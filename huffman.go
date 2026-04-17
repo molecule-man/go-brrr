@@ -174,6 +174,11 @@ func createHuffmanTree(data []uint32, treeLimit int, tree []huffmanTreeNode, dep
 			depth[tree[0].rightOrValue] = 1 // Only one element.
 			break
 		}
+		if n == 2 {
+			depth[tree[0].rightOrValue] = 1
+			depth[tree[1].rightOrValue] = 1
+			break
+		}
 
 		// Sort leaf nodes by (totalCount ASC, rightOrValue DESC).
 		// Pack each node into a uint64 sort key so we can use slices.Sort
