@@ -827,9 +827,23 @@ func (h *h5b6) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32
 			// When distanceCode == 0, s.distCache is unchanged, so the local
 			// distCache is already correct — no re-expansion needed.
 
-			s.commands = append(s.commands, newCommandSimpleDist(
-				insertLength, sr.len, sr.lenCodeDelta, distanceCode,
-			))
+			// Manually inline newCommandSimpleDist to avoid non-inlineable
+			// function call overhead and struct return copy in the q7 hot path.
+			{
+				delta := uint32(uint8(int8(sr.lenCodeDelta)))
+				distPrefix, distExtra := prefixEncodeSimpleDistance(distanceCode)
+				effectiveCopyLen := uint(int(sr.len) + sr.lenCodeDelta)
+				insCode := getInsertLenCode(insertLength)
+				copyCode := getCopyLenCode(effectiveCopyLen)
+				cmdPrefix := combineLengthCodes(insCode, copyCode, (distPrefix&0x3FF) == 0)
+				s.commands = append(s.commands, command{
+					insertLen:  uint32(insertLength),
+					copyLen:    uint32(sr.len) | (delta << 25),
+					distExtra:  distExtra,
+					cmdPrefix:  cmdPrefix,
+					distPrefix: distPrefix,
+				})
+			}
 			s.numLiterals += insertLength
 			insertLength = 0
 
