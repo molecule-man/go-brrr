@@ -437,6 +437,11 @@ func (c *twoPassCompressor) updateHashTableTwoPass6(input []byte, table []uint32
 // histograms and write commands and literals to the bitstream.
 func (c *twoPassCompressor) writeCommands(literals []byte, commands []uint32) {
 	s := c.arena
+	b := c.b
+	cmdDepth := s.cmdDepth[:]
+	cmdBits := s.cmdBits[:]
+	litDepth := s.litDepth[:]
+	litBits := s.litBits[:]
 
 	s.resetHistograms()
 
@@ -457,20 +462,20 @@ func (c *twoPassCompressor) writeCommands(literals []byte, commands []uint32) {
 	s.cmdHisto[2]++
 	s.cmdHisto[64]++
 	s.cmdHisto[84]++
-	s.buildAndWriteCommandPrefixCode(c.b)
+	s.buildAndWriteCommandPrefixCode(b)
 
 	// Emit commands and interleaved literals.
 	litIdx := 0
 	for _, cmd := range commands {
-		code := cmd & 0xFF
-		extra := cmd >> 8
-		cmdDepth := uint(s.cmdDepth[code])
-		c.b.writeBits(cmdDepth+numExtraBits[code], uint64(s.cmdBits[code])|uint64(extra)<<cmdDepth)
+		code := byte(cmd)
+		extra := uint64(cmd >> 8)
+		depth := uint(cmdDepth[code])
+		b.writeBits(depth+numExtraBits[code], uint64(cmdBits[code])|extra<<depth)
 		if code < 24 {
-			insert := insertOffset[code] + uint(extra)
-			for range insert {
+			nextLitIdx := litIdx + int(insertOffset[code]) + int(extra)
+			for litIdx < nextLitIdx {
 				lit := literals[litIdx]
-				c.b.writeBits(uint(s.litDepth[lit]), uint64(s.litBits[lit]))
+				b.writeBits(uint(litDepth[lit]), uint64(litBits[lit]))
 				litIdx++
 			}
 		}
