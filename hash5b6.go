@@ -435,10 +435,16 @@ func (h *h5b6) findLongestMatchSmallBuf(
 	// backward-1 >= maxBackward is a single check replacing both
 	// "prev >= cur" (backward==0) and "backward > maxBackward".
 	// The penalty constants below are backwardReferencePenaltyUsingLastDistance(i).
+	//
+	// curByte = data[curMasked+bestLen] is hoisted across iterations. The
+	// compiler can't CSE these loads because it can't prove writes through
+	// *out don't alias *data, so it reloads them on each Phase 1 branch.
+	// Refreshed only when bestLen changes (rare: common case is no match).
+	curByte := loadByte(data, curMasked+bestLen)
 	backward := distCache[0]
 	if backward-1 < maxBackward {
 		prev := (cur - backward) & ringBufferMask
-		if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+		if curByte == loadByte(data, prev+bestLen) {
 			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
 			if ml >= 3 || ml == 2 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
@@ -448,6 +454,7 @@ func (h *h5b6) findLongestMatchSmallBuf(
 					out.len = bestLen
 					out.distance = backward
 					out.score = bestScore
+					curByte = loadByte(data, curMasked+bestLen)
 				}
 			}
 		}
@@ -455,7 +462,7 @@ func (h *h5b6) findLongestMatchSmallBuf(
 	backward = distCache[1]
 	if backward-1 < maxBackward {
 		prev := (cur - backward) & ringBufferMask
-		if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+		if curByte == loadByte(data, prev+bestLen) {
 			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
 			if ml >= 3 || ml == 2 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
@@ -467,6 +474,7 @@ func (h *h5b6) findLongestMatchSmallBuf(
 						out.len = bestLen
 						out.distance = backward
 						out.score = bestScore
+						curByte = loadByte(data, curMasked+bestLen)
 					}
 				}
 			}
@@ -475,7 +483,7 @@ func (h *h5b6) findLongestMatchSmallBuf(
 	backward = distCache[2]
 	if backward-1 < maxBackward {
 		prev := (cur - backward) & ringBufferMask
-		if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+		if curByte == loadByte(data, prev+bestLen) {
 			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
 			if ml >= 3 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
@@ -487,6 +495,7 @@ func (h *h5b6) findLongestMatchSmallBuf(
 						out.len = bestLen
 						out.distance = backward
 						out.score = bestScore
+						curByte = loadByte(data, curMasked+bestLen)
 					}
 				}
 			}
@@ -495,7 +504,7 @@ func (h *h5b6) findLongestMatchSmallBuf(
 	backward = distCache[3]
 	if backward-1 < maxBackward {
 		prev := (cur - backward) & ringBufferMask
-		if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+		if curByte == loadByte(data, prev+bestLen) {
 			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
 			if ml >= 3 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
@@ -507,6 +516,7 @@ func (h *h5b6) findLongestMatchSmallBuf(
 						out.len = bestLen
 						out.distance = backward
 						out.score = bestScore
+						curByte = loadByte(data, curMasked+bestLen)
 					}
 				}
 			}
@@ -515,7 +525,7 @@ func (h *h5b6) findLongestMatchSmallBuf(
 	backward = distCache[4]
 	if backward-1 < maxBackward {
 		prev := (cur - backward) & ringBufferMask
-		if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+		if curByte == loadByte(data, prev+bestLen) {
 			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
 			if ml >= 3 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
@@ -527,6 +537,7 @@ func (h *h5b6) findLongestMatchSmallBuf(
 						out.len = bestLen
 						out.distance = backward
 						out.score = bestScore
+						curByte = loadByte(data, curMasked+bestLen)
 					}
 				}
 			}
@@ -535,7 +546,7 @@ func (h *h5b6) findLongestMatchSmallBuf(
 	backward = distCache[5]
 	if backward-1 < maxBackward {
 		prev := (cur - backward) & ringBufferMask
-		if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+		if curByte == loadByte(data, prev+bestLen) {
 			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
 			if ml >= 3 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
@@ -547,6 +558,7 @@ func (h *h5b6) findLongestMatchSmallBuf(
 						out.len = bestLen
 						out.distance = backward
 						out.score = bestScore
+						curByte = loadByte(data, curMasked+bestLen)
 					}
 				}
 			}
@@ -555,7 +567,7 @@ func (h *h5b6) findLongestMatchSmallBuf(
 	backward = distCache[6]
 	if backward-1 < maxBackward {
 		prev := (cur - backward) & ringBufferMask
-		if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+		if curByte == loadByte(data, prev+bestLen) {
 			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
 			if ml >= 3 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
@@ -567,6 +579,7 @@ func (h *h5b6) findLongestMatchSmallBuf(
 						out.len = bestLen
 						out.distance = backward
 						out.score = bestScore
+						curByte = loadByte(data, curMasked+bestLen)
 					}
 				}
 			}
@@ -575,7 +588,7 @@ func (h *h5b6) findLongestMatchSmallBuf(
 	backward = distCache[7]
 	if backward-1 < maxBackward {
 		prev := (cur - backward) & ringBufferMask
-		if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+		if curByte == loadByte(data, prev+bestLen) {
 			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
 			if ml >= 3 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
@@ -587,6 +600,7 @@ func (h *h5b6) findLongestMatchSmallBuf(
 						out.len = bestLen
 						out.distance = backward
 						out.score = bestScore
+						curByte = loadByte(data, curMasked+bestLen)
 					}
 				}
 			}
@@ -595,7 +609,7 @@ func (h *h5b6) findLongestMatchSmallBuf(
 	backward = distCache[8]
 	if backward-1 < maxBackward {
 		prev := (cur - backward) & ringBufferMask
-		if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+		if curByte == loadByte(data, prev+bestLen) {
 			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
 			if ml >= 3 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
@@ -607,6 +621,7 @@ func (h *h5b6) findLongestMatchSmallBuf(
 						out.len = bestLen
 						out.distance = backward
 						out.score = bestScore
+						curByte = loadByte(data, curMasked+bestLen)
 					}
 				}
 			}
@@ -615,7 +630,7 @@ func (h *h5b6) findLongestMatchSmallBuf(
 	backward = distCache[9]
 	if backward-1 < maxBackward {
 		prev := (cur - backward) & ringBufferMask
-		if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+		if curByte == loadByte(data, prev+bestLen) {
 			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
 			if ml >= 3 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
