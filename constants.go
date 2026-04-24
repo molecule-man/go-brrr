@@ -81,21 +81,11 @@ var blockLengthNBits = [alphabetSizeBlockCount]uint32{
 	13, 24,
 }
 
-// Insert/copy length code lookup tables (RFC 7932 Section 5).
+// Insert/copy length code extra-bit lookup tables (RFC 7932 Section 5).
 // Indexed by insert length code (0–23) or copy length code (0–23).
-var insertBase = [24]uint32{
-	0, 1, 2, 3, 4, 5, 6, 8, 10, 14, 18, 26,
-	34, 50, 66, 98, 130, 194, 322, 578, 1090, 2114, 6210, 22594,
-}
-
 var insertExtra = [24]uint32{
 	0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 3, 3,
 	4, 4, 5, 5, 6, 7, 8, 9, 10, 12, 14, 24,
-}
-
-var copyBase = [24]uint32{
-	2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 18,
-	22, 30, 38, 54, 70, 102, 134, 198, 326, 582, 1094, 2118,
 }
 
 var copyExtra = [24]uint32{

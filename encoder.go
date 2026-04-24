@@ -1159,16 +1159,17 @@ func (e *encoderSplit) writeMetaBlock(length int, isLast bool, mb *metaBlockSpli
 		cmd := commands[i]
 
 		// Command symbol.
-		cmdEnc.storeSymbol(uint(cmd.cmdPrefix), b)
-		// Inlined writeExtra: compute insert+copy length extra bits on-the-fly.
+		cmdCode := cmd.cmdPrefix
+		cmdEnc.storeSymbol(uint(cmdCode), b)
+		// Use the command prefix lookup table to avoid recomputing
+		// insert/copy length prefix classes for every command.
 		{
-			insCode := getInsertLenCode(uint(cmd.insertLen))
+			lut := cmdLut[cmdCode]
 			effCopyLen := uint(cmd.copyLenCode())
-			copyCode := getCopyLenCode(effCopyLen)
-			insNumExtra := insertExtra[insCode]
-			b.writeBits(uint(insNumExtra+copyExtra[copyCode]),
-				((uint64(effCopyLen)-uint64(copyBase[copyCode]))<<insNumExtra)|
-					(uint64(cmd.insertLen)-uint64(insertBase[insCode])))
+			insNumExtra := lut.insertLenExtraBits
+			b.writeBits(uint(insNumExtra+lut.copyLenExtraBits),
+				((uint64(effCopyLen)-uint64(lut.copyLenOffset))<<insNumExtra)|
+					(uint64(cmd.insertLen)-uint64(lut.insertLenOffset)))
 		}
 
 		// Literal bytes.
