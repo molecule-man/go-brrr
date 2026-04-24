@@ -147,14 +147,10 @@ func (h *h6) findLongestMatch(
 	// are not needed here.
 	for i := range uint(h6NumLastDistances) {
 		backward := distCache[i]
-		prev := cur - backward
-		if prev >= cur {
+		if backward-1 >= maxBackward {
 			continue
 		}
-		if backward > maxBackward {
-			continue
-		}
-		prev &= ringBufferMask
+		prev := (cur - backward) & ringBufferMask
 
 		if data[curMasked+bestLen] != data[prev+bestLen] {
 			continue
@@ -263,14 +259,10 @@ func (h *h6) findLongestMatchSmallBuf(
 	// Phase 1: try cached distances.
 	for i := range uint(h6NumLastDistances) {
 		backward := distCache[i]
-		prev := cur - backward
-		if prev >= cur {
+		if backward-1 >= maxBackward {
 			continue
 		}
-		if backward > maxBackward {
-			continue
-		}
-		prev &= ringBufferMask
+		prev := (cur - backward) & ringBufferMask
 
 		if curMasked+bestLen > ringBufferMask {
 			break
