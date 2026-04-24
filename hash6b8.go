@@ -137,41 +137,22 @@ func (h *h6b8) findLongestMatch(
 	out.len = 0
 	out.lenCodeDelta = 0
 
-	// Phase 1: try cached distances.
+	// Phase 1: try cached distances (fully unrolled for 16 entries).
 	// In the fast path, the ring buffer has a mirrored tail of tailSize bytes
 	// beyond ringBufferMask (see copyInputToRingBuffer). Since bestLen ≤
 	// maxLength ≤ tailSize, loadByte accesses are always within len(data), so
 	// the per-iteration wrap-around bounds guards are not needed here.
 	// backward-1 >= maxBackward is a single check replacing both
 	// "prev >= cur" (backward==0) and "backward > maxBackward".
-	// Split out the first two cache entries since only they accept 2-byte
-	// matches; the remaining entries share the simpler length >= 3 rule.
-	backward := uint(distCache[0])
-	if backward-1 < maxBackward {
-		prev := (cur - backward) & ringBufferMask
-		if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
-			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
-			if ml >= 2 {
-				score := backwardReferenceScoreUsingLastDistance(ml)
-				if bestScore < score {
-					bestScore = score
-					bestLen = ml
-					out.len = bestLen
-					out.distance = backward
-					out.score = bestScore
-				}
-			}
-		}
-	}
-	backward = uint(distCache[1])
-	if backward-1 < maxBackward {
-		prev := (cur - backward) & ringBufferMask
-		if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
-			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
-			if ml >= 2 {
-				score := backwardReferenceScoreUsingLastDistance(ml)
-				if bestScore < score {
-					score -= 39
+	// Penalty constants from backwardReferencePenaltyUsingLastDistance(i).
+	{
+		backward := uint(distCache[0])
+		if backward-1 < maxBackward {
+			prev := (cur - backward) & ringBufferMask
+			if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+				ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+				if ml >= 3 || ml == 2 {
+					score := backwardReferenceScoreUsingLastDistance(ml)
 					if bestScore < score {
 						bestScore = score
 						bestLen = ml
@@ -183,28 +164,287 @@ func (h *h6b8) findLongestMatch(
 			}
 		}
 	}
-	for i := uint(2); i < h6b8NumLastDistances; i++ {
-		backward := uint(distCache[i])
-		if backward-1 >= maxBackward {
-			continue
+	{
+		backward := uint(distCache[1])
+		if backward-1 < maxBackward {
+			prev := (cur - backward) & ringBufferMask
+			if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+				ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+				if ml >= 3 || ml == 2 {
+					score := backwardReferenceScoreUsingLastDistance(ml)
+					if bestScore+39 < score {
+						bestScore = score - 39
+						bestLen = ml
+						out.len = bestLen
+						out.distance = backward
+						out.score = bestScore
+					}
+				}
+			}
 		}
-		prev := (cur - backward) & ringBufferMask
-
-		if loadByte(data, curMasked+bestLen) != loadByte(data, prev+bestLen) {
-			continue
+	}
+	{
+		backward := uint(distCache[2])
+		if backward-1 < maxBackward {
+			prev := (cur - backward) & ringBufferMask
+			if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+				ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+				if ml >= 3 {
+					score := backwardReferenceScoreUsingLastDistance(ml)
+					if bestScore+43 < score {
+						bestScore = score - 43
+						bestLen = ml
+						out.len = bestLen
+						out.distance = backward
+						out.score = bestScore
+					}
+				}
+			}
 		}
-
-		ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
-		if ml >= 3 {
-			score := backwardReferenceScoreUsingLastDistance(ml)
-			if bestScore < score {
-				score -= backwardReferencePenaltyUsingLastDistance(i)
-				if bestScore < score {
-					bestScore = score
-					bestLen = ml
-					out.len = bestLen
-					out.distance = backward
-					out.score = bestScore
+	}
+	{
+		backward := uint(distCache[3])
+		if backward-1 < maxBackward {
+			prev := (cur - backward) & ringBufferMask
+			if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+				ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+				if ml >= 3 {
+					score := backwardReferenceScoreUsingLastDistance(ml)
+					if bestScore+43 < score {
+						bestScore = score - 43
+						bestLen = ml
+						out.len = bestLen
+						out.distance = backward
+						out.score = bestScore
+					}
+				}
+			}
+		}
+	}
+	{
+		backward := uint(distCache[4])
+		if backward-1 < maxBackward {
+			prev := (cur - backward) & ringBufferMask
+			if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+				ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+				if ml >= 3 {
+					score := backwardReferenceScoreUsingLastDistance(ml)
+					if bestScore+39 < score {
+						bestScore = score - 39
+						bestLen = ml
+						out.len = bestLen
+						out.distance = backward
+						out.score = bestScore
+					}
+				}
+			}
+		}
+	}
+	{
+		backward := uint(distCache[5])
+		if backward-1 < maxBackward {
+			prev := (cur - backward) & ringBufferMask
+			if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+				ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+				if ml >= 3 {
+					score := backwardReferenceScoreUsingLastDistance(ml)
+					if bestScore+39 < score {
+						bestScore = score - 39
+						bestLen = ml
+						out.len = bestLen
+						out.distance = backward
+						out.score = bestScore
+					}
+				}
+			}
+		}
+	}
+	{
+		backward := uint(distCache[6])
+		if backward-1 < maxBackward {
+			prev := (cur - backward) & ringBufferMask
+			if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+				ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+				if ml >= 3 {
+					score := backwardReferenceScoreUsingLastDistance(ml)
+					if bestScore+47 < score {
+						bestScore = score - 47
+						bestLen = ml
+						out.len = bestLen
+						out.distance = backward
+						out.score = bestScore
+					}
+				}
+			}
+		}
+	}
+	{
+		backward := uint(distCache[7])
+		if backward-1 < maxBackward {
+			prev := (cur - backward) & ringBufferMask
+			if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+				ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+				if ml >= 3 {
+					score := backwardReferenceScoreUsingLastDistance(ml)
+					if bestScore+47 < score {
+						bestScore = score - 47
+						bestLen = ml
+						out.len = bestLen
+						out.distance = backward
+						out.score = bestScore
+					}
+				}
+			}
+		}
+	}
+	{
+		backward := uint(distCache[8])
+		if backward-1 < maxBackward {
+			prev := (cur - backward) & ringBufferMask
+			if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+				ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+				if ml >= 3 {
+					score := backwardReferenceScoreUsingLastDistance(ml)
+					if bestScore+49 < score {
+						bestScore = score - 49
+						bestLen = ml
+						out.len = bestLen
+						out.distance = backward
+						out.score = bestScore
+					}
+				}
+			}
+		}
+	}
+	{
+		backward := uint(distCache[9])
+		if backward-1 < maxBackward {
+			prev := (cur - backward) & ringBufferMask
+			if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+				ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+				if ml >= 3 {
+					score := backwardReferenceScoreUsingLastDistance(ml)
+					if bestScore+49 < score {
+						bestScore = score - 49
+						bestLen = ml
+						out.len = bestLen
+						out.distance = backward
+						out.score = bestScore
+					}
+				}
+			}
+		}
+	}
+	{
+		backward := uint(distCache[10])
+		if backward-1 < maxBackward {
+			prev := (cur - backward) & ringBufferMask
+			if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+				ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+				if ml >= 3 {
+					score := backwardReferenceScoreUsingLastDistance(ml)
+					if bestScore+41 < score {
+						bestScore = score - 41
+						bestLen = ml
+						out.len = bestLen
+						out.distance = backward
+						out.score = bestScore
+					}
+				}
+			}
+		}
+	}
+	{
+		backward := uint(distCache[11])
+		if backward-1 < maxBackward {
+			prev := (cur - backward) & ringBufferMask
+			if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+				ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+				if ml >= 3 {
+					score := backwardReferenceScoreUsingLastDistance(ml)
+					if bestScore+41 < score {
+						bestScore = score - 41
+						bestLen = ml
+						out.len = bestLen
+						out.distance = backward
+						out.score = bestScore
+					}
+				}
+			}
+		}
+	}
+	{
+		backward := uint(distCache[12])
+		if backward-1 < maxBackward {
+			prev := (cur - backward) & ringBufferMask
+			if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+				ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+				if ml >= 3 {
+					score := backwardReferenceScoreUsingLastDistance(ml)
+					if bestScore+51 < score {
+						bestScore = score - 51
+						bestLen = ml
+						out.len = bestLen
+						out.distance = backward
+						out.score = bestScore
+					}
+				}
+			}
+		}
+	}
+	{
+		backward := uint(distCache[13])
+		if backward-1 < maxBackward {
+			prev := (cur - backward) & ringBufferMask
+			if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+				ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+				if ml >= 3 {
+					score := backwardReferenceScoreUsingLastDistance(ml)
+					if bestScore+51 < score {
+						bestScore = score - 51
+						bestLen = ml
+						out.len = bestLen
+						out.distance = backward
+						out.score = bestScore
+					}
+				}
+			}
+		}
+	}
+	{
+		backward := uint(distCache[14])
+		if backward-1 < maxBackward {
+			prev := (cur - backward) & ringBufferMask
+			if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+				ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+				if ml >= 3 {
+					score := backwardReferenceScoreUsingLastDistance(ml)
+					if bestScore+45 < score {
+						bestScore = score - 45
+						bestLen = ml
+						out.len = bestLen
+						out.distance = backward
+						out.score = bestScore
+					}
+				}
+			}
+		}
+	}
+	{
+		backward := uint(distCache[15])
+		if backward-1 < maxBackward {
+			prev := (cur - backward) & ringBufferMask
+			if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+				ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+				if ml >= 3 {
+					score := backwardReferenceScoreUsingLastDistance(ml)
+					if bestScore+45 < score {
+						bestScore = score - 45
+						bestLen = ml
+						out.len = bestLen
+						out.distance = backward
+						out.score = bestScore
+					}
 				}
 			}
 		}
