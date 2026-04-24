@@ -204,13 +204,29 @@ func (h *h40) findLongestMatch(
 	}
 
 	// Phase 2: walk the chain.
+	// Capture the old chain head/addr, then store cur *before* the walk so
+	// storeWithKey's writes to addr/head/slots/tinyHash pipeline against the
+	// chain's serial slot loads. The walk still traverses the old chain — the
+	// newly-stored slot is only reachable via the new head, which we don't use.
 	{
-		bank := key & (h40NumBanks - 1)
+		oldAddr := uint(h.addr[key])
+		oldHead := h.head[key]
+
+		newIdx := h.freeSlotIdx
+		h.freeSlotIdx++
+		storeDelta := cur - oldAddr
+		h.tinyHash[uint16(cur)] = uint8(key)
+		if storeDelta > 0xFFFF {
+			storeDelta = 0xFFFF
+		}
+		h.slots[newIdx] = h40PackedSlot(uint32(storeDelta) | uint32(oldHead)<<16)
+		h.addr[key] = uint32(cur)
+		h.head[key] = newIdx
+
 		backward := uint(0)
 		hops := h.maxHops
-		delta := cur - uint(h.addr[key])
-		slot := h.head[key]
-		slotBase := uint(bank) * h40BankSize
+		delta := cur - oldAddr
+		slot := oldHead
 		for hops > 0 {
 			hops--
 			backward += delta
@@ -218,7 +234,7 @@ func (h *h40) findLongestMatch(
 				break
 			}
 			prevIx := (cur - backward) & ringBufferMask
-			slotEntry := uint32(h.slots[slotBase+uint(slot)])
+			slotEntry := uint32(h.slots[uint(slot)])
 			slot = uint16(slotEntry >> 16)
 			delta = uint(uint16(slotEntry))
 			if curMasked+bestLen > ringBufferMask ||
@@ -239,7 +255,6 @@ func (h *h40) findLongestMatch(
 				}
 			}
 		}
-		h.storeWithKey(key, cur)
 	}
 
 	// Phase 3: static dictionary fallback when no match was found.
