@@ -98,8 +98,12 @@ func (h *h3) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 		{
 			lastDistance := s.distCache[0]
 			curMasked := position & mask
-			guardByte := loadByte(data, curMasked) // sr.len == 0 → bestLenIn == 0
-			key := hashBytes(data, curMasked)
+			// Fuse the guard byte and hash load — both read from data[curMasked].
+			// Doing one 8-byte load and deriving both keeps loadByte off the
+			// dependency chain and hands the compiler a single fused access.
+			curWord := loadU64LE(data, curMasked)
+			guardByte := byte(curWord) // sr.len == 0 → bestLenIn == 0
+			key := uint32(((curWord << (64 - 8*hashLen)) * hashMul64) >> (64 - bucketBits))
 			bestScore := sr.score // minScore, type uint
 			bestLen := uint(0)
 
