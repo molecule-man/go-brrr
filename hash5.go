@@ -251,16 +251,17 @@ func (h *h5) findLongestMatchSmallBuf(
 	out.len = 0
 	out.lenCodeDelta = 0
 
+	// backward-1 >= maxBackward fuses both "backward == 0" (wraps to MAX_UINT)
+	// and "backward > maxBackward" into a single compare. Since all callers
+	// guarantee maxBackward <= cur, this also subsumes the "backward > cur"
+	// (prev-underflow) check that the explicit version needed. Matches the
+	// fast-path Phase 1 simplification applied in the fast-path function.
 	for i := range uint(h5NumLastDistances) {
 		backward := distCache[i]
-		prev := cur - backward
-		if prev >= cur {
+		if backward-1 >= maxBackward {
 			continue
 		}
-		if backward > maxBackward {
-			continue
-		}
-		prev &= ringBufferMask
+		prev := (cur - backward) & ringBufferMask
 
 		if curMasked+bestLen > ringBufferMask {
 			break
