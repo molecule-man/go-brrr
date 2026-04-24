@@ -115,6 +115,9 @@ func (h *h5b6) findLongestMatch(
 	bestLen := out.len
 	key := h.hash(data, curMasked)
 	bucket := h.buckets[uint(key)<<h5b6BlockBits:]
+	// Issue the Phase 2 num[] load early so its (often L3-miss) latency is
+	// hidden by Phase 1. n is held in a register until Phase 2.
+	n := h.num[key]
 
 	// Speculatively load from the next position's bucket to warm the cache.
 	nextKey := h.hash(data, (cur+1)&ringBufferMask)
@@ -350,7 +353,7 @@ func (h *h5b6) findLongestMatch(
 	// condition but avoids computing backward = cur - prev on every iteration.
 	// maxBackward = min(cur, maxBackwardLimit) ≤ cur so the subtraction never
 	// wraps. backward is then computed lazily only when ml ≥ 4 (rare path).
-	n := h.num[key]
+	// n was loaded near the top of the function so its latency overlaps Phase 1.
 	down := uint(0)
 	if uint(n) > h5b6BlockSize {
 		down = uint(n) - h5b6BlockSize
