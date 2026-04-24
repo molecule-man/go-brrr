@@ -64,6 +64,7 @@ func (h *h3) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 	mask := uint(s.mask)
 	maxBackwardLimit := (uint(1) << s.lgwin) - windowGap
 	gap := s.compound.totalSize
+	hasCompound := s.compound.numChunks > 0
 
 	insertLength := s.lastInsertLen
 	position := uint(wrappedPos)
@@ -114,7 +115,7 @@ func (h *h3) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 
 			{
 				prev := position - lastDistance
-				if prev < position {
+				if prev < position && lastDistance <= maxDistance {
 					prev &= mask
 					if guardByte == loadByte(data, prev+bestLen) {
 						length := matchLenAt(data, prev, curMasked, int(maxLength))
@@ -171,6 +172,12 @@ func (h *h3) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 			buckets[keyOut] = uint32(position)
 		}
 
+		if hasCompound {
+			s.compound.lookupMatch(data, mask,
+				&s.distCache, position, maxLength,
+				maxDistance, &sr)
+		}
+
 		if sr.score > minScore {
 			// Found a match. Try lazy matching: look one position ahead.
 			delayedBackwardReferencesInRow := 0
@@ -208,7 +215,7 @@ func (h *h3) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 
 					{
 						prev := cur2 - lastDistance
-						if prev < cur2 {
+						if prev < cur2 && lastDistance <= maxDistance {
 							prev &= mask
 							if guardByte == loadByte(data, prev+bestLen2) {
 								length := matchLenAt(data, prev, curMasked, int(maxLength))
@@ -263,6 +270,12 @@ func (h *h3) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 					}
 
 					buckets[keyOut] = uint32(cur2)
+				}
+
+				if hasCompound {
+					s.compound.lookupMatch(data, mask,
+						&s.distCache, position+1, maxLength,
+						maxDistance, &sr2)
 				}
 
 				if sr2.score >= sr.score+costDiffLazy {

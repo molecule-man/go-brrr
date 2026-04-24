@@ -81,6 +81,7 @@ func (h *h4) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 	mask := uint(s.mask)
 	maxBackwardLimit := (uint(1) << s.lgwin) - windowGap
 	gap := s.compound.totalSize
+	hasCompound := s.compound.numChunks > 0
 
 	insertLength := s.lastInsertLen
 	position := uint(wrappedPos)
@@ -133,7 +134,7 @@ func (h *h4) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 
 			{
 				prev := position - lastDistance
-				if prev < position {
+				if prev < position && lastDistance <= maxDistance {
 					prev &= mask
 					if loadByte(data, prev+bestLen) == guardByte {
 						length := matchLenAt(data, prev, curMasked, limit)
@@ -241,6 +242,12 @@ func (h *h4) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 			}
 		}
 
+		if hasCompound {
+			s.compound.lookupMatch(data, mask,
+				&s.distCache, position, maxLength,
+				maxDistance, &sr)
+		}
+
 		if sr.score > minScore {
 			delayedBackwardReferencesInRow := 0
 			maxLength--
@@ -279,7 +286,7 @@ func (h *h4) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 
 					{
 						prev := cur2 - lastDistance
-						if prev < cur2 {
+						if prev < cur2 && lastDistance <= maxDistance {
 							prev &= mask
 							if loadByte(data, prev+bestLen) == guardByte {
 								length := matchLenAt(data, prev, curMasked, limit)
@@ -385,6 +392,12 @@ func (h *h4) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 							s.dictNumMatches++
 						}
 					}
+				}
+
+				if hasCompound {
+					s.compound.lookupMatch(data, mask,
+						&s.distCache, position+1, maxLength,
+						maxDistance, &sr2)
 				}
 
 				if sr2.score >= sr.score+costDiffLazy {
