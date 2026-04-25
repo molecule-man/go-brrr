@@ -115,7 +115,7 @@ func (h *h40) storeWithKey(key uint32, ix uint) {
 // storeRange records positions [start, end) in the hash table.
 func (h *h40) storeRange(data []byte, mask, start, end uint) {
 	for i := start; i < end; i++ {
-		h.store(data, mask, i)
+		h.storeWithKey(h.hash(data, i&mask), i)
 	}
 }
 
