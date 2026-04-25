@@ -185,26 +185,32 @@ func (h *h5) findLongestMatch(
 	// Same tail guarantee: ring buffer end checks are omitted for the fast path.
 	// backward == 0 is impossible here: we store cur after the loop, so all
 	// bucket entries refer to strictly earlier positions.
+	//
+	// minPrev = cur - maxBackward is equivalent to the backward > maxBackward break
+	// condition but avoids computing backward = cur - prev on every iteration.
+	// maxBackward = min(cur, maxBackwardLimit) <= cur so the subtraction never
+	// wraps. backward is then computed lazily only when ml >= 4 (rare path).
 	n := h.num[key]
 	down := uint(0)
 	if uint(n) > h5BlockSize {
 		down = uint(n) - h5BlockSize
 	}
+	minPrev := cur - maxBackward
 	curProbe := loadU32LE(data, curMasked+bestLen-3)
 	for i := uint(n); i > down; {
 		i--
-		prev := uint(bucket[i&h5BlockMask])
-		backward := cur - prev
-		if backward > maxBackward {
+		prevRaw := uint(bucket[i&h5BlockMask])
+		if prevRaw < minPrev {
 			break
 		}
-		prev &= ringBufferMask
-		if curProbe != loadU32LE(data, prev+bestLen-3) {
+		prevMasked := prevRaw & ringBufferMask
+		if curProbe != loadU32LE(data, prevMasked+bestLen-3) {
 			continue
 		}
 
-		ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+		ml := uint(matchLenAtNoInline(data, prevMasked, curMasked, int(maxLength)))
 		if ml >= 4 {
+			backward := cur - prevRaw
 			score := backwardReferenceScore(ml, backward)
 			if bestScore < score {
 				bestScore = score
