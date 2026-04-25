@@ -1142,6 +1142,8 @@ func (e *encoderSplit) writeMetaBlock(length int, isLast bool, mb *metaBlockSpli
 	} else {
 		storeTrivialContextMap(uint(mb.distSplit.numTypes), distanceContextBits, tree, b)
 	}
+	// Tiny metablocks measured better with the smaller storeSymbol path.
+	combineDistExtraBits := !useDistContextMap && length >= 4096
 
 	// Build and store entropy codes for each histogram.
 	e.litDepths, e.litBits = litEnc.buildAndStoreEntropyCodes(mb.litHistograms,
@@ -1238,16 +1240,28 @@ func (e *encoderSplit) writeMetaBlock(length int, isLast bool, mb *metaBlockSpli
 		copyLen := cmd.copyLength()
 		pos += uint(copyLen)
 		if copyLen != 0 && cmd.cmdPrefix >= 128 {
-			distCode := cmd.distPrefixCode()
-			distNumExtra := cmd.distExtraBitsLen()
-			if useDistContextMap {
+			distPrefix := cmd.distPrefix
+			distCode := distPrefix & 0x3FF
+			distNumExtra := distPrefix >> 10
+			switch {
+			case useDistContextMap:
 				distContext := uint(cmd.distanceContext())
 				distEnc.storeSymbolWithContext(uint(distCode), distContext,
 					mb.distanceContextMap, distanceContextBits, b)
-			} else {
+				b.writeBits(uint(distNumExtra), uint64(cmd.distExtra))
+			case combineDistExtraBits:
+				if distEnc.blockLen == 0 {
+					distEnc.emitBlockSwitch(b)
+				}
+				distEnc.blockLen--
+				ix := distEnc.entropyIdx + int(distCode)
+				distBitsLen := uint(distEnc.depths[ix])
+				b.writeBits(distBitsLen+uint(distNumExtra),
+					uint64(distEnc.bits[ix])|(uint64(cmd.distExtra)<<distBitsLen))
+			default:
 				distEnc.storeSymbol(uint(distCode), b)
+				b.writeBits(uint(distNumExtra), uint64(cmd.distExtra))
 			}
-			b.writeBits(uint(distNumExtra), uint64(cmd.distExtra))
 		}
 
 		// Track preceding bytes for context computation across copy runs.
