@@ -227,6 +227,17 @@ For on-the-fly compression, brotli q5–6 is a strong choice if you're already u
 
 If you compress per request in a webserver, keep `*brrr.Writer` instances in a `sync.Pool` and `Reset` each one into the response body rather than allocating a new Writer per request. See the [pooling example](#pooling-writers-for-per-request-http-compression) below.
 
+## A note on the code
+
+Don't expect idiomatic Go. The library is tuned for throughput first, and the source reflects that:
+
+- giant functions that would normally be split up,
+- duplicated loops where a shared helper would force a slow path,
+- hand-specialized code for hot shapes,
+- APIs structured around escape analysis and inlining rather than aesthetics.
+
+If something looks oddly written, it's almost always deliberate — measured against benchmarks and kept because the "cleaner" version was slower.
+
 ## Acknowledgments
 
 This library is a port of the [Brotli reference implementation](https://github.com/google/brotli) by the Brotli Authors, licensed under the MIT License.
