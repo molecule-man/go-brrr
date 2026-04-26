@@ -87,9 +87,23 @@ func (h *h41) store(data []byte, mask, ix uint) {
 }
 
 // storeRange records positions [start, end) in the hash table.
+// h41NumBanks == 1 and h41BankSize == 1<<16 == cap(h.slots), so the bank/
+// slotBase indirection and the idx mask in store() are dead here; dropping
+// them, plus a single packed 32-bit slot write (matching the unsafe read
+// pattern in findLongestMatch's chain walk), keeps the loop call-free.
 func (h *h41) storeRange(data []byte, mask, start, end uint) {
 	for i := start; i < end; i++ {
-		h.store(data, mask, i)
+		key := h.hash(data, i&mask)
+		idx := h.freeSlotIdx
+		h.freeSlotIdx++
+		delta := i - uint(h.addr[key])
+		h.tinyHash[uint16(i)] = uint8(key)
+		if delta > 0xFFFF {
+			delta = 0xFFFF
+		}
+		*(*uint32)(unsafe.Pointer(&h.slots[idx])) = uint32(delta) | uint32(h.head[key])<<16
+		h.addr[key] = uint32(i)
+		h.head[key] = idx
 	}
 }
 

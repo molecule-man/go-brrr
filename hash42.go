@@ -87,7 +87,19 @@ func (h *h42) store(data []byte, mask, ix uint) {
 // storeRange records positions [start, end) in the hash table.
 func (h *h42) storeRange(data []byte, mask, start, end uint) {
 	for i := start; i < end; i++ {
-		h.store(data, mask, i)
+		key := h.hash(data, i&mask)
+		bank := key & (h42NumBanks - 1)
+		idx := h.freeSlotIdx[bank] & (h42BankSize - 1)
+		h.freeSlotIdx[bank]++
+		delta := i - uint(h.addr[key])
+		h.tinyHash[uint16(i)] = uint8(key)
+		if delta > 0xFFFF {
+			delta = 0xFFFF
+		}
+		h.banks[bank][idx].delta = uint16(delta)
+		h.banks[bank][idx].next = h.head[key]
+		h.addr[key] = uint32(i)
+		h.head[key] = idx
 	}
 }
 
