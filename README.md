@@ -1,3 +1,5 @@
+![go brrr](assets/go-brrr-logo.jpg)
+
 # go-brrr
 
 Pure Go implementation of the Brotli compression algorithm.
