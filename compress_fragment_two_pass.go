@@ -132,7 +132,7 @@ func (c *twoPassCompressor) createCommands(
 		ipLimit := pos + lenLimit
 
 		ip++
-		nextHash = hashTwoPass(input[ip:], shift, minMatch)
+		nextHash = hashTwoPass4At(input, uint(ip), shift)
 
 		for {
 			// Step 1: Scan forward looking for a match. Skip bytes
@@ -150,11 +150,11 @@ func (c *twoPassCompressor) createCommands(
 				if nextIP > ipLimit {
 					goto encodeRemainder
 				}
-				nextHash = hashTwoPass(input[nextIP:], shift, minMatch)
+				nextHash = hashTwoPass4At(input, uint(nextIP), shift)
 
 				candidate = ip - lastDistance
 				if candidate >= 0 && candidate < ip &&
-					isMatchTwoPass(input[ip:], input[candidate:], minMatch) {
+					isMatchTwoPass4At(input, uint(ip), uint(candidate)) {
 					table[hash] = uint32(ip)
 					if ip-candidate <= maxDistance {
 						break
@@ -164,7 +164,7 @@ func (c *twoPassCompressor) createCommands(
 
 				candidate = int(table[hash])
 				table[hash] = uint32(ip)
-				if isMatchTwoPass(input[ip:], input[candidate:], minMatch) {
+				if isMatchTwoPass4At(input, uint(ip), uint(candidate)) {
 					if ip-candidate <= maxDistance {
 						break
 					}
@@ -205,7 +205,7 @@ func (c *twoPassCompressor) createCommands(
 
 			// Try to find another match immediately.
 			for ip-candidate <= maxDistance &&
-				isMatchTwoPass(input[ip:], input[candidate:], minMatch) {
+				isMatchTwoPass4At(input, uint(ip), uint(candidate)) {
 				base := ip
 				matched := minMatch + matchLen(
 					input[candidate+minMatch:], input[ip+minMatch:], ipEnd-ip-minMatch)
@@ -223,7 +223,7 @@ func (c *twoPassCompressor) createCommands(
 			}
 
 			ip++
-			nextHash = hashTwoPass(input[ip:], shift, minMatch)
+			nextHash = hashTwoPass4At(input, uint(ip), shift)
 		}
 	} // close block scope for ipLimit, lenLimit
 
@@ -529,10 +529,11 @@ func compressFragmentTwoPass(
 	c.compress()
 }
 
-// hashTwoPass computes a hash of minMatch bytes starting at p,
-// shifted right by shift bits (64 - tableBits).
-func hashTwoPass(p []byte, shift uint, minMatch int) uint32 {
-	h := (loadU64LE(p, 0) << uint(((8 - minMatch) * 8))) * hashMul32
+// hashTwoPass4At computes a 4-byte hash of input[i:], shifted right by
+// shift bits (64 - tableBits). Taking the raw byte slice and index avoids
+// the sub-slice bounds check at the call site in the inner scan loop.
+func hashTwoPass4At(input []byte, i, shift uint) uint32 {
+	h := (loadU64LE(input, i) << 32) * hashMul32
 	return uint32(h >> shift)
 }
 
@@ -556,15 +557,11 @@ func hashBytesAtOffsetTwoPass6(v uint64, offset, shift uint) uint32 {
 	return uint32(h >> shift)
 }
 
-// isMatchTwoPass returns true if the first minMatch bytes of a and b are equal.
-func isMatchTwoPass(a, b []byte, minMatch int) bool {
-	if loadU32LE(a, 0) != loadU32LE(b, 0) {
-		return false
-	}
-	if minMatch == 4 {
-		return true
-	}
-	return a[4] == b[4] && a[5] == b[5]
+// isMatchTwoPass4At compares 4 bytes of input at positions a and b. Taking
+// the raw byte slice and indices avoids the sub-slice bounds check at the
+// call site in the inner scan loop.
+func isMatchTwoPass4At(input []byte, a, b uint) bool {
+	return loadU32LE(input, a) == loadU32LE(input, b)
 }
 
 // isMatchTwoPass6At compares 6 bytes of input at positions a and b. Taking
