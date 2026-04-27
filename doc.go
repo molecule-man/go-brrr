@@ -12,7 +12,7 @@ match for static web asset pipelines.
 Streaming compression through an io.Writer:
 
 	var buf bytes.Buffer
-	w, err := brrr.NewWriter(&buf, brrr.WriterOptions{Quality: 6})
+	w, err := brrr.NewWriter(&buf, 6)
 	if err != nil {
 		log.Fatal(err)
 	}

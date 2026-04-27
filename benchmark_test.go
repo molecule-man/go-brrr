@@ -151,7 +151,7 @@ func BenchmarkCompress(b *testing.B) {
 
 				b.Run("payload="+tc.name+suffix, func(b *testing.B) {
 					b.Run("impl=go-brrr", func(b *testing.B) {
-						w, err := brrr.NewWriter(io.Discard, brrr.WriterOptions{Quality: q, LGWin: lgwin, SizeHint: sizeHint})
+						w, err := brrr.NewWriterOptions(io.Discard, q, brrr.WriterOptions{LGWin: lgwin, SizeHint: sizeHint})
 						if err != nil {
 							b.Fatal(err)
 						}
@@ -217,8 +217,7 @@ func BenchmarkCompressHasher(b *testing.B) {
 				}
 
 				b.Run("payload="+tc.name, func(b *testing.B) {
-					w, err := brrr.NewWriter(io.Discard, brrr.WriterOptions{
-						Quality:  hc.quality,
+					w, err := brrr.NewWriterOptions(io.Discard, hc.quality, brrr.WriterOptions{
 						LGWin:    hc.lgwin,
 						SizeHint: hc.sizeHint,
 					})
@@ -262,7 +261,7 @@ func BenchmarkCompressDict(b *testing.B) {
 	for _, q := range []int{5, 6, 7, 8, 9, 10, 11} {
 		b.Run(fmt.Sprintf("q=%d", q), func(b *testing.B) {
 			b.Run("impl=go-brrr", func(b *testing.B) {
-				w, err := brrr.NewWriter(io.Discard, brrr.WriterOptions{Quality: q})
+				w, err := brrr.NewWriter(io.Discard, q)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -386,7 +385,7 @@ func BenchmarkCompressOneshot(b *testing.B) {
 				b.Run("payload="+tc.name+suffix, func(b *testing.B) {
 					b.Run("impl=go-brrr", func(b *testing.B) {
 						benchCompressOneshot(b, func(w io.Writer, quality, lgwin int) (io.WriteCloser, error) {
-							return brrr.NewWriter(w, brrr.WriterOptions{Quality: quality, LGWin: lgwin, SizeHint: sizeHint})
+							return brrr.NewWriterOptions(w, quality, brrr.WriterOptions{LGWin: lgwin, SizeHint: sizeHint})
 						}, payloads, q, lgwin)
 					})
 					for _, ec := range extraCompressors {
@@ -605,7 +604,7 @@ func BenchmarkDecompressDict(b *testing.B) {
 	for _, q := range []int{5, 6, 7, 8, 9, 10, 11} {
 		// Compress with dictionary for the decompression benchmark.
 		var buf bytes.Buffer
-		w, err := brrr.NewWriter(&buf, brrr.WriterOptions{Quality: q})
+		w, err := brrr.NewWriter(&buf, q)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -658,7 +657,7 @@ func BenchmarkCompressCorpusFile(b *testing.B) {
 		b.Run(fmt.Sprintf("q=%d", q), func(b *testing.B) {
 			b.Run("payload="+name+benchParamSuffix(lgwin, sizeHint), func(b *testing.B) {
 				b.Run("impl=go-brrr", func(b *testing.B) {
-					w, err := brrr.NewWriter(io.Discard, brrr.WriterOptions{Quality: q, LGWin: lgwin, SizeHint: sizeHint})
+					w, err := brrr.NewWriterOptions(io.Discard, q, brrr.WriterOptions{LGWin: lgwin, SizeHint: sizeHint})
 					if err != nil {
 						b.Fatal(err)
 					}

@@ -38,7 +38,7 @@ func BenchmarkCrossLib(b *testing.B) {
 			name:   "go-brrr",
 			levels: intRange(0, 11),
 			create: func(w io.Writer, level int) (compressor, error) {
-				return brrr.NewWriter(w, brrr.WriterOptions{Quality: level})
+				return brrr.NewWriter(w, level)
 			},
 		},
 		// {
@@ -137,7 +137,7 @@ func BenchmarkCrossLibDecompress(b *testing.B) {
 			levels: intRange(0, 11),
 			compress: func(data []byte, level int) []byte {
 				var buf bytes.Buffer
-				w, err := brrr.NewWriter(&buf, brrr.WriterOptions{Quality: level})
+				w, err := brrr.NewWriter(&buf, level)
 				if err != nil {
 					b.Fatal(err)
 				}

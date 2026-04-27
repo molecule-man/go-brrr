@@ -102,8 +102,7 @@ func testMatchesCRef(t *testing.T, quality, lgwin int, sizeHint uint) {
 	t.Helper()
 
 	var goBuf bytes.Buffer
-	w, err := NewWriter(&goBuf, WriterOptions{
-		Quality:  quality,
+	w, err := NewWriterOptions(&goBuf, quality, WriterOptions{
 		LGWin:    lgwin,
 		SizeHint: sizeHint,
 	})
@@ -225,7 +224,7 @@ func TestQ2EmptyMatchesCRef(t *testing.T) {
 	t.Parallel()
 
 	var goBuf bytes.Buffer
-	w, err := NewWriter(&goBuf, WriterOptions{Quality: 2, LGWin: 18})
+	w, err := NewWriterOptions(&goBuf, 2, WriterOptions{LGWin: 18})
 	if err != nil {
 		t.Fatalf("NewWriter: %v", err)
 	}
@@ -266,7 +265,7 @@ func TestQ2PositionWrapMatchesCRef(t *testing.T) {
 
 	// Go encoder: stream chunks, collect compressed output.
 	var goBuf bytes.Buffer
-	w, err := NewWriter(&goBuf, WriterOptions{Quality: 2, LGWin: 18})
+	w, err := NewWriterOptions(&goBuf, 2, WriterOptions{LGWin: 18})
 	if err != nil {
 		t.Fatalf("NewWriter: %v", err)
 	}
@@ -325,8 +324,7 @@ func testCompoundDictMatchesCRef(t *testing.T, quality, lgwin int, sizeHint uint
 
 	// Go encoder with compound dictionary.
 	var goBuf bytes.Buffer
-	w, err := NewWriter(&goBuf, WriterOptions{
-		Quality:  quality,
+	w, err := NewWriterOptions(&goBuf, quality, WriterOptions{
 		LGWin:    lgwin,
 		SizeHint: sizeHint,
 	})
@@ -409,7 +407,7 @@ func TestCompoundDictDecoderRoundtrip(t *testing.T) {
 
 				// Encode with Go encoder + compound dictionary.
 				var buf bytes.Buffer
-				w, err := NewWriter(&buf, WriterOptions{Quality: quality, LGWin: lgwin})
+				w, err := NewWriterOptions(&buf, quality, WriterOptions{LGWin: lgwin})
 				if err != nil {
 					t.Fatalf("NewWriter: %v", err)
 				}
@@ -493,7 +491,7 @@ func TestCompoundDictDecoderSmallBuffer(t *testing.T) {
 
 	// Encode at Q5 with compound dictionary.
 	var buf bytes.Buffer
-	w, err := NewWriter(&buf, WriterOptions{Quality: 5, LGWin: 18})
+	w, err := NewWriterOptions(&buf, 5, WriterOptions{LGWin: 18})
 	if err != nil {
 		t.Fatalf("NewWriter: %v", err)
 	}

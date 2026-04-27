@@ -15,7 +15,7 @@ import (
 func compress(t testing.TB, data []byte, quality int) []byte {
 	t.Helper()
 	var buf bytes.Buffer
-	w, err := NewWriter(&buf, WriterOptions{Quality: quality})
+	w, err := NewWriter(&buf, quality)
 	if err != nil {
 		t.Fatalf("NewWriter: %v", err)
 	}

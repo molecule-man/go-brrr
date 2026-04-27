@@ -15,12 +15,9 @@ const (
 	defaultLGWin = 22
 )
 
-// WriterOptions configures the brotli encoder.
+// WriterOptions configures advanced tuning knobs for the brotli encoder.
+// The compression level is passed positionally to NewWriter / NewWriterOptions.
 type WriterOptions struct {
-	// Quality controls the compression level (0–11).
-	// 0 is fastest, 11 is best compression.
-	Quality int
-
 	// LGWin sets the base-2 logarithm of the sliding window size (10–24).
 	// 0 selects the default (22).
 	LGWin int

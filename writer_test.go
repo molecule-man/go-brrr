@@ -18,7 +18,7 @@ func TestWriterMultipleWrites(t *testing.T) {
 	for _, level := range writerLevels {
 		t.Run(fmt.Sprintf("quality_%d", level), func(t *testing.T) {
 			var buf bytes.Buffer
-			w, err := NewWriter(&buf, WriterOptions{Quality: level})
+			w, err := NewWriter(&buf, level)
 			if err != nil {
 				t.Fatalf("NewWriter: %v", err)
 			}
@@ -55,7 +55,7 @@ func TestWriterFlush(t *testing.T) {
 	for _, level := range writerLevels {
 		t.Run(fmt.Sprintf("quality_%d", level), func(t *testing.T) {
 			var buf bytes.Buffer
-			w, err := NewWriter(&buf, WriterOptions{Quality: level})
+			w, err := NewWriter(&buf, level)
 			if err != nil {
 				t.Fatalf("NewWriter: %v", err)
 			}
@@ -95,7 +95,7 @@ func TestWriterEmpty(t *testing.T) {
 	for _, level := range writerLevels {
 		t.Run(fmt.Sprintf("quality_%d", level), func(t *testing.T) {
 			var buf bytes.Buffer
-			w, err := NewWriter(&buf, WriterOptions{Quality: level})
+			w, err := NewWriter(&buf, level)
 			if err != nil {
 				t.Fatalf("NewWriter: %v", err)
 			}
@@ -118,7 +118,7 @@ func TestWriterReset(t *testing.T) {
 	for _, level := range writerLevels {
 		t.Run(fmt.Sprintf("quality_%d", level), func(t *testing.T) {
 			var buf1, buf2 bytes.Buffer
-			w, err := NewWriter(&buf1, WriterOptions{Quality: level})
+			w, err := NewWriter(&buf1, level)
 			if err != nil {
 				t.Fatalf("NewWriter: %v", err)
 			}
@@ -156,7 +156,7 @@ func TestWriterReset(t *testing.T) {
 
 func TestWriterCloseIdempotent(t *testing.T) {
 	var buf bytes.Buffer
-	w, _ := NewWriter(&buf, WriterOptions{})
+	w, _ := NewWriter(&buf, 0)
 	_, _ = w.Write([]byte("data"))
 	if err := w.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -169,7 +169,7 @@ func TestWriterCloseIdempotent(t *testing.T) {
 
 func TestWriterWriteAfterClose(t *testing.T) {
 	var buf bytes.Buffer
-	w, _ := NewWriter(&buf, WriterOptions{})
+	w, _ := NewWriter(&buf, 0)
 	if err := w.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestWriterIOWriter(t *testing.T) {
 func TestNewWriterValidation(t *testing.T) {
 	// Valid options.
 	for _, level := range []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11} {
-		w, err := NewWriter(io.Discard, WriterOptions{Quality: level})
+		w, err := NewWriter(io.Discard, level)
 		if err != nil {
 			t.Errorf("NewWriter(quality=%d): unexpected error: %v", level, err)
 		}
@@ -198,7 +198,7 @@ func TestNewWriterValidation(t *testing.T) {
 
 	// Invalid quality.
 	for _, level := range []int{-1, 12, 100} {
-		w, err := NewWriter(io.Discard, WriterOptions{Quality: level})
+		w, err := NewWriter(io.Discard, level)
 		if err == nil {
 			t.Errorf("NewWriter(quality=%d): expected error, got nil", level)
 		}
@@ -209,7 +209,7 @@ func TestNewWriterValidation(t *testing.T) {
 
 	// Invalid lgwin.
 	for _, lgwin := range []int{5, 9, 25, 30} {
-		w, err := NewWriter(io.Discard, WriterOptions{LGWin: lgwin})
+		w, err := NewWriterOptions(io.Discard, 0, WriterOptions{LGWin: lgwin})
 		if err == nil {
 			t.Errorf("NewWriter(lgwin=%d): expected error, got nil", lgwin)
 		}
@@ -220,7 +220,7 @@ func TestNewWriterValidation(t *testing.T) {
 
 	// Valid lgwin values.
 	for lgwin := 10; lgwin <= 24; lgwin++ {
-		w, err := NewWriter(io.Discard, WriterOptions{LGWin: lgwin})
+		w, err := NewWriterOptions(io.Discard, 0, WriterOptions{LGWin: lgwin})
 		if err != nil {
 			t.Errorf("NewWriter(lgwin=%d): unexpected error: %v", lgwin, err)
 		}
@@ -245,7 +245,7 @@ func TestWriterErrorPropagation(t *testing.T) {
 	// compressed data. Write repeatedly until the error surfaces.
 	for _, quality := range []int{2, 4, 6} {
 		t.Run(fmt.Sprintf("write_q%d", quality), func(t *testing.T) {
-			w, err := NewWriter(failAfter(0), WriterOptions{Quality: quality, LGWin: 10})
+			w, err := NewWriterOptions(failAfter(0), quality, WriterOptions{LGWin: 10})
 			if err != nil {
 				t.Fatalf("NewWriter: %v", err)
 			}
@@ -265,7 +265,7 @@ func TestWriterErrorPropagation(t *testing.T) {
 	// Test Close error propagation for streaming qualities.
 	for _, quality := range []int{2, 4, 6} {
 		t.Run(fmt.Sprintf("close_q%d", quality), func(t *testing.T) {
-			w, err := NewWriter(failAfter(0), WriterOptions{Quality: quality})
+			w, err := NewWriter(failAfter(0), quality)
 			if err != nil {
 				t.Fatalf("NewWriter: %v", err)
 			}
@@ -279,7 +279,7 @@ func TestWriterErrorPropagation(t *testing.T) {
 	// Test Flush error propagation for streaming qualities.
 	for _, quality := range []int{2, 4} {
 		t.Run(fmt.Sprintf("flush_q%d", quality), func(t *testing.T) {
-			w, err := NewWriter(failAfter(0), WriterOptions{Quality: quality})
+			w, err := NewWriter(failAfter(0), quality)
 			if err != nil {
 				t.Fatalf("NewWriter: %v", err)
 			}
@@ -294,7 +294,7 @@ func TestWriterErrorPropagation(t *testing.T) {
 	// Test Flush and Close error propagation for batch qualities (0-1).
 	for _, quality := range []int{0, 1} {
 		t.Run(fmt.Sprintf("flush_q%d", quality), func(t *testing.T) {
-			w, err := NewWriter(failAfter(0), WriterOptions{Quality: quality})
+			w, err := NewWriter(failAfter(0), quality)
 			if err != nil {
 				t.Fatalf("NewWriter: %v", err)
 			}
@@ -306,7 +306,7 @@ func TestWriterErrorPropagation(t *testing.T) {
 		})
 
 		t.Run(fmt.Sprintf("close_q%d", quality), func(t *testing.T) {
-			w, err := NewWriter(failAfter(0), WriterOptions{Quality: quality})
+			w, err := NewWriter(failAfter(0), quality)
 			if err != nil {
 				t.Fatalf("NewWriter: %v", err)
 			}
@@ -322,7 +322,7 @@ func TestWriterErrorPropagation(t *testing.T) {
 func TestWriterAttachDictionaryLowQuality(t *testing.T) {
 	for _, quality := range []int{0, 1} {
 		t.Run(fmt.Sprintf("quality_%d", quality), func(t *testing.T) {
-			w, err := NewWriter(io.Discard, WriterOptions{Quality: quality})
+			w, err := NewWriter(io.Discard, quality)
 			if err != nil {
 				t.Fatalf("NewWriter: %v", err)
 			}
@@ -336,7 +336,7 @@ func TestWriterAttachDictionaryLowQuality(t *testing.T) {
 
 func TestWriterFlushAfterClose(t *testing.T) {
 	var buf bytes.Buffer
-	w, _ := NewWriter(&buf, WriterOptions{})
+	w, _ := NewWriter(&buf, 0)
 	_ = w.Close()
 	err := w.Flush()
 	if !errors.Is(err, io.ErrClosedPipe) {
@@ -349,7 +349,7 @@ func TestWriterFlushEmpty(t *testing.T) {
 	for _, quality := range []int{0, 1} {
 		t.Run(fmt.Sprintf("quality_%d", quality), func(t *testing.T) {
 			var buf bytes.Buffer
-			w, err := NewWriter(&buf, WriterOptions{Quality: quality})
+			w, err := NewWriter(&buf, quality)
 			if err != nil {
 				t.Fatalf("NewWriter: %v", err)
 			}
@@ -392,7 +392,7 @@ func TestWriterErrorStickiness(t *testing.T) {
 		t.Run(fmt.Sprintf("quality_%d", quality), func(t *testing.T) {
 			// Allow a small amount of output so the writer initialises,
 			// then fail on subsequent writes.
-			w, err := NewWriter(&limitedWriter{limit: 0, err: errFail}, WriterOptions{Quality: quality, LGWin: 10})
+			w, err := NewWriterOptions(&limitedWriter{limit: 0, err: errFail}, quality, WriterOptions{LGWin: 10})
 			if err != nil {
 				t.Fatalf("NewWriter: %v", err)
 			}
@@ -441,7 +441,7 @@ func TestWriterResetQ6WithCompoundDict(t *testing.T) {
 
 	// Compress with a fresh writer + compound dictionary.
 	var freshBuf bytes.Buffer
-	fresh, err := NewWriter(&freshBuf, WriterOptions{Quality: 6})
+	fresh, err := NewWriter(&freshBuf, 6)
 	if err != nil {
 		t.Fatalf("NewWriter (fresh): %v", err)
 	}
@@ -458,7 +458,7 @@ func TestWriterResetQ6WithCompoundDict(t *testing.T) {
 	// Use a reused writer: first compress something to dirty internal state,
 	// then Reset, attach the same dictionary, and compress the same input.
 	var discardBuf, reusedBuf bytes.Buffer
-	reused, err := NewWriter(&discardBuf, WriterOptions{Quality: 6})
+	reused, err := NewWriter(&discardBuf, 6)
 	if err != nil {
 		t.Fatalf("NewWriter (reused): %v", err)
 	}

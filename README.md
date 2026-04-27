@@ -26,7 +26,7 @@ func Example_roundtrip() {
 	// Compress
 	original := []byte("Hello, brotli! This is a round-trip compression example.")
 	var compressed bytes.Buffer
-	w, err := brrr.NewWriter(&compressed, brrr.WriterOptions{Quality: 6})
+	w, err := brrr.NewWriter(&compressed, 6)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func Example_decompress() {
 	// Compress some data first.
 	original := []byte("Decompress restores the original bytes from a brotli-compressed slice.")
 	var compressed bytes.Buffer
-	w, err := brrr.NewWriter(&compressed, brrr.WriterOptions{Quality: 4})
+	w, err := brrr.NewWriter(&compressed, 4)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func Example_reuse() {
 	}
 
 	var compressed bytes.Buffer
-	w, err := brrr.NewWriter(&compressed, brrr.WriterOptions{Quality: 4})
+	w, err := brrr.NewWriter(&compressed, 4)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -132,13 +132,12 @@ func Example_pool() {
 	// sync.Pool. On each request: Get, Reset to the response body, Write,
 	// Close, Put back. This avoids allocating encoder state (hash tables,
 	// ring buffer) per request.
-	opts := brrr.WriterOptions{Quality: 5}
 	pool := sync.Pool{
 		New: func() any {
-			w, err := brrr.NewWriter(io.Discard, opts)
+			w, err := brrr.NewWriter(io.Discard, 5)
 			if err != nil {
-				// NewWriter only fails for invalid WriterOptions,
-				// which are static here.
+				// NewWriter only fails for an invalid level, which is
+				// static here.
 				panic(err)
 			}
 			return w
@@ -191,7 +190,7 @@ func Example_compoundDictionary() {
 
 	// Compress with compound dictionary.
 	var compressed bytes.Buffer
-	w, err := brrr.NewWriter(&compressed, brrr.WriterOptions{Quality: 4})
+	w, err := brrr.NewWriter(&compressed, 4)
 	if err != nil {
 		log.Fatal(err)
 	}

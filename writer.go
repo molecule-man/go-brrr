@@ -40,14 +40,19 @@ type Writer struct {
 	reused      bool // true after first Reset; suppresses pool release on Close
 }
 
-// NewWriter returns a new Writer compressing data to dst.
-//
-// Supported quality levels are 0–11. LGWin range is 10–24; 0 selects the
-// default (22).
-func NewWriter(dst io.Writer, opts WriterOptions) (*Writer, error) {
-	quality := opts.Quality
-	if quality < 0 || quality > 11 {
-		return nil, errors.New("brrr: invalid compression level: " + strconv.Itoa(opts.Quality))
+// NewWriter returns a new Writer compressing data to dst at the given
+// quality level. Supported levels are 0 (BestSpeed) through 11
+// (BestCompression).
+func NewWriter(dst io.Writer, level int) (*Writer, error) {
+	return NewWriterOptions(dst, level, WriterOptions{})
+}
+
+// NewWriterOptions returns a new Writer compressing data to dst at the given
+// quality level with additional tuning options. LGWin range is 10–24; 0
+// selects the default (22).
+func NewWriterOptions(dst io.Writer, level int, opts WriterOptions) (*Writer, error) {
+	if level < 0 || level > 11 {
+		return nil, errors.New("brrr: invalid compression level: " + strconv.Itoa(level))
 	}
 
 	lgwin := opts.LGWin
@@ -59,7 +64,7 @@ func NewWriter(dst io.Writer, opts WriterOptions) (*Writer, error) {
 			" (must be " + strconv.Itoa(minLGWin) + "–" + strconv.Itoa(maxLGWin) + ")")
 	}
 
-	w := &Writer{dst: dst, quality: quality, lgwin: lgwin, sizeHint: opts.SizeHint}
+	w := &Writer{dst: dst, quality: level, lgwin: lgwin, sizeHint: opts.SizeHint}
 	w.init()
 	return w, nil
 }

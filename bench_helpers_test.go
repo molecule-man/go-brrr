@@ -19,7 +19,7 @@ func BenchCompressPayloads(tb testing.TB, payloads [][]byte, quality, lgwin int)
 			continue
 		}
 		var buf bytes.Buffer
-		w, err := NewWriter(&buf, WriterOptions{Quality: quality, LGWin: lgwin})
+		w, err := NewWriterOptions(&buf, quality, WriterOptions{LGWin: lgwin})
 		if err != nil {
 			tb.Fatal(err)
 		}
