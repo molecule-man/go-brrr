@@ -26,7 +26,9 @@ Streaming compression through an io.Writer:
 Streaming decompression through an io.Reader:
 
 	r := brrr.NewReader(src)
-	out, err := io.ReadAll(r)
+	if _, err := io.Copy(dst, r); err != nil {
+		log.Fatal(err)
+	}
 
 One-shot decompression of a complete in-memory blob:
 
