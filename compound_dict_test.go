@@ -174,8 +174,9 @@ func TestFindCompoundDictionaryMatch_HashChainHit(t *testing.T) {
 	var sr hasherSearchResult
 	sr.score = minScore
 
+	var sink uint16
 	pd.findCompoundMatch(ring, mask,
-		&distCache, cur, maxLength, distanceOffset, &sr)
+		&distCache, cur, maxLength, distanceOffset, &sr, &sink)
 
 	if sr.score <= minScore {
 		t.Fatal("expected a match but got minScore")
@@ -213,8 +214,9 @@ func TestFindCompoundDictionaryMatch_CacheHit(t *testing.T) {
 	var sr hasherSearchResult
 	sr.score = minScore
 
+	var sink uint16
 	pd.findCompoundMatch(ring, mask,
-		&distCache, cur, maxLength, distanceOffset, &sr)
+		&distCache, cur, maxLength, distanceOffset, &sr, &sink)
 
 	if sr.score <= minScore {
 		t.Fatal("expected a cache hit match")
@@ -252,8 +254,9 @@ func TestFindCompoundDictionaryMatch_NoMatch(t *testing.T) {
 	var sr hasherSearchResult
 	sr.score = minScore
 
+	var sink uint16
 	pd.findCompoundMatch(ring, mask,
-		&distCache, cur, maxLength, distanceOffset, &sr)
+		&distCache, cur, maxLength, distanceOffset, &sr, &sink)
 
 	if sr.score != minScore {
 		t.Fatal("expected no match")

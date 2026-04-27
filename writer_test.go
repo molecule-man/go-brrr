@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"testing"
 )
 
@@ -505,4 +506,41 @@ func TestWriterResetQ6WithCompoundDict(t *testing.T) {
 		t.Errorf("output mismatch: fresh=%d bytes, reused=%d bytes",
 			freshBuf.Len(), reusedBuf.Len())
 	}
+}
+
+// TestPreparedDictionaryConcurrentShare exercises the documented contract that
+// a *PreparedDictionary may be shared across goroutines. Run with -race.
+func TestPreparedDictionaryConcurrentShare(t *testing.T) {
+	dict := bytes.Repeat([]byte("shared-dictionary content for concurrency test "), 100)
+	input := bytes.Repeat([]byte("payload that references shared-dictionary content "), 200)
+
+	pd, err := PrepareDictionary(dict)
+	if err != nil {
+		t.Fatalf("PrepareDictionary: %v", err)
+	}
+
+	const goroutines = 8
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for range goroutines {
+		go func() {
+			defer wg.Done()
+			var buf bytes.Buffer
+			w, err := NewWriterOptions(&buf, 6, WriterOptions{
+				Dictionaries: []*PreparedDictionary{pd},
+			})
+			if err != nil {
+				t.Errorf("NewWriterOptions: %v", err)
+				return
+			}
+			if _, err := w.Write(input); err != nil {
+				t.Errorf("Write: %v", err)
+				return
+			}
+			if err := w.Close(); err != nil {
+				t.Errorf("Close: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
 }

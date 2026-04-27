@@ -49,8 +49,9 @@ be reused across payloads without reallocating per-call buffers. Both
 also accept compound dictionaries — useful when the payloads share
 content with a known corpus. The encoder takes pre-built
 [PreparedDictionary] values via [WriterOptions.Dictionaries], so the
-hash table is built once and reused across many serial Writers. The
-decoder takes raw dictionary bytes via [ReaderOptions.Dictionaries].
+hash table is built once and may be shared across many Writers and
+goroutines. The decoder takes raw dictionary bytes via
+[ReaderOptions.Dictionaries].
 
 # Choosing a quality level
 

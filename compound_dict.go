@@ -17,16 +17,13 @@ var (
 	errQualityTooLow = errors.New("brrr: compound dictionaries require quality >= 2")
 )
 
-// PreparedDictionary is a hash table built from caller-provided source bytes.
-// It allows the encoder to reference those bytes as if they preceded the input
-// stream.
+// PreparedDictionary is an immutable hash table built from caller-provided
+// source bytes. It allows the encoder to reference those bytes as if they
+// preceded the input stream.
 //
-// Build a PreparedDictionary once with [PrepareDictionary] and reuse it across
-// many serial Writers via [WriterOptions.Dictionaries]. A single
-// *PreparedDictionary must not be used by Writers running concurrently in
-// different goroutines; the encoder writes to an internal scratch field
-// during match search. Prepare separately per goroutine for parallel
-// compression.
+// Build a PreparedDictionary once with [PrepareDictionary] and pass it to any
+// number of Writers via [WriterOptions.Dictionaries]. A *PreparedDictionary is
+// safe to share across goroutines.
 type PreparedDictionary struct {
 	source      []byte
 	slotOffsets []uint32
@@ -36,13 +33,6 @@ type PreparedDictionary struct {
 	slotBits    uint32
 	hashShift   uint32 // 64 - bucketBits, precomputed to avoid per-call arithmetic
 	slotMask    uint32 // (1 << slotBits) - 1, precomputed
-	// nextHead is a write-only prefetch sink written during match search;
-	// the value is meaningless and never read. Concurrent writes from
-	// multiple Writers sharing the same *PreparedDictionary will produce
-	// data-race warnings from go test -race even though they are functionally
-	// harmless. Run parallel encodes with separate prepared dictionaries if
-	// the race detector is in use.
-	nextHead uint16
 }
 
 // compoundDictionary holds multiple prepared dictionary chunks that the encoder
@@ -53,6 +43,11 @@ type compoundDictionary struct {
 	chunkOffsets [maxCompoundDicts + 1]uint
 	totalSize    uint
 	numChunks    int
+	// nextHead is a per-encoder write-only prefetch sink written during match
+	// search. Living on compoundDictionary (per-encoder) rather than on
+	// *PreparedDictionary lets a single prepared dictionary be shared across
+	// concurrent Writers without racing on this write.
+	nextHead uint16
 }
 
 // PrepareDictionary builds an immutable [PreparedDictionary] from the given
@@ -212,6 +207,7 @@ func (d *PreparedDictionary) findCompoundMatch(
 	data []byte, ringBufferMask uint,
 	distCache *[4]uint, cur, maxLength, distanceOffset uint,
 	out *hasherSearchResult,
+	prefetchSink *uint16,
 ) {
 	sourceSize := uint(len(d.source))
 	if sourceSize < 8 {
@@ -222,10 +218,12 @@ func (d *PreparedDictionary) findCompoundMatch(
 
 	// Speculatively load from the next position's heads entry to warm the cache.
 	// By the time the next call arrives, the cache line will be in L1.
+	// prefetchSink points at a per-encoder slot so concurrent Writers sharing
+	// the same dict do not race on this write.
 	nextCurMasked := (cur + 1) & ringBufferMask
 	nh := (loadU64LE(data, nextCurMasked) & hashMask) * hashMul64
 	nextKey := uint32(nh >> d.hashShift)
-	d.nextHead = d.heads[nextKey]
+	*prefetchSink = d.heads[nextKey]
 
 	boundary := distanceOffset - sourceSize
 
@@ -395,6 +393,7 @@ func (cd *compoundDictionary) lookupMatch(
 		cd.chunks[i].findCompoundMatch(
 			data, ringBufferMask,
 			distCache, cur, maxLength,
-			baseOffset-cd.chunkOffsets[i], sr)
+			baseOffset-cd.chunkOffsets[i], sr,
+			&cd.nextHead)
 	}
 }
