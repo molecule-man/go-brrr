@@ -17,10 +17,17 @@ var (
 	errQualityTooLow = errors.New("brrr: compound dictionaries require quality >= 2")
 )
 
-// preparedDictionary is an immutable hash table built from caller-provided
-// source bytes. It allows the encoder to reference those bytes as if they
-// preceded the input stream.
-type preparedDictionary struct {
+// PreparedDictionary is a hash table built from caller-provided source bytes.
+// It allows the encoder to reference those bytes as if they preceded the input
+// stream.
+//
+// Build a PreparedDictionary once with [PrepareDictionary] and reuse it across
+// many serial Writers via [WriterOptions.Dictionaries]. A single
+// *PreparedDictionary must not be used by Writers running concurrently in
+// different goroutines; the encoder writes to an internal scratch field
+// during match search. Prepare separately per goroutine for parallel
+// compression.
+type PreparedDictionary struct {
 	source      []byte
 	slotOffsets []uint32
 	heads       []uint16
@@ -29,25 +36,47 @@ type preparedDictionary struct {
 	slotBits    uint32
 	hashShift   uint32 // 64 - bucketBits, precomputed to avoid per-call arithmetic
 	slotMask    uint32 // (1 << slotBits) - 1, precomputed
-	nextHead    uint16 // speculative prefetch sink (prevents dead-code elimination)
+	// nextHead is a write-only prefetch sink written during match search;
+	// the value is meaningless and never read. Concurrent writes from
+	// multiple Writers sharing the same *PreparedDictionary will produce
+	// data-race warnings from go test -race even though they are functionally
+	// harmless. Run parallel encodes with separate prepared dictionaries if
+	// the race detector is in use.
+	nextHead uint16
 }
 
 // compoundDictionary holds multiple prepared dictionary chunks that the encoder
 // can reference as backward distances beyond the ring buffer.
 type compoundDictionary struct {
-	chunks       [maxCompoundDicts]*preparedDictionary
+	chunks       [maxCompoundDicts]*PreparedDictionary
 	chunkSource  [maxCompoundDicts][]byte
 	chunkOffsets [maxCompoundDicts + 1]uint
 	totalSize    uint
 	numChunks    int
 }
 
+// PrepareDictionary builds an immutable [PreparedDictionary] from the given
+// source bytes, suitable for use as a compound dictionary chunk via
+// [WriterOptions.Dictionaries]. The returned dictionary may be shared across
+// any number of Writers and goroutines.
+//
+// The returned dictionary keeps a reference to data; the caller must not
+// mutate data while any Writer holding the dictionary is still in use.
+//
+// Returns an error if data is empty.
+func PrepareDictionary(data []byte) (*PreparedDictionary, error) {
+	if len(data) == 0 {
+		return nil, errEmptyDict
+	}
+	return newPreparedDictionary(data), nil
+}
+
 // newPreparedDictionary builds a hash table from source for compound dictionary
 // matching.
-func newPreparedDictionary(source []byte) *preparedDictionary {
+func newPreparedDictionary(source []byte) *PreparedDictionary {
 	sourceSize := uint32(len(source))
 	if sourceSize < 8 {
-		return &preparedDictionary{source: source}
+		return &PreparedDictionary{source: source}
 	}
 
 	bucketBits := uint32(17)
@@ -95,7 +124,7 @@ func newPreparedDictionary(source []byte) *preparedDictionary {
 	}
 
 	// Step 2: find slot limits and sizes, compute slot offsets.
-	d := &preparedDictionary{
+	d := &PreparedDictionary{
 		source:      source,
 		slotOffsets: make([]uint32, numSlots),
 		heads:       make([]uint16, numBuckets),
@@ -162,18 +191,13 @@ func newPreparedDictionary(source []byte) *preparedDictionary {
 	return d
 }
 
-// attach builds a preparedDictionary from data and appends it as a chunk.
-func (cd *compoundDictionary) attach(data []byte) error {
+// attach appends a prepared dictionary as a chunk.
+func (cd *compoundDictionary) attach(pd *PreparedDictionary) error {
 	if cd.numChunks == maxCompoundDicts {
 		return errTooManyDicts
 	}
-	if len(data) == 0 {
-		return errEmptyDict
-	}
-
-	pd := newPreparedDictionary(data)
 	idx := cd.numChunks
-	cd.totalSize += uint(len(data))
+	cd.totalSize += uint(len(pd.source))
 	cd.chunks[idx] = pd
 	cd.chunkSource[idx] = pd.source
 	cd.chunkOffsets[idx+1] = cd.totalSize
@@ -184,7 +208,7 @@ func (cd *compoundDictionary) attach(data []byte) error {
 // findCompoundDictionaryMatch searches a single prepared dictionary for the
 // best backward reference match. Two phases: distance cache check, then hash
 // chain walk.
-func (d *preparedDictionary) findCompoundMatch(
+func (d *PreparedDictionary) findCompoundMatch(
 	data []byte, ringBufferMask uint,
 	distCache *[4]uint, cur, maxLength, distanceOffset uint,
 	out *hasherSearchResult,
@@ -284,7 +308,7 @@ func (d *preparedDictionary) findCompoundMatch(
 
 // findAllCompoundMatches searches this prepared dictionary for all matches
 // at the given position, returning them sorted by strictly increasing length.
-func (d *preparedDictionary) findAllCompoundMatches(
+func (d *PreparedDictionary) findAllCompoundMatches(
 	data []byte, ringBufferMask, curIx, minLength, maxLength, distanceOffset, maxDistance uint,
 	matches []backwardMatch,
 ) uint {

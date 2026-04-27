@@ -258,14 +258,18 @@ func BenchmarkCompressDict(b *testing.B) {
 	dict := corpus[:dictEnd]
 	input := corpus[inputStart:]
 
+	pd, err := brrr.PrepareDictionary(dict)
+	if err != nil {
+		b.Fatal(err)
+	}
+
 	for _, q := range []int{5, 6, 7, 8, 9, 10, 11} {
 		b.Run(fmt.Sprintf("q=%d", q), func(b *testing.B) {
 			b.Run("impl=go-brrr", func(b *testing.B) {
-				w, err := brrr.NewWriter(io.Discard, q)
+				w, err := brrr.NewWriterOptions(io.Discard, q, brrr.WriterOptions{
+					Dictionaries: []*brrr.PreparedDictionary{pd},
+				})
 				if err != nil {
-					b.Fatal(err)
-				}
-				if err := w.AttachDictionary(dict); err != nil {
 					b.Fatal(err)
 				}
 				benchCompressDict(b, w, input)
@@ -601,14 +605,18 @@ func BenchmarkDecompressDict(b *testing.B) {
 	dict := corpus[:dictEnd]
 	input := corpus[inputStart:]
 
+	pd, err := brrr.PrepareDictionary(dict)
+	if err != nil {
+		b.Fatal(err)
+	}
+
 	for _, q := range []int{5, 6, 7, 8, 9, 10, 11} {
 		// Compress with dictionary for the decompression benchmark.
 		var buf bytes.Buffer
-		w, err := brrr.NewWriter(&buf, q)
+		w, err := brrr.NewWriterOptions(&buf, q, brrr.WriterOptions{
+			Dictionaries: []*brrr.PreparedDictionary{pd},
+		})
 		if err != nil {
-			b.Fatal(err)
-		}
-		if err := w.AttachDictionary(dict); err != nil {
 			b.Fatal(err)
 		}
 		if _, err := w.Write(input); err != nil {
@@ -622,8 +630,10 @@ func BenchmarkDecompressDict(b *testing.B) {
 		b.Run(fmt.Sprintf("q=%d", q), func(b *testing.B) {
 			b.Run("impl=go-brrr", func(b *testing.B) {
 				benchDecompressDict(b, input, compressed, dict, func(src io.Reader, d []byte) io.ReadCloser {
-					r := brrr.NewReader(src)
-					if err := r.AttachDictionary(d); err != nil {
+					r, err := brrr.NewReaderOptions(src, brrr.ReaderOptions{
+						Dictionaries: [][]byte{d},
+					})
+					if err != nil {
 						b.Fatal(err)
 					}
 					return r

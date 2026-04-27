@@ -45,7 +45,7 @@ type streamEncoder interface {
 	clearTrailingBits()
 	reset(quality, lgwin int, sizeHint uint)
 	updateSizeHint(availableIn uint)
-	attachDictionary(data []byte) error
+	attachDictionary(pd *PreparedDictionary) error
 	releaseBuffers()
 }
 

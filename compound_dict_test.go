@@ -61,7 +61,7 @@ func TestNewPreparedDictionary_AutoScale(t *testing.T) {
 func TestCompoundDictionary_AttachSingle(t *testing.T) {
 	var cd compoundDictionary
 	data := []byte("the quick brown fox jumps over the lazy dog")
-	if err := cd.attach(data); err != nil {
+	if err := cd.attach(newPreparedDictionary(data)); err != nil {
 		t.Fatal(err)
 	}
 	if cd.numChunks != 1 {
@@ -82,10 +82,10 @@ func TestCompoundDictionary_AttachMultiple(t *testing.T) {
 	var cd compoundDictionary
 	data1 := []byte("chunk one data here!")
 	data2 := []byte("chunk two data here!")
-	if err := cd.attach(data1); err != nil {
+	if err := cd.attach(newPreparedDictionary(data1)); err != nil {
 		t.Fatal(err)
 	}
-	if err := cd.attach(data2); err != nil {
+	if err := cd.attach(newPreparedDictionary(data2)); err != nil {
 		t.Fatal(err)
 	}
 	if cd.numChunks != 2 {
@@ -106,21 +106,20 @@ func TestCompoundDictionary_AttachOverflow(t *testing.T) {
 	var cd compoundDictionary
 	for i := range maxCompoundDicts {
 		data := []byte{byte(i), 1, 2, 3, 4, 5, 6, 7, 8}
-		if err := cd.attach(data); err != nil {
+		if err := cd.attach(newPreparedDictionary(data)); err != nil {
 			t.Fatalf("attach %d: %v", i, err)
 		}
 	}
-	if err := cd.attach([]byte("overflow")); !errors.Is(err, errTooManyDicts) {
+	if err := cd.attach(newPreparedDictionary([]byte("overflow"))); !errors.Is(err, errTooManyDicts) {
 		t.Fatalf("expected errTooManyDicts, got %v", err)
 	}
 }
 
-func TestCompoundDictionary_AttachEmpty(t *testing.T) {
-	var cd compoundDictionary
-	if err := cd.attach(nil); !errors.Is(err, errEmptyDict) {
+func TestPrepareDictionaryEmpty(t *testing.T) {
+	if _, err := PrepareDictionary(nil); !errors.Is(err, errEmptyDict) {
 		t.Fatalf("expected errEmptyDict for nil, got %v", err)
 	}
-	if err := cd.attach([]byte{}); !errors.Is(err, errEmptyDict) {
+	if _, err := PrepareDictionary([]byte{}); !errors.Is(err, errEmptyDict) {
 		t.Fatalf("expected errEmptyDict for empty, got %v", err)
 	}
 }
@@ -267,7 +266,7 @@ func TestLookupCompoundDictionaryMatch_SingleChunk(t *testing.T) {
 	copy(dictData[48:], pattern)
 
 	var cd compoundDictionary
-	_ = cd.attach(dictData)
+	_ = cd.attach(newPreparedDictionary(dictData))
 
 	ringSize := 1024
 	ring := make([]byte, ringSize)
@@ -305,8 +304,8 @@ func TestLookupCompoundDictionaryMatch_MultiChunk(t *testing.T) {
 	copy(dict2[64:], pattern)
 
 	var cd compoundDictionary
-	_ = cd.attach(dict1)
-	_ = cd.attach(dict2)
+	_ = cd.attach(newPreparedDictionary(dict1))
+	_ = cd.attach(newPreparedDictionary(dict2))
 
 	ringSize := 1024
 	ring := make([]byte, ringSize)

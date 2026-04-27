@@ -1,4 +1,4 @@
-// Public package-level constants and WriterOptions.
+// Public package-level constants and option structs.
 
 package brrr
 
@@ -18,6 +18,15 @@ const (
 // WriterOptions configures advanced tuning knobs for the brotli encoder.
 // The compression level is passed positionally to NewWriter / NewWriterOptions.
 type WriterOptions struct {
+	// Dictionaries are compound dictionary chunks the encoder may reference
+	// as backward distances beyond the ring buffer, useful when inputs share
+	// content with a known corpus. Build each chunk once with
+	// [PrepareDictionary] and share the resulting *PreparedDictionary across
+	// any number of Writers. Up to 15 chunks are allowed and compound
+	// dictionaries require compression level >= 2. Dictionaries are preserved
+	// across Reset.
+	Dictionaries []*PreparedDictionary
+
 	// LGWin sets the base-2 logarithm of the sliding window size (10–24).
 	// 0 selects the default (22).
 	LGWin int
@@ -27,4 +36,13 @@ type WriterOptions struct {
 	// hasher selection for large inputs. 0 means unknown; the encoder will
 	// auto-estimate from the first Write call.
 	SizeHint uint
+}
+
+// ReaderOptions configures the brotli decoder.
+type ReaderOptions struct {
+	// Dictionaries are compound dictionary chunks the decoder will use to
+	// resolve backward references beyond the ring buffer. They must match
+	// the dictionaries supplied to the encoder. Up to 15 chunks are allowed;
+	// each must be non-empty. Dictionaries are preserved across Reset.
+	Dictionaries [][]byte
 }

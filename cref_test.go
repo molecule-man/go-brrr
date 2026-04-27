@@ -322,17 +322,20 @@ func testCompoundDictMatchesCRef(t *testing.T, quality, lgwin int, sizeHint uint
 	dict := corpus[:dictEnd]
 	input := corpus[inputStart:]
 
+	pd, err := PrepareDictionary(dict)
+	if err != nil {
+		t.Fatalf("PrepareDictionary: %v", err)
+	}
+
 	// Go encoder with compound dictionary.
 	var goBuf bytes.Buffer
 	w, err := NewWriterOptions(&goBuf, quality, WriterOptions{
-		LGWin:    lgwin,
-		SizeHint: sizeHint,
+		LGWin:        lgwin,
+		SizeHint:     sizeHint,
+		Dictionaries: []*PreparedDictionary{pd},
 	})
 	if err != nil {
 		t.Fatalf("NewWriter: %v", err)
-	}
-	if err := w.AttachDictionary(dict); err != nil {
-		t.Fatalf("AttachDictionary: %v", err)
 	}
 	if _, err := w.Write(input); err != nil {
 		t.Fatalf("Write: %v", err)
@@ -400,6 +403,15 @@ func TestCompoundDictDecoderRoundtrip(t *testing.T) {
 	chunk2 := corpus[len(corpus)*10/100 : len(corpus)*20/100]
 	input := corpus[len(corpus)*10/100:]
 
+	pd1, err := PrepareDictionary(chunk1)
+	if err != nil {
+		t.Fatalf("PrepareDictionary(chunk1): %v", err)
+	}
+	pd2, err := PrepareDictionary(chunk2)
+	if err != nil {
+		t.Fatalf("PrepareDictionary(chunk2): %v", err)
+	}
+
 	for quality := 2; quality <= 9; quality++ {
 		for _, lgwin := range []int{14, 18, 22} {
 			t.Run(fmt.Sprintf("q%d_lgwin%d", quality, lgwin), func(t *testing.T) {
@@ -407,15 +419,12 @@ func TestCompoundDictDecoderRoundtrip(t *testing.T) {
 
 				// Encode with Go encoder + compound dictionary.
 				var buf bytes.Buffer
-				w, err := NewWriterOptions(&buf, quality, WriterOptions{LGWin: lgwin})
+				w, err := NewWriterOptions(&buf, quality, WriterOptions{
+					LGWin:        lgwin,
+					Dictionaries: []*PreparedDictionary{pd1, pd2},
+				})
 				if err != nil {
 					t.Fatalf("NewWriter: %v", err)
-				}
-				if err := w.AttachDictionary(chunk1); err != nil {
-					t.Fatalf("AttachDictionary(chunk1): %v", err)
-				}
-				if err := w.AttachDictionary(chunk2); err != nil {
-					t.Fatalf("AttachDictionary(chunk2): %v", err)
 				}
 				if _, err := w.Write(input); err != nil {
 					t.Fatalf("Write: %v", err)
@@ -426,12 +435,11 @@ func TestCompoundDictDecoderRoundtrip(t *testing.T) {
 				compressed := buf.Bytes()
 
 				// Decode with Go decoder + same compound dictionary.
-				r := NewReader(bytes.NewReader(compressed))
-				if err := r.AttachDictionary(chunk1); err != nil {
-					t.Fatalf("Reader.AttachDictionary(chunk1): %v", err)
-				}
-				if err := r.AttachDictionary(chunk2); err != nil {
-					t.Fatalf("Reader.AttachDictionary(chunk2): %v", err)
+				r, err := NewReaderOptions(bytes.NewReader(compressed), ReaderOptions{
+					Dictionaries: [][]byte{chunk1, chunk2},
+				})
+				if err != nil {
+					t.Fatalf("NewReaderOptions: %v", err)
 				}
 				got, err := io.ReadAll(r)
 				if err != nil {
@@ -463,9 +471,11 @@ func TestCompoundDictDecoderCRef(t *testing.T) {
 				compressed := brotliCompressDict(t, input, dict, quality, lgwin, 0)
 
 				// Go decoder with compound dictionary.
-				r := NewReader(bytes.NewReader(compressed))
-				if err := r.AttachDictionary(dict); err != nil {
-					t.Fatalf("AttachDictionary: %v", err)
+				r, err := NewReaderOptions(bytes.NewReader(compressed), ReaderOptions{
+					Dictionaries: [][]byte{dict},
+				})
+				if err != nil {
+					t.Fatalf("NewReaderOptions: %v", err)
 				}
 				got, err := io.ReadAll(r)
 				if err != nil {
@@ -489,14 +499,19 @@ func TestCompoundDictDecoderSmallBuffer(t *testing.T) {
 	dict := corpus[:len(corpus)*20/100]
 	input := corpus[len(corpus)*10/100:]
 
+	pd, err := PrepareDictionary(dict)
+	if err != nil {
+		t.Fatalf("PrepareDictionary: %v", err)
+	}
+
 	// Encode at Q5 with compound dictionary.
 	var buf bytes.Buffer
-	w, err := NewWriterOptions(&buf, 5, WriterOptions{LGWin: 18})
+	w, err := NewWriterOptions(&buf, 5, WriterOptions{
+		LGWin:        18,
+		Dictionaries: []*PreparedDictionary{pd},
+	})
 	if err != nil {
 		t.Fatalf("NewWriter: %v", err)
-	}
-	if err := w.AttachDictionary(dict); err != nil {
-		t.Fatalf("AttachDictionary: %v", err)
 	}
 	if _, err := w.Write(input); err != nil {
 		t.Fatalf("Write: %v", err)
@@ -507,9 +522,11 @@ func TestCompoundDictDecoderSmallBuffer(t *testing.T) {
 	compressed := buf.Bytes()
 
 	// Decode one byte at a time.
-	r := NewReader(iotest.OneByteReader(bytes.NewReader(compressed)))
-	if err := r.AttachDictionary(dict); err != nil {
-		t.Fatalf("AttachDictionary: %v", err)
+	r, err := NewReaderOptions(iotest.OneByteReader(bytes.NewReader(compressed)), ReaderOptions{
+		Dictionaries: [][]byte{dict},
+	})
+	if err != nil {
+		t.Fatalf("NewReaderOptions: %v", err)
 	}
 	var got []byte
 	readBuf := make([]byte, 37) // small, odd-sized buffer

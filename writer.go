@@ -32,7 +32,8 @@ type Writer struct {
 	table       []uint32
 	commandBuf  []uint32
 	literalBuf  []byte
-	quality     int // 0 = one-pass, 1 = two-pass, 2+ = streaming
+	dicts       []*PreparedDictionary // from WriterOptions, preserved across Reset
+	quality     int                   // 0 = one-pass, 1 = two-pass, 2+ = streaming
 	lgwin       int
 	sizeHint    uint // from WriterOptions, preserved across Reset
 	wroteHeader bool
@@ -49,7 +50,8 @@ func NewWriter(dst io.Writer, level int) (*Writer, error) {
 
 // NewWriterOptions returns a new Writer compressing data to dst at the given
 // quality level with additional tuning options. LGWin range is 10–24; 0
-// selects the default (22).
+// selects the default (22). Compound dictionaries supplied via opts.Dictionaries
+// require level >= 2.
 func NewWriterOptions(dst io.Writer, level int, opts WriterOptions) (*Writer, error) {
 	if level < 0 || level > 11 {
 		return nil, errors.New("brrr: invalid compression level: " + strconv.Itoa(level))
@@ -64,8 +66,18 @@ func NewWriterOptions(dst io.Writer, level int, opts WriterOptions) (*Writer, er
 			" (must be " + strconv.Itoa(minLGWin) + "–" + strconv.Itoa(maxLGWin) + ")")
 	}
 
-	w := &Writer{dst: dst, quality: level, lgwin: lgwin, sizeHint: opts.SizeHint}
+	if len(opts.Dictionaries) > maxCompoundDicts {
+		return nil, errTooManyDicts
+	}
+	if len(opts.Dictionaries) > 0 && level < 2 {
+		return nil, errQualityTooLow
+	}
+
+	w := &Writer{dst: dst, quality: level, lgwin: lgwin, sizeHint: opts.SizeHint, dicts: opts.Dictionaries}
 	w.init()
+	for _, pd := range w.dicts {
+		_ = w.enc.attachDictionary(pd)
+	}
 	return w, nil
 }
 
@@ -161,19 +173,9 @@ func (w *Writer) Close() error {
 	return w.err
 }
 
-// AttachDictionary registers raw dictionary bytes as a compound dictionary
-// chunk. The encoder will reference these bytes as backward distances beyond
-// the ring buffer. May be called multiple times (up to 15 dictionaries).
-// Returns an error if quality < 2 or max dictionaries exceeded.
-func (w *Writer) AttachDictionary(data []byte) error {
-	if w.enc == nil {
-		return errQualityTooLow
-	}
-	return w.enc.attachDictionary(data)
-}
-
 // Reset discards internal state and switches to writing to dst.
 // This permits reusing a Writer rather than allocating a new one.
+// Compound dictionaries supplied via WriterOptions are preserved.
 func (w *Writer) Reset(dst io.Writer) {
 	w.dst = dst
 	w.err = nil
@@ -182,6 +184,9 @@ func (w *Writer) Reset(dst io.Writer) {
 
 	if w.enc != nil {
 		w.enc.reset(w.quality, w.lgwin, w.sizeHint)
+		for _, pd := range w.dicts {
+			_ = w.enc.attachDictionary(pd)
+		}
 		return
 	}
 
@@ -190,6 +195,9 @@ func (w *Writer) Reset(dst io.Writer) {
 		e := poolEncoderSplit.Get().(*encoderSplit)
 		e.reset(w.quality, w.lgwin, w.sizeHint)
 		w.enc = e
+		for _, pd := range w.dicts {
+			_ = w.enc.attachDictionary(pd)
+		}
 		return
 	}
 
@@ -198,6 +206,9 @@ func (w *Writer) Reset(dst io.Writer) {
 		e := poolEncoderArena.Get().(*encoderArena)
 		e.reset(w.quality, w.lgwin, w.sizeHint)
 		w.enc = e
+		for _, pd := range w.dicts {
+			_ = w.enc.attachDictionary(pd)
+		}
 		return
 	}
 

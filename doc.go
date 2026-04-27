@@ -46,8 +46,11 @@ One-shot decompression of a complete in-memory blob:
 
 Writer and Reader both expose Reset methods, so the same instance can
 be reused across payloads without reallocating per-call buffers. Both
-also accept a compound dictionary via AttachDictionary, useful when
-the payloads share content with a known corpus.
+also accept compound dictionaries — useful when the payloads share
+content with a known corpus. The encoder takes pre-built
+[PreparedDictionary] values via [WriterOptions.Dictionaries], so the
+hash table is built once and reused across many serial Writers. The
+decoder takes raw dictionary bytes via [ReaderOptions.Dictionaries].
 
 # Choosing a quality level
 

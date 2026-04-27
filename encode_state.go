@@ -324,6 +324,6 @@ func (s *encodeState) clearTrailingBits() {
 	s.lastBytesBits = 0
 }
 
-func (s *encodeState) attachDictionary(data []byte) error {
-	return s.compound.attach(data)
+func (s *encodeState) attachDictionary(pd *PreparedDictionary) error {
+	return s.compound.attach(pd)
 }

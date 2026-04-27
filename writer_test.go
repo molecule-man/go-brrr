@@ -319,18 +319,37 @@ func TestWriterErrorPropagation(t *testing.T) {
 	}
 }
 
-func TestWriterAttachDictionaryLowQuality(t *testing.T) {
+func TestWriterDictionaryLowQuality(t *testing.T) {
+	pd, err := PrepareDictionary([]byte("dictionary data"))
+	if err != nil {
+		t.Fatalf("PrepareDictionary: %v", err)
+	}
 	for _, quality := range []int{0, 1} {
 		t.Run(fmt.Sprintf("quality_%d", quality), func(t *testing.T) {
-			w, err := NewWriter(io.Discard, quality)
-			if err != nil {
-				t.Fatalf("NewWriter: %v", err)
-			}
-			err = w.AttachDictionary([]byte("dictionary data"))
-			if err == nil {
-				t.Fatal("AttachDictionary: expected error for low quality, got nil")
+			_, err := NewWriterOptions(io.Discard, quality, WriterOptions{
+				Dictionaries: []*PreparedDictionary{pd},
+			})
+			if !errors.Is(err, errQualityTooLow) {
+				t.Fatalf("expected errQualityTooLow for level %d, got %v", quality, err)
 			}
 		})
+	}
+}
+
+func TestWriterDictionaryTooMany(t *testing.T) {
+	dicts := make([]*PreparedDictionary, 16)
+	for i := range dicts {
+		pd, err := PrepareDictionary(fmt.Appendf(nil, "dict%d___", i))
+		if err != nil {
+			t.Fatalf("PrepareDictionary %d: %v", i, err)
+		}
+		dicts[i] = pd
+	}
+	_, err := NewWriterOptions(io.Discard, 4, WriterOptions{
+		Dictionaries: dicts,
+	})
+	if !errors.Is(err, errTooManyDicts) {
+		t.Fatalf("expected errTooManyDicts, got %v", err)
 	}
 }
 
@@ -438,15 +457,17 @@ func TestWriterErrorStickiness(t *testing.T) {
 func TestWriterResetQ6WithCompoundDict(t *testing.T) {
 	dict := bytes.Repeat([]byte("dictionary content for compound test "), 50)
 	input := bytes.Repeat([]byte("input referencing dictionary content here "), 100)
+	pd, err := PrepareDictionary(dict)
+	if err != nil {
+		t.Fatalf("PrepareDictionary: %v", err)
+	}
+	dictOpts := WriterOptions{Dictionaries: []*PreparedDictionary{pd}}
 
 	// Compress with a fresh writer + compound dictionary.
 	var freshBuf bytes.Buffer
-	fresh, err := NewWriter(&freshBuf, 6)
+	fresh, err := NewWriterOptions(&freshBuf, 6, dictOpts)
 	if err != nil {
-		t.Fatalf("NewWriter (fresh): %v", err)
-	}
-	if err := fresh.AttachDictionary(dict); err != nil {
-		t.Fatalf("AttachDictionary (fresh): %v", err)
+		t.Fatalf("NewWriterOptions (fresh): %v", err)
 	}
 	if _, err := fresh.Write(input); err != nil {
 		t.Fatalf("Write (fresh): %v", err)
@@ -456,11 +477,12 @@ func TestWriterResetQ6WithCompoundDict(t *testing.T) {
 	}
 
 	// Use a reused writer: first compress something to dirty internal state,
-	// then Reset, attach the same dictionary, and compress the same input.
+	// then Reset and compress the same input. The dictionary supplied via
+	// WriterOptions must be preserved across Reset.
 	var discardBuf, reusedBuf bytes.Buffer
-	reused, err := NewWriter(&discardBuf, 6)
+	reused, err := NewWriterOptions(&discardBuf, 6, dictOpts)
 	if err != nil {
-		t.Fatalf("NewWriter (reused): %v", err)
+		t.Fatalf("NewWriterOptions (reused): %v", err)
 	}
 	if _, err := reused.Write([]byte("throwaway data to dirty state")); err != nil {
 		t.Fatalf("Write (throwaway): %v", err)
@@ -470,9 +492,6 @@ func TestWriterResetQ6WithCompoundDict(t *testing.T) {
 	}
 
 	reused.Reset(&reusedBuf)
-	if err := reused.AttachDictionary(dict); err != nil {
-		t.Fatalf("AttachDictionary (reused): %v", err)
-	}
 	if _, err := reused.Write(input); err != nil {
 		t.Fatalf("Write (reused): %v", err)
 	}

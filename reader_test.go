@@ -397,49 +397,26 @@ func TestReaderDeferredSourceErrorAfterFinalBytes(t *testing.T) {
 	}
 }
 
-func TestReaderAttachDictionaryErrors(t *testing.T) {
-	t.Run("after decoding started", func(t *testing.T) {
-		input := []byte("hello")
-		compressed := compress(t, input, 1)
-		r := NewReader(bytes.NewReader(compressed))
-
-		// Drive one Read so started becomes true.
-		buf := make([]byte, 1)
-		if _, err := r.Read(buf); err != nil {
-			t.Fatalf("Read: %v", err)
-		}
-
-		err := r.AttachDictionary([]byte("dict data"))
-		if err == nil {
-			t.Fatal("expected error attaching dictionary after decoding started")
-		}
-	})
-
+func TestReaderDictionaryValidation(t *testing.T) {
 	t.Run("empty data", func(t *testing.T) {
-		r := NewReader(bytes.NewReader(nil))
-		if err := r.AttachDictionary([]byte{}); !errors.Is(err, errEmptyDict) {
+		_, err := NewReaderOptions(bytes.NewReader(nil), ReaderOptions{
+			Dictionaries: [][]byte{[]byte("ok"), {}},
+		})
+		if !errors.Is(err, errEmptyDict) {
 			t.Fatalf("expected errEmptyDict, got %v", err)
 		}
 	})
 
 	t.Run("too many dictionaries", func(t *testing.T) {
-		r := NewReader(bytes.NewReader(nil))
-		for i := range 15 {
-			if err := r.AttachDictionary(fmt.Appendf(nil, "dict%d___", i)); err != nil {
-				t.Fatalf("AttachDictionary %d: %v", i, err)
-			}
+		dicts := make([][]byte, 16)
+		for i := range dicts {
+			dicts[i] = fmt.Appendf(nil, "dict%d___", i)
 		}
-		if err := r.AttachDictionary([]byte("overflow")); !errors.Is(err, errTooManyDicts) {
+		_, err := NewReaderOptions(bytes.NewReader(nil), ReaderOptions{
+			Dictionaries: dicts,
+		})
+		if !errors.Is(err, errTooManyDicts) {
 			t.Fatalf("expected errTooManyDicts, got %v", err)
-		}
-	})
-
-	t.Run("after close", func(t *testing.T) {
-		r := NewReader(bytes.NewReader(nil))
-		_ = r.Close()
-		err := r.AttachDictionary([]byte("dict data"))
-		if err == nil {
-			t.Fatal("expected error attaching dictionary after Close")
 		}
 	})
 }

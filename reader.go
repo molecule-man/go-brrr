@@ -11,15 +11,15 @@ var errReaderClosed = errors.New("brrr: reader is closed")
 
 // Reader decompresses brotli-compressed data from an underlying io.Reader.
 type Reader struct {
-	src          io.Reader
-	err          error    // sticky terminal error (io.EOF or decode error)
-	srcErr       error    // deferred source error received alongside input bytes
-	out          []byte   // decoded output not yet served to caller
-	pendingDicts [][]byte // staged compound dictionary chunks, injected on first Read
-	state        decodeState
-	outPos       int
-	started      bool
-	buf          [32 << 10]byte
+	src     io.Reader
+	err     error    // sticky terminal error (io.EOF or decode error)
+	srcErr  error    // deferred source error received alongside input bytes
+	out     []byte   // decoded output not yet served to caller
+	dicts   [][]byte // from ReaderOptions, preserved across Reset; injected on first Read
+	state   decodeState
+	outPos  int
+	started bool
+	buf     [32 << 10]byte
 }
 
 // NewReader returns a new Reader reading brotli-compressed data from src.
@@ -27,25 +27,19 @@ func NewReader(src io.Reader) *Reader {
 	return &Reader{src: src}
 }
 
-// AttachDictionary registers raw dictionary bytes as a compound dictionary
-// chunk. The decoder will use these bytes when the compressed stream contains
-// backward references beyond the ring buffer. Must be called before the first
-// Read. May be called up to 15 times for multiple chunks.
-func (r *Reader) AttachDictionary(data []byte) error {
-	if r.started {
-		return errors.New("brrr: cannot attach dictionary after decoding started")
+// NewReaderOptions returns a new Reader reading brotli-compressed data from src
+// with additional options. Compound dictionaries supplied via opts.Dictionaries
+// must match those used by the encoder.
+func NewReaderOptions(src io.Reader, opts ReaderOptions) (*Reader, error) {
+	if len(opts.Dictionaries) > maxCompoundDicts {
+		return nil, errTooManyDicts
 	}
-	if r.err != nil {
-		return r.err
+	for _, d := range opts.Dictionaries {
+		if len(d) == 0 {
+			return nil, errEmptyDict
+		}
 	}
-	if len(data) == 0 {
-		return errEmptyDict
-	}
-	if len(r.pendingDicts) >= 15 {
-		return errTooManyDicts
-	}
-	r.pendingDicts = append(r.pendingDicts, data)
-	return nil
+	return &Reader{src: src, dicts: opts.Dictionaries}, nil
 }
 
 // Read decompresses data into p.
@@ -73,7 +67,7 @@ func (r *Reader) Read(p []byte) (int, error) {
 	if !r.started {
 		r.state.initForReuse()
 		r.started = true
-		for _, d := range r.pendingDicts {
+		for _, d := range r.dicts {
 			if err := r.state.attachCompoundDict(d); err != nil {
 				r.err = err
 				return 0, r.err
@@ -136,13 +130,12 @@ func (r *Reader) Read(p []byte) (int, error) {
 }
 
 // Reset discards internal state and switches to reading from src.
-// Compound dictionaries are cleared; call AttachDictionary again if needed.
+// Compound dictionaries supplied via ReaderOptions are preserved.
 func (r *Reader) Reset(src io.Reader) {
 	r.src = src
 	r.err = nil
 	r.srcErr = nil
 	r.out = r.out[:0]
-	r.pendingDicts = nil
 	r.outPos = 0
 	r.started = false
 	// state will be zeroed by initForReuse on first Read;

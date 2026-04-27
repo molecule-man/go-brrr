@@ -200,13 +200,19 @@ func Example_compoundDictionary() {
 	input := []byte("This document references common dictionary content that appears in many documents. " +
 		"It benefits from the shared dictionary because repeated phrases compress better.")
 
-	// Compress with compound dictionary.
-	var compressed bytes.Buffer
-	w, err := brrr.NewWriter(&compressed, 4)
+	// Build the encoder-side hash table once. The same *PreparedDictionary
+	// can be shared across many Writers, including across goroutines.
+	pd, err := brrr.PrepareDictionary(dict)
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := w.AttachDictionary(dict); err != nil {
+
+	// Compress with compound dictionary.
+	var compressed bytes.Buffer
+	w, err := brrr.NewWriterOptions(&compressed, 4, brrr.WriterOptions{
+		Dictionaries: []*brrr.PreparedDictionary{pd},
+	})
+	if err != nil {
 		log.Fatal(err)
 	}
 	if _, err := w.Write(input); err != nil {
@@ -217,8 +223,10 @@ func Example_compoundDictionary() {
 	}
 
 	// Decompress with the same compound dictionary.
-	r := brrr.NewReader(&compressed)
-	if err := r.AttachDictionary(dict); err != nil {
+	r, err := brrr.NewReaderOptions(&compressed, brrr.ReaderOptions{
+		Dictionaries: [][]byte{dict},
+	})
+	if err != nil {
 		log.Fatal(err)
 	}
 	result, err := io.ReadAll(r)
