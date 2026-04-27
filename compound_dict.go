@@ -398,13 +398,24 @@ func (cd *compoundDictionary) lookupAllMatches(
 }
 
 // lookupCompoundDictionaryMatch iterates all chunks in the compound dictionary,
-// calling findCompoundDictionaryMatch for each.
+// calling findCompoundDictionaryMatch for each. The single-chunk path is split
+// out so the compiler emits a tail call without a loop prologue, eliminating
+// per-call register save/restore around the call. Most callers register only
+// one PreparedDictionary, so this is the overwhelmingly common case.
 func (cd *compoundDictionary) lookupMatch(
 	data []byte, ringBufferMask uint,
 	distCache *[4]uint, cur, maxLength, maxRingBufferDistance uint,
 	sr *hasherSearchResult,
 ) {
 	baseOffset := maxRingBufferDistance + 1 + cd.totalSize - 1
+	if cd.numChunks == 1 {
+		cd.chunks[0].findCompoundMatch(
+			data, ringBufferMask,
+			distCache, cur, maxLength,
+			baseOffset, sr,
+			&cd.nextHead)
+		return
+	}
 	for i := range cd.numChunks {
 		cd.chunks[i].findCompoundMatch(
 			data, ringBufferMask,
