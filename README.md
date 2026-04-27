@@ -2,7 +2,30 @@
 
 # go-brrr
 
-Pure Go implementation of the Brotli compression algorithm.
+Pure Go implementation of the Brotli compression algorithm (RFC 7932). Encoder and decoder, no cgo, output byte-compatible with the C reference.
+
+## Highlights
+
+- **Pure Go.** No cgo, no C toolchain.
+- **Faster than other pure-Go brotli libraries** at every quality level we measure (see [Benchmarks](#benchmarks)).
+- **Compound dictionaries.**
+- **Encoder tuning.** `LGWin` (window size) and `SizeHint` (expected total input size) are exposed via `WriterOptions`. `SizeHint` lets the encoder pick context modeling and hasher parameters tuned for the actual payload size.
+
+## Compared to other Go brotli libraries
+
+| | go-brrr | [andybalholm](https://github.com/andybalholm/brotli) | [google/brotli/go/brotli](https://github.com/google/brotli/tree/master/go/brotli) | [cbrotli](https://github.com/google/brotli/tree/master/go/cbrotli) |
+|---|---|---|---|---|
+| Pure Go (no cgo) | ✓ | ✓ | ✓ | ✗ |
+| Encoder | ✓ | ✓ | ✗ | ✓ |
+| Decoder | ✓ | ✓ | ✓ | ✓ |
+| Compound dictionaries (encode) | ✓ | ✗ | n/a | ✓ |
+| Compound dictionaries (decode) | ✓ | ✗ | ✓ | ✓ |
+| `LGWin` tuning | ✓ | ✓ | n/a | ✓ |
+| `SizeHint` | ✓ | ✗ | n/a | ✗ |
+| Writer `Reset` | ✓ | ✓ | n/a | ✗ |
+| Reader `Reset` | ✓ | ✓ | ✗ | ✗ |
+
+If you're using `andybalholm/brotli`, go-brrr is a near drop-in upgrade with higher throughput on both compression and decompression, plus compound-dictionary and `SizeHint` support. If you're using `cbrotli`, go-brrr trades roughly 7% on one-shot decompression (3.99 ms vs 3.71 ms geomean - see [Benchmarks](#benchmarks)) for: no cgo, multi-chunk compound dictionaries, and poolable `Writer`/`Reader` (cbrotli has no `Reset`, so each stream allocates a fresh encoder/decoder state - noticeable on many-small-file workloads).
 
 ## Install
 
