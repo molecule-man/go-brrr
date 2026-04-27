@@ -192,6 +192,18 @@ import (
 var errEncode = errors.New("c reference brotli compression failed")
 var errDecode = errors.New("c reference brotli decompression failed")
 
+// goBytesLarge copies a C buffer into a fresh Go slice. C.GoBytes is unusable
+// for buffers >= 2 GiB because it truncates the length to C.int (32-bit) and
+// panics; the wrap test decodes ~3.5 GiB.
+func goBytesLarge(p unsafe.Pointer, n C.size_t) []byte {
+	if n == 0 {
+		return nil
+	}
+	out := make([]byte, n)
+	copy(out, unsafe.Slice((*byte)(p), n))
+	return out
+}
+
 // Encode compresses input using the C reference streaming encoder.
 func Encode(input []byte, quality, lgwin int, sizeHint uint) ([]byte, error) {
 	var inPtr *C.uint8_t
@@ -210,7 +222,7 @@ func Encode(input []byte, quality, lgwin int, sizeHint uint) ([]byte, error) {
 	}
 	defer C.free(unsafe.Pointer(out))
 
-	return C.GoBytes(unsafe.Pointer(out), C.int(outLen)), nil
+	return goBytesLarge(unsafe.Pointer(out), outLen), nil
 }
 
 // Decode decompresses brotli data using the C reference decoder.
@@ -229,7 +241,7 @@ func Decode(compressed []byte) ([]byte, error) {
 	}
 	defer C.free(unsafe.Pointer(out))
 
-	return C.GoBytes(unsafe.Pointer(out), C.int(outLen)), nil
+	return goBytesLarge(unsafe.Pointer(out), outLen), nil
 }
 
 // EncodeDict compresses input with a raw prefix compound dictionary using
@@ -256,5 +268,5 @@ func EncodeDict(input, dict []byte, quality, lgwin int, sizeHint uint) ([]byte, 
 	}
 	defer C.free(unsafe.Pointer(out))
 
-	return C.GoBytes(unsafe.Pointer(out), C.int(outLen)), nil
+	return goBytesLarge(unsafe.Pointer(out), outLen), nil
 }

@@ -8,8 +8,19 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"testing/iotest"
+)
+
+// testdataCache shares corpus file contents across the many parallel
+// TestMatchesCRef / TestCompoundDictMatchesCRef subtests, which would
+// otherwise each call os.ReadFile and hold an independent copy. With
+// BRRR_LONG_TESTS active, bb.binast alone (12 MiB) was being duplicated
+// ~120 times.
+var (
+	testdataCacheMu sync.Mutex
+	testdataCache   = make(map[string][]byte)
 )
 
 // crefTestCases returns the shared set of test cases for C-ref matching tests.
@@ -140,15 +151,13 @@ func testMatchesCRef(t *testing.T, quality, lgwin int, sizeHint uint) {
 					len(goDecompressed), len(tt.input))
 			}
 
-			// Verify with the Go streaming decoder.
+			// Verify with the Go streaming decoder, comparing chunk-by-chunk
+			// against the input so a 12 MiB-class case (e.g. bb.binast)
+			// doesn't allocate a third full-input-sized buffer alongside
+			// the C-decoder and Go one-shot results above.
 			r.Reset(bytes.NewReader(goOut))
-			goStreamed, err := io.ReadAll(r)
-			if err != nil {
-				t.Fatalf("Go streaming ReadAll: %v", err)
-			}
-			if !bytes.Equal(goStreamed, tt.input) {
-				t.Fatalf("Go streaming roundtrip mismatch: got %d bytes, want %d bytes",
-					len(goStreamed), len(tt.input))
+			if err := streamCompareReader(r, tt.input); err != nil {
+				t.Fatalf("Go streaming roundtrip mismatch: %v", err)
 			}
 
 			cOut := brotliCompress(t, tt.input, quality, lgwin, sizeHint)
@@ -219,93 +228,127 @@ func TestMatchesCRef(t *testing.T) {
 	}
 }
 
-// TestQ2EmptyMatchesCRef checks that an empty stream matches the C reference.
-func TestQ2EmptyMatchesCRef(t *testing.T) {
+// TestPositionWrap exercises the hasher reset in updateLastProcessedPos that
+// fires when the 32-bit wrapped stream position rolls over. Instead of
+// compressing 3+ GiB of real input, it pokes the encoder's position fields
+// to just before the wrap boundary, then writes a small input that crosses
+// it. If updateLastProcessedPos failed to reset hashers, stale wrapped-pos
+// entries would produce broken back-references and the Go-decoder roundtrip
+// would diverge from the input.
+func TestPositionWrap(t *testing.T) {
 	t.Parallel()
 
-	var goBuf bytes.Buffer
-	w, err := NewWriterOptions(&goBuf, 2, WriterOptions{LGWin: 18})
-	if err != nil {
-		t.Fatalf("NewWriter: %v", err)
-	}
-	if err := w.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-	goOut := goBuf.Bytes()
+	// 4 MiB straddling the wrap (seed at 3 GiB - 2 MiB, write 4 MiB → end
+	// at 3 GiB + 2 MiB). Pseudo-random data so the encoder actually populates
+	// hash tables and emits matches across the boundary.
+	data := pseudoRandomBytesCRef(4<<20, 7)
 
-	cOut := brotliCompress(t, nil, 2, 18, 0)
+	for quality := 2; quality <= 11; quality++ {
+		t.Run(fmt.Sprintf("q%d", quality), func(t *testing.T) {
+			t.Parallel()
 
-	if !bytes.Equal(goOut, cOut) {
-		t.Errorf("empty stream mismatch: Go=%x C=%x", goOut, cOut)
+			const lgwin = 18
+
+			var goBuf bytes.Buffer
+			w, err := NewWriterOptions(&goBuf, quality, WriterOptions{LGWin: lgwin})
+			if err != nil {
+				t.Fatalf("NewWriter: %v", err)
+			}
+
+			seedEncoderPosForTest(t, w, (3<<30)-(2<<20))
+
+			if _, err := w.Write(data); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+			if err := w.Close(); err != nil {
+				t.Fatalf("Close: %v", err)
+			}
+
+			r := NewReader(bytes.NewReader(goBuf.Bytes()))
+			decoded, err := io.ReadAll(r)
+			if err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if !bytes.Equal(decoded, data) {
+				t.Fatalf("roundtrip mismatch: decoded %d bytes, want %d",
+					len(decoded), len(data))
+			}
+		})
 	}
 }
 
-// TestQ2PositionWrapMatchesCRef verifies that the Go encoder produces
-// byte-identical output to the C reference when the 32-bit wrapped position
-// rolls over (~3 GiB of input). This exercises the hasher reset path in
-// updateLastProcessedPos.
-func TestQ2PositionWrapMatchesCRef(t *testing.T) {
-	t.Parallel()
-
-	if os.Getenv("BRRR_LONG_TESTS") == "" {
-		t.Skip("skipping 3+ GiB position-wrap test; set BRRR_LONG_TESTS=1 to enable")
+// seedEncoderPosForTest advances the streaming encoder's stream-position
+// fields to pos so the next Write straddles the 32-bit wrap boundary without
+// having to compress GiB of input first. The ring buffer is left empty (the
+// encoder only references data we subsequently write), and lgwin caps
+// distances so references stay within the in-metablock region.
+func seedEncoderPosForTest(t *testing.T, w *Writer, pos uint64) {
+	t.Helper()
+	var es *encodeState
+	switch enc := w.enc.(type) {
+	case *encoderArena:
+		es = &enc.encodeState
+	case *encoderSplit:
+		es = &enc.encodeState
+	default:
+		t.Fatalf("unexpected encoder type %T (Q0/Q1 do not use the wrap path)", w.enc)
 	}
-
-	chunk := readTestdata(t, filepath.Join("brotli-ref", "tests", "testdata", "bb.binast"))
-
-	// 3.25 GiB total — enough to cross the 3 GiB wrap boundary.
-	const target = 3<<30 + 256<<20
-	reps := target/len(chunk) + 1
-
-	// Build the full input.
-	input := make([]byte, 0, int64(reps)*int64(len(chunk)))
-	for range reps {
-		input = append(input, chunk...)
-	}
-
-	// Go encoder: stream chunks, collect compressed output.
-	var goBuf bytes.Buffer
-	w, err := NewWriterOptions(&goBuf, 2, WriterOptions{LGWin: 18})
-	if err != nil {
-		t.Fatalf("NewWriter: %v", err)
-	}
-	for range reps {
-		if _, err := w.Write(chunk); err != nil {
-			t.Fatalf("Write: %v", err)
-		}
-	}
-	if err := w.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-	goOut := goBuf.Bytes()
-
-	// C reference encoder.
-	cOut := brotliCompress(t, input, 2, 18, 0)
-
-	if !bytes.Equal(goOut, cOut) {
-		t.Errorf("output mismatch: Go produced %d bytes, C produced %d bytes",
-			len(goOut), len(cOut))
-		minLen := min(len(goOut), len(cOut))
-		for i := range minLen {
-			if goOut[i] != cOut[i] {
-				t.Errorf("first difference at byte %d: Go=0x%02x C=0x%02x",
-					i, goOut[i], cOut[i])
-				break
-			}
-		}
-	}
-
-	t.Logf("compared %d compressed bytes from %d bytes of input (%d reps)",
-		len(goOut), int64(reps)*int64(len(chunk)), reps)
+	es.inputPos = pos
+	es.lastProcessedPos = pos
+	es.lastFlushPos = pos
+	es.ringBufPos = uint32(pos & uint64(es.mask))
 }
 
 func readTestdata(t *testing.T, path string) []byte {
 	t.Helper()
+
+	testdataCacheMu.Lock()
+	if data, ok := testdataCache[path]; ok {
+		testdataCacheMu.Unlock()
+		return data
+	}
+	testdataCacheMu.Unlock()
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	testdataCacheMu.Lock()
+	testdataCache[path] = data
+	testdataCacheMu.Unlock()
 	return data
+}
+
+// streamCompareReader reads from r and verifies the bytes match expected
+// without materializing r's full output into a single slice.
+func streamCompareReader(r io.Reader, expected []byte) error {
+	buf := make([]byte, 64*1024)
+	pos := 0
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			if pos+n > len(expected) {
+				return fmt.Errorf("decoded too many bytes: got >=%d, want %d", pos+n, len(expected))
+			}
+			for i := range n {
+				if buf[i] != expected[pos+i] {
+					return fmt.Errorf("byte %d: got 0x%02x want 0x%02x", pos+i, buf[i], expected[pos+i])
+				}
+			}
+			pos += n
+		}
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return err
+		}
+	}
+	if pos != len(expected) {
+		return fmt.Errorf("decoded %d bytes, want %d", pos, len(expected))
+	}
+	return nil
 }
 
 // testCompoundDictMatchesCRef verifies that the Go encoder with a compound
