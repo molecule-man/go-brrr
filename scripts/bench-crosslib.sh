@@ -23,7 +23,7 @@ trap 'rm -f "$TMPRAW"' EXIT
 echo "Running benchmarks (bench=$BENCH, benchtime=$BENCHTIME, count=$COUNT)..." >&2
 
 go test -tags bench -run='^$' -bench="$BENCH" \
-    -benchtime="$BENCHTIME" -count=$COUNT -timeout=0 -cpu 1 . 2>&1 \
+    -benchtime="$BENCHTIME" -count=$COUNT -timeout=0 -cpu 1 ./benchmarks/ 2>&1 \
 | tee /dev/stderr > "$TMPRAW"
 
 echo "Running benchstat..." >&2

@@ -1,7 +1,7 @@
 // Cross-library compression benchmarks for comparing speed vs compression ratio.
 //go:build bench
 
-package brrr_test
+package benchmarks
 
 import (
 	"bytes"
@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/klauspost/compress/zstd"
@@ -17,9 +16,9 @@ import (
 )
 
 func BenchmarkCrossLib(b *testing.B) {
-	path := os.Getenv("BENCH_CORPUS_FILE")
+	path := resolveUserPath(os.Getenv("BENCH_CORPUS_FILE"))
 	if path == "" {
-		path = filepath.Join("brotli-ref", "tests", "testdata", "alice29.txt")
+		path = dataPath("brotli-ref", "tests", "testdata", "alice29.txt")
 	}
 
 	payload, err := os.ReadFile(path)
@@ -114,9 +113,9 @@ func BenchmarkCrossLib(b *testing.B) {
 }
 
 func BenchmarkCrossLibDecompress(b *testing.B) {
-	path := os.Getenv("BENCH_CORPUS_FILE")
+	path := resolveUserPath(os.Getenv("BENCH_CORPUS_FILE"))
 	if path == "" {
-		path = filepath.Join("brotli-ref", "tests", "testdata", "alice29.txt")
+		path = dataPath("brotli-ref", "tests", "testdata", "alice29.txt")
 	}
 
 	payload, err := os.ReadFile(path)

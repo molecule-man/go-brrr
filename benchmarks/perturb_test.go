@@ -1,5 +1,5 @@
 // Runtime heap padding for benchmark alignment perturbation.
-package brrr
+package benchmarks
 
 import (
 	"os"

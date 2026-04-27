@@ -1,4 +1,4 @@
-package brrr_test
+package benchmarks
 
 import (
 	"bytes"
@@ -39,33 +39,33 @@ var testCases = []struct {
 	paths []string
 }{
 	{"MixedPayloads", []string{
-		filepath.Join("brotli-ref", "tests", "testdata", "alice29.txt"),
-		filepath.Join("brotli-ref", "tests", "testdata", "asyoulik.txt"),
-		filepath.Join("brotli-ref", "tests", "testdata", "lcet10.txt"),
-		filepath.Join("brotli-ref", "tests", "testdata", "mapsdatazrh"),
+		dataPath("brotli-ref", "tests", "testdata", "alice29.txt"),
+		dataPath("brotli-ref", "tests", "testdata", "asyoulik.txt"),
+		dataPath("brotli-ref", "tests", "testdata", "lcet10.txt"),
+		dataPath("brotli-ref", "tests", "testdata", "mapsdatazrh"),
 	}},
 	// VariedPayloads rotates through a larger, heterogeneous set of
 	// payloads (mixed sizes and content types). Acts as a marker against
 	// benchmark-shaped optimizations: wins that only show up when the
 	// same input is fed back-to-back should not move this row.
 	{"VariedPayloads", []string{
-		filepath.Join("testdata", "github_events_2k.json"),
-		filepath.Join("testdata", "github_events_5k.json"),
-		filepath.Join("testdata", "github_events_8k.json"),
-		filepath.Join("testdata", "gh_172KB.html"),
-		filepath.Join("testdata", "reactcore_187KB.js"),
-		filepath.Join("brotli-ref", "tests", "testdata", "alice29.txt"),
-		filepath.Join("brotli-ref", "tests", "testdata", "asyoulik.txt"),
-		filepath.Join("brotli-ref", "tests", "testdata", "lcet10.txt"),
-		filepath.Join("brotli-ref", "tests", "testdata", "plrabn12.txt"),
+		dataPath("testdata", "github_events_2k.json"),
+		dataPath("testdata", "github_events_5k.json"),
+		dataPath("testdata", "github_events_8k.json"),
+		dataPath("testdata", "gh_172KB.html"),
+		dataPath("testdata", "reactcore_187KB.js"),
+		dataPath("brotli-ref", "tests", "testdata", "alice29.txt"),
+		dataPath("brotli-ref", "tests", "testdata", "asyoulik.txt"),
+		dataPath("brotli-ref", "tests", "testdata", "lcet10.txt"),
+		dataPath("brotli-ref", "tests", "testdata", "plrabn12.txt"),
 	}},
-	{"Small", []string{filepath.Join("brotli-ref", "tests", "testdata", "monkey")}},
-	{"Json_2k", []string{filepath.Join("testdata", "github_events_2k.json")}},
-	{"Json_5k", []string{filepath.Join("testdata", "github_events_5k.json")}},
-	{"Json_8k", []string{filepath.Join("testdata", "github_events_8k.json")}},
-	{"Medium", []string{filepath.Join("brotli-ref", "tests", "testdata", "alice29.txt")}},
-	{"Large", []string{filepath.Join("brotli-ref", "tests", "testdata", "plrabn12.txt")}},
-	{"LargeTechnical", []string{filepath.Join("brotli-ref", "tests", "testdata", "lcet10.txt")}},
+	{"Small", []string{dataPath("brotli-ref", "tests", "testdata", "monkey")}},
+	{"Json_2k", []string{dataPath("testdata", "github_events_2k.json")}},
+	{"Json_5k", []string{dataPath("testdata", "github_events_5k.json")}},
+	{"Json_8k", []string{dataPath("testdata", "github_events_8k.json")}},
+	{"Medium", []string{dataPath("brotli-ref", "tests", "testdata", "alice29.txt")}},
+	{"Large", []string{dataPath("brotli-ref", "tests", "testdata", "plrabn12.txt")}},
+	{"LargeTechnical", []string{dataPath("brotli-ref", "tests", "testdata", "lcet10.txt")}},
 }
 
 func benchLGWin() int {
@@ -469,7 +469,7 @@ func BenchmarkDecompress(b *testing.B) {
 					payloads[i] = data
 				}
 
-				compressed := brrr.BenchCompressPayloads(b, payloads, q, lgwin)
+				compressed := compressPayloads(b, payloads, q, lgwin)
 
 				b.Run("payload="+tc.name+suffix, func(b *testing.B) {
 					b.Run("impl=go-brrr", func(b *testing.B) {
@@ -505,7 +505,7 @@ func BenchmarkDecompressOneshot(b *testing.B) {
 					payloads[i] = data
 				}
 
-				compressed := brrr.BenchCompressPayloads(b, payloads, q, lgwin)
+				compressed := compressPayloads(b, payloads, q, lgwin)
 
 				b.Run("payload="+tc.name+suffix, func(b *testing.B) {
 					b.Run("impl=go-brrr", func(b *testing.B) {
@@ -578,7 +578,7 @@ func benchDecompressBytes(b *testing.B, decode oneshotBytesDecompressor, origina
 }
 
 func BenchmarkDecompressDict(b *testing.B) {
-	corpus, err := os.ReadFile(filepath.Join("brotli-ref", "tests", "testdata", "alice29.txt"))
+	corpus, err := os.ReadFile(dataPath("brotli-ref", "tests", "testdata", "alice29.txt"))
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -632,7 +632,7 @@ func BenchmarkDecompressDict(b *testing.B) {
 }
 
 func BenchmarkCompressCorpusFile(b *testing.B) {
-	path := os.Getenv("BENCH_CORPUS_FILE")
+	path := resolveUserPath(os.Getenv("BENCH_CORPUS_FILE"))
 	if path == "" {
 		b.Skip("BENCH_CORPUS_FILE not set")
 	}
@@ -671,7 +671,7 @@ func BenchmarkCompressCorpusFile(b *testing.B) {
 }
 
 func BenchmarkDecompressCorpusFile(b *testing.B) {
-	path := os.Getenv("BENCH_CORPUS_FILE")
+	path := resolveUserPath(os.Getenv("BENCH_CORPUS_FILE"))
 	if path == "" {
 		b.Skip("BENCH_CORPUS_FILE not set")
 	}
@@ -706,7 +706,7 @@ func BenchmarkDecompressCorpusFile(b *testing.B) {
 }
 
 func BenchmarkDecompressCorpus(b *testing.B) {
-	dir := os.Getenv("BENCH_CORPUS_DIR")
+	dir := resolveUserPath(os.Getenv("BENCH_CORPUS_DIR"))
 	if dir == "" {
 		b.Skip("BENCH_CORPUS_DIR not set")
 	}

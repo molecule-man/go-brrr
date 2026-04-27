@@ -2,7 +2,7 @@
 // (transpiled from the Java reference, decompression only).
 //go:build bench
 
-package brrr_test
+package benchmarks
 
 import googlebrotli "github.com/google/brotli/go/brotli"
 

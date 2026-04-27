@@ -33,7 +33,7 @@ AFTER_TXT="/tmp/after.txt"
 
 export BENCH_QUALITIES=all
 
-# BENCH_HEAP_PAD is consumed by bench_perturb_test.go to allocate and touch a
+# BENCH_HEAP_PAD is consumed by benchmarks/perturb_test.go to allocate and touch a
 # heap pad of the given size, shifting physical page placement of every later
 # allocation. Cycling pad sizes across processes samples multiple alignments
 # so benchstat averages over alignment noise instead of being captured by it.

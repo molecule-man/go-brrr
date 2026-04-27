@@ -1,7 +1,7 @@
 // Benchmark using Google's reference C brotli via CGo.
 //go:build cgo && bench
 
-package brrr_test
+package benchmarks
 
 import (
 	"io"

@@ -1,7 +1,7 @@
 // Benchmark using andybalholm/brotli pure-Go implementation.
 //go:build bench
 
-package brrr_test
+package benchmarks
 
 import (
 	"io"
@@ -15,7 +15,7 @@ type andybalholmDecompressor struct {
 
 func (d *andybalholmDecompressor) Read(p []byte) (int, error) { return d.r.Read(p) }
 func (d *andybalholmDecompressor) Close() error               { return nil }
-func (d *andybalholmDecompressor) Reset(src io.Reader)         { _ = d.r.Reset(src) }
+func (d *andybalholmDecompressor) Reset(src io.Reader)        { _ = d.r.Reset(src) }
 
 func init() {
 	extraCompressors = append(extraCompressors, struct {
