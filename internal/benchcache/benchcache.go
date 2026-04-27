@@ -63,31 +63,49 @@ func Store(key string, data []byte) {
 }
 
 // RepoRoot returns the absolute path of the go-brrr repository root,
-// determined by walking upward from this source file until a go.mod is found.
-// It panics if no go.mod is located, since that means the package was used
-// outside of the repository it was designed for.
+// determined by walking upward from the current working directory (and, as a
+// fallback, this source file) until a go.mod is found. It panics if no go.mod
+// is located, since that means the package was used outside of the repository
+// it was designed for.
+//
+// The CWD is tried first because pre-built test binaries (see
+// scripts/testbins.sh) embed a compile-time source path inside an ephemeral
+// git worktree that is deleted before the binary runs, so runtime.Caller
+// alone cannot locate go.mod.
 func RepoRoot() string {
 	repoRootOnce.Do(func() {
+		if cwd, err := os.Getwd(); err == nil {
+			if root, ok := findGoMod(cwd); ok {
+				repoRootDir = root
+				return
+			}
+		}
 		_, file, _, ok := runtime.Caller(0)
 		if !ok {
 			panic("benchcache: runtime.Caller failed")
 		}
-		dir := filepath.Dir(file)
-		for {
-			if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-				repoRootDir = dir
-				return
-			}
-			parent := filepath.Dir(dir)
-			if parent == dir {
-				panic("benchcache: could not locate go.mod walking up from " + file)
-			}
-			dir = parent
+		if root, ok := findGoMod(filepath.Dir(file)); ok {
+			repoRootDir = root
+			return
 		}
+		panic("benchcache: could not locate go.mod from cwd or " + file)
 	})
 	return repoRootDir
 }
 
 func cacheDir() string {
 	return filepath.Join(RepoRoot(), cacheDirName)
+}
+
+func findGoMod(dir string) (string, bool) {
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
 }

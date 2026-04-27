@@ -46,10 +46,10 @@ for i in $(seq 1 "$PROCESSES"); do
     pad="${PADS[$(( (i - 1) % ${#PADS[@]} ))]}"
 
     if (( i % 2 == 1 )); then
-        BENCH_HEAP_PAD="$pad" GOGC=off setarch -R "$BEFORE_BIN" -test.run '^$' -test.bench="$BENCH_PATTERN" -test.cpu=1 -test.benchtime "$BENCHTIME" -test.count "$RUNS_PER_PROCESS" >> "$BEFORE_TXT"
-        BENCH_HEAP_PAD="$pad" GOGC=off setarch -R "$AFTER_BIN"  -test.run '^$' -test.bench="$BENCH_PATTERN" -test.cpu=1 -test.benchtime "$BENCHTIME" -test.count "$RUNS_PER_PROCESS" >> "$AFTER_TXT"
+        BENCH_HEAP_PAD="$pad" GOGC=off setarch -R "$BEFORE_BIN" -test.run '^$' -test.bench="$BENCH_PATTERN" -test.cpu=1 -test.benchtime "$BENCHTIME" -test.count "$RUNS_PER_PROCESS" ./... >> "$BEFORE_TXT"
+        BENCH_HEAP_PAD="$pad" GOGC=off setarch -R "$AFTER_BIN"  -test.run '^$' -test.bench="$BENCH_PATTERN" -test.cpu=1 -test.benchtime "$BENCHTIME" -test.count "$RUNS_PER_PROCESS" ./... >> "$AFTER_TXT"
     else
-        BENCH_HEAP_PAD="$pad" GOGC=off setarch -R "$AFTER_BIN"  -test.run '^$' -test.bench="$BENCH_PATTERN" -test.cpu=1 -test.benchtime "$BENCHTIME" -test.count "$RUNS_PER_PROCESS" >> "$AFTER_TXT"
-        BENCH_HEAP_PAD="$pad" GOGC=off setarch -R "$BEFORE_BIN" -test.run '^$' -test.bench="$BENCH_PATTERN" -test.cpu=1 -test.benchtime "$BENCHTIME" -test.count "$RUNS_PER_PROCESS" >> "$BEFORE_TXT"
+        BENCH_HEAP_PAD="$pad" GOGC=off setarch -R "$AFTER_BIN"  -test.run '^$' -test.bench="$BENCH_PATTERN" -test.cpu=1 -test.benchtime "$BENCHTIME" -test.count "$RUNS_PER_PROCESS" ./... >> "$AFTER_TXT"
+        BENCH_HEAP_PAD="$pad" GOGC=off setarch -R "$BEFORE_BIN" -test.run '^$' -test.bench="$BENCH_PATTERN" -test.cpu=1 -test.benchtime "$BENCHTIME" -test.count "$RUNS_PER_PROCESS" ./... >> "$BEFORE_TXT"
     fi
 done
