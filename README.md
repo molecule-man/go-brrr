@@ -281,11 +281,11 @@ Compared against [klauspost/compress](https://github.com/klauspost/compress) zst
 
 ## Benchmarks
 
-Compared against pure Go brotli libraries. **go-brrr** is the base in all comparisons. The smaller the number the better.
+Compared against other Go brotli libraries. **go-brrr** is the base in all comparisons. The smaller the number the better.
 
-- **andybalholm** - [github.com/andybalholm/brotli](https://github.com/andybalholm/brotli), another pure Go brotli implementation.
-- **brotli-ref** - the [original C implementation](https://github.com/google/brotli) by Google, called via cgo. Included as a reference point; note that this is a naive cgo wrapper calling into the C library without any Go-side optimizations.
-- **cbrotli** - [github.com/google/brotli/go/cbrotli](https://github.com/google/brotli/go/cbrotli), Google's official cgo bindings. Including a cgo library in a pure Go comparison isn't apples-to-apples, but it provides a useful ceiling for how fast brotli can go with C under the hood.
+- **andybalholm** - [github.com/andybalholm/brotli](https://github.com/andybalholm/brotli), pure Go encoder and decoder.
+- **google-brotli** - [github.com/google/brotli/go/brotli](https://github.com/google/brotli/tree/master/go/brotli), Google's official pure Go decoder, transpiled from the Java reference. Decompression only, no encoder.
+- **cbrotli** - [github.com/google/brotli/go/cbrotli](https://github.com/google/brotli/tree/master/go/cbrotli), Google's official cgo bindings to the C reference implementation. Including a cgo library in a pure Go comparison isn't apples-to-apples, but it provides a useful ceiling for how fast brotli can go with C under the hood.
 
 ### Compression
 
@@ -324,7 +324,7 @@ Compared against pure Go brotli libraries. **go-brrr** is the base in all compar
 ### One-shot Decompression
 
 <!-- bench:decompresso -->
-| | go-brrr (sec/op) | andybalholm (sec/op) | brotli-ref (sec/op) | cbrotli (sec/op) |
+| | go-brrr (sec/op) | andybalholm (sec/op) | google-brotli (sec/op) | cbrotli (sec/op) |
 | --- | --- | --- | --- | --- |
 | DecompressOneshot/q=4/payload=VariedPayloads | 3.993m ± 0% | 7.353m ± 1%  +84.14% (p=0.000 n=12) | 7.748m ± 1%  +94.05% (p=0.000 n=12) | 3.661m ± 1%  -8.31% (p=0.000 n=12) |
 | DecompressOneshot/q=5/payload=VariedPayloads | 3.980m ± 0% | 7.044m ± 1%  +76.97% (p=0.000 n=12) | 7.658m ± 1%  +92.39% (p=0.000 n=12) | 3.586m ± 1%  -9.91% (p=0.000 n=12) |
