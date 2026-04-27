@@ -274,6 +274,16 @@ func (d *PreparedDictionary) findCompoundMatch(
 	if head == 0xFFFF {
 		return
 	}
+	// Hoist loop-invariant guards out of the inner loop. bestLen only grows
+	// (after a successful match), so once any of these is violated, no future
+	// iteration can record an improvement — the original code skipped them
+	// silently via the inner if, so an early return preserves semantics while
+	// avoiding pointless chain traversal. After bestLen grows we re-check
+	// before computing the next curProbe.
+	if bestLen >= maxLength || curMasked+bestLen > ringBufferMask || sourceSize <= bestLen {
+		return
+	}
+	maxValidOffset := sourceSize - bestLen
 	curProbe := loadU32LE(data, curMasked+bestLen-3)
 	for i := d.slotOffsets[slot] + uint32(head); ; i++ {
 		item := d.items[i]
@@ -281,13 +291,9 @@ func (d *PreparedDictionary) findCompoundMatch(
 		distance := distanceOffset - offset
 		// limit (= min(sourceSize-offset, maxLength)) is computed lazily after
 		// the curProbe prefilter — most iterations fail that check, so the
-		// per-iteration min is wasted work. The original bestLen<limit guard
-		// is split into offset+bestLen<sourceSize (also keeps the curProbe
-		// load in-bounds) and bestLen<maxLength.
+		// per-iteration min is wasted work.
 		if distance <= maxBackwardDistance &&
-			curMasked+bestLen <= ringBufferMask &&
-			offset+bestLen < sourceSize &&
-			bestLen < maxLength &&
+			offset < maxValidOffset &&
 			curProbe == loadU32LE(source, offset+bestLen-3) {
 			limit := min(sourceSize-offset, maxLength)
 			ml := uint(matchLen(source[offset:offset+limit], data[curMasked:curMasked+limit], int(limit)))
@@ -300,6 +306,10 @@ func (d *PreparedDictionary) findCompoundMatch(
 					out.lenCodeDelta = 0
 					out.distance = distance
 					out.score = bestScore
+					if bestLen >= maxLength || curMasked+bestLen > ringBufferMask || sourceSize <= bestLen {
+						return
+					}
+					maxValidOffset = sourceSize - bestLen
 					curProbe = loadU32LE(data, curMasked+bestLen-3)
 				}
 			}
