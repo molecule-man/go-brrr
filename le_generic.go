@@ -1,10 +1,29 @@
-// writeBits: portable path for big-endian or purego builds.
+// Portable fallback for big-endian platforms or purego builds: safe-Go load
+// primitives and bit writer hot loops that avoid unsafe pointer arithmetic.
 
 //go:build purego || !(amd64 || 386 || arm || arm64 || loong64 || mips64le || mipsle || ppc64le || riscv64 || wasm)
 
 package brrr
 
 import "encoding/binary"
+
+//go:nosplit
+func loadByte(b []byte, i uint) byte {
+	return b[i]
+}
+
+//go:nosplit
+func loadU32LE(b []byte, i uint) uint32 {
+	_ = b[i+3]
+	return uint32(b[i]) | uint32(b[i+1])<<8 | uint32(b[i+2])<<16 | uint32(b[i+3])<<24
+}
+
+//go:nosplit
+func loadU64LE(b []byte, i uint) uint64 {
+	_ = b[i+7]
+	return uint64(b[i]) | uint64(b[i+1])<<8 | uint64(b[i+2])<<16 | uint64(b[i+3])<<24 |
+		uint64(b[i+4])<<32 | uint64(b[i+5])<<40 | uint64(b[i+6])<<48 | uint64(b[i+7])<<56
+}
 
 // writeBits packs value into the bitstream and advances the bit position.
 // Up to 56 bits may be written at a time.
