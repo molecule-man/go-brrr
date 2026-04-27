@@ -34,10 +34,12 @@ var oneshotOnlyCompressors []struct {
 	factory oneshotCompressorFactory
 }
 
-var testCases = []struct {
+type testCase struct {
 	name  string
 	paths []string
-}{
+}
+
+var testCases = []testCase{
 	{"MixedPayloads", []string{
 		dataPath("brotli-ref", "tests", "testdata", "alice29.txt"),
 		dataPath("brotli-ref", "tests", "testdata", "asyoulik.txt"),
@@ -242,7 +244,21 @@ var extraDictCompressBenches []struct {
 }
 
 func BenchmarkCompressDict(b *testing.B) {
-	for _, tc := range testCases {
+	var benchDict []byte
+	if dictPath := resolveUserPath(os.Getenv("BENCH_DICT")); dictPath != "" {
+		var err error
+		benchDict, err = os.ReadFile(dictPath)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	cases := testCases
+	if corpusFile := resolveUserPath(os.Getenv("BENCH_CORPUS_FILE")); corpusFile != "" {
+		cases = []testCase{{name: filepath.Base(corpusFile), paths: []string{corpusFile}}}
+	}
+
+	for _, tc := range cases {
 		if len(tc.paths) != 1 {
 			continue
 		}
@@ -253,10 +269,16 @@ func BenchmarkCompressDict(b *testing.B) {
 				b.Fatal(err)
 			}
 
-			dictEnd := len(corpus) * 20 / 100
-			inputStart := len(corpus) * 10 / 100
-			dict := corpus[:dictEnd]
-			input := corpus[inputStart:]
+			var dict, input []byte
+			if benchDict != nil {
+				dict = benchDict
+				input = corpus
+			} else {
+				dictEnd := len(corpus) * 20 / 100
+				inputStart := len(corpus) * 10 / 100
+				dict = corpus[:dictEnd]
+				input = corpus[inputStart:]
+			}
 
 			pd, err := brrr.PrepareDictionary(dict)
 			if err != nil {
@@ -583,10 +605,19 @@ func BenchmarkDecompressDict(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	dictEnd := len(corpus) * 20 / 100
-	inputStart := len(corpus) * 10 / 100
-	dict := corpus[:dictEnd]
-	input := corpus[inputStart:]
+	var dict, input []byte
+	if dictPath := resolveUserPath(os.Getenv("BENCH_DICT")); dictPath != "" {
+		dict, err = os.ReadFile(dictPath)
+		if err != nil {
+			b.Fatal(err)
+		}
+		input = corpus
+	} else {
+		dictEnd := len(corpus) * 20 / 100
+		inputStart := len(corpus) * 10 / 100
+		dict = corpus[:dictEnd]
+		input = corpus[inputStart:]
+	}
 
 	pd, err := brrr.PrepareDictionary(dict)
 	if err != nil {
