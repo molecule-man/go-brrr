@@ -231,12 +231,6 @@ func BenchmarkCompressHasher(b *testing.B) {
 	}
 }
 
-// dictCompressor wraps a compressor that uses a compound dictionary.
-type dictCompressor interface {
-	io.WriteCloser
-	Reset(io.Writer)
-}
-
 //nolint:unused // oneshotDictCompressorFactory is used by extraDictCompressBenches.
 type oneshotDictCompressorFactory func(w io.Writer, quality int, dict []byte) (io.WriteCloser, error)
 
@@ -248,57 +242,46 @@ var extraDictCompressBenches []struct {
 }
 
 func BenchmarkCompressDict(b *testing.B) {
-	corpus, err := os.ReadFile(filepath.Join("brotli-ref", "tests", "testdata", "alice29.txt"))
-	if err != nil {
-		b.Fatal(err)
-	}
+	for _, tc := range testCases {
+		if len(tc.paths) != 1 {
+			continue
+		}
 
-	dictEnd := len(corpus) * 20 / 100
-	inputStart := len(corpus) * 10 / 100
-	dict := corpus[:dictEnd]
-	input := corpus[inputStart:]
+		b.Run("payload="+tc.name, func(b *testing.B) {
+			corpus, err := os.ReadFile(tc.paths[0])
+			if err != nil {
+				b.Fatal(err)
+			}
 
-	pd, err := brrr.PrepareDictionary(dict)
-	if err != nil {
-		b.Fatal(err)
-	}
+			dictEnd := len(corpus) * 20 / 100
+			inputStart := len(corpus) * 10 / 100
+			dict := corpus[:dictEnd]
+			input := corpus[inputStart:]
 
-	for _, q := range []int{5, 6, 7, 8, 9, 10, 11} {
-		b.Run(fmt.Sprintf("q=%d", q), func(b *testing.B) {
-			b.Run("impl=go-brrr", func(b *testing.B) {
-				w, err := brrr.NewWriterOptions(io.Discard, q, brrr.WriterOptions{
-					Dictionaries: []*brrr.PreparedDictionary{pd},
-				})
-				if err != nil {
-					b.Fatal(err)
-				}
-				benchCompressDict(b, w, input)
-			})
-			for _, ec := range extraDictCompressBenches {
-				b.Run("impl="+ec.name, func(b *testing.B) {
-					ec.fn(b, input, q, dict)
+			pd, err := brrr.PrepareDictionary(dict)
+			if err != nil {
+				b.Fatal(err)
+			}
+
+			for _, q := range []int{3, 4, 5, 6, 7, 8, 9, 10, 11} {
+				b.Run(fmt.Sprintf("q=%d", q), func(b *testing.B) {
+					b.Run("impl=go-brrr", func(b *testing.B) {
+						w, err := brrr.NewWriterOptions(io.Discard, q, brrr.WriterOptions{
+							Dictionaries: []*brrr.PreparedDictionary{pd},
+						})
+						if err != nil {
+							b.Fatal(err)
+						}
+						benchCompress(b, w, [][]byte{input})
+					})
+					for _, ec := range extraDictCompressBenches {
+						b.Run("impl="+ec.name, func(b *testing.B) {
+							ec.fn(b, input, q, dict)
+						})
+					}
 				})
 			}
 		})
-	}
-}
-
-func benchCompressDict(b *testing.B, w dictCompressor, input []byte) {
-	b.Helper()
-	b.SetBytes(int64(len(input)))
-	b.ReportAllocs()
-
-	var buf bytes.Buffer
-
-	for b.Loop() {
-		buf.Reset()
-		w.Reset(&buf)
-		if _, err := w.Write(input); err != nil {
-			b.Fatal(err)
-		}
-		if err := w.Close(); err != nil {
-			b.Fatal(err)
-		}
 	}
 }
 
