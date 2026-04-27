@@ -279,11 +279,17 @@ func (d *PreparedDictionary) findCompoundMatch(
 		item := d.items[i]
 		offset := uint(item & 0x7FFFFFFF)
 		distance := distanceOffset - offset
-		limit := min(sourceSize-offset, maxLength)
+		// limit (= min(sourceSize-offset, maxLength)) is computed lazily after
+		// the curProbe prefilter — most iterations fail that check, so the
+		// per-iteration min is wasted work. The original bestLen<limit guard
+		// is split into offset+bestLen<sourceSize (also keeps the curProbe
+		// load in-bounds) and bestLen<maxLength.
 		if distance <= maxBackwardDistance &&
 			curMasked+bestLen <= ringBufferMask &&
-			bestLen < limit &&
+			offset+bestLen < sourceSize &&
+			bestLen < maxLength &&
 			curProbe == loadU32LE(source, offset+bestLen-3) {
+			limit := min(sourceSize-offset, maxLength)
 			ml := uint(matchLen(source[offset:offset+limit], data[curMasked:curMasked+limit], int(limit)))
 			if ml >= 4 {
 				score := backwardReferenceScore(ml, distance)
