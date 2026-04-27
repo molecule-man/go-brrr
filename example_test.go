@@ -102,11 +102,12 @@ func Example_reuse() {
 }
 
 func Example_pool() {
-	// For per-request HTTP compression, keep *brrr.Writer instances in a
-	// sync.Pool. On each request: Get, Reset to the response body, Write,
-	// Close, Put back. This avoids allocating encoder state (hash tables,
-	// ring buffer) per request.
-	pool := sync.Pool{
+	// For repeated compression and decompression (e.g. per-request in an
+	// HTTP server, per-message in a stream processor), keep *brrr.Writer
+	// and *brrr.Reader instances in sync.Pools. Get, Reset, use, Put back.
+	// This avoids allocating encoder hash tables and decoder ring buffers
+	// each time.
+	writerPool := sync.Pool{
 		New: func() any {
 			w, err := brrr.NewWriter(io.Discard, 5)
 			if err != nil {
@@ -117,16 +118,27 @@ func Example_pool() {
 			return w
 		},
 	}
+	readerPool := sync.Pool{
+		New: func() any { return brrr.NewReader(nil) },
+	}
 
 	compress := func(dst io.Writer, payload []byte) error {
-		w := pool.Get().(*brrr.Writer)
-		defer pool.Put(w)
+		w := writerPool.Get().(*brrr.Writer)
+		defer writerPool.Put(w)
 
 		w.Reset(dst)
 		if _, err := w.Write(payload); err != nil {
 			return err
 		}
 		return w.Close()
+	}
+
+	decompress := func(src io.Reader) ([]byte, error) {
+		r := readerPool.Get().(*brrr.Reader)
+		defer readerPool.Put(r)
+
+		r.Reset(src)
+		return io.ReadAll(r)
 	}
 
 	payloads := []string{
@@ -138,7 +150,7 @@ func Example_pool() {
 		if err := compress(&buf, []byte(p)); err != nil {
 			log.Fatal(err)
 		}
-		out, err := brrr.Decompress(buf.Bytes())
+		out, err := decompress(&buf)
 		if err != nil {
 			log.Fatal(err)
 		}

@@ -121,18 +121,19 @@ func Example_reuse() {
 }
 ```
 
-### Pooling Writers for per-request HTTP compression
+### Pooling Writers and Readers
 
-The canonical on-the-fly use case is compressing response bodies in a webserver. Creating a fresh `*brrr.Writer` for every request allocates significant encoder state (hash tables, ring buffer), so keep a `sync.Pool` of Writers and reset each one into the response body before writing.
+When you compress or decompress repeatedly - per-request in a webserver, per-message in a stream processor, per-record in a batch job - allocating a fresh `*brrr.Writer` or `*brrr.Reader` each time wastes work on encoder hash tables, decoder ring buffers, and scratch buffers. Keep them in `sync.Pool`s and `Reset` each instance into the next stream.
 
 [embedmd]:# (example_test.go go /func Example_pool/ /^}/)
 ```go
 func Example_pool() {
-	// For per-request HTTP compression, keep *brrr.Writer instances in a
-	// sync.Pool. On each request: Get, Reset to the response body, Write,
-	// Close, Put back. This avoids allocating encoder state (hash tables,
-	// ring buffer) per request.
-	pool := sync.Pool{
+	// For repeated compression and decompression (e.g. per-request in an
+	// HTTP server, per-message in a stream processor), keep *brrr.Writer
+	// and *brrr.Reader instances in sync.Pools. Get, Reset, use, Put back.
+	// This avoids allocating encoder hash tables and decoder ring buffers
+	// each time.
+	writerPool := sync.Pool{
 		New: func() any {
 			w, err := brrr.NewWriter(io.Discard, 5)
 			if err != nil {
@@ -143,16 +144,27 @@ func Example_pool() {
 			return w
 		},
 	}
+	readerPool := sync.Pool{
+		New: func() any { return brrr.NewReader(nil) },
+	}
 
 	compress := func(dst io.Writer, payload []byte) error {
-		w := pool.Get().(*brrr.Writer)
-		defer pool.Put(w)
+		w := writerPool.Get().(*brrr.Writer)
+		defer writerPool.Put(w)
 
 		w.Reset(dst)
 		if _, err := w.Write(payload); err != nil {
 			return err
 		}
 		return w.Close()
+	}
+
+	decompress := func(src io.Reader) ([]byte, error) {
+		r := readerPool.Get().(*brrr.Reader)
+		defer readerPool.Put(r)
+
+		r.Reset(src)
+		return io.ReadAll(r)
 	}
 
 	payloads := []string{
@@ -164,7 +176,7 @@ func Example_pool() {
 		if err := compress(&buf, []byte(p)); err != nil {
 			log.Fatal(err)
 		}
-		out, err := brrr.Decompress(buf.Bytes())
+		out, err := decompress(&buf)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -222,9 +234,9 @@ func Example_compoundDictionary() {
 
 The best use case for brotli is **static asset compression** - CSS, JS, HTML, fonts, WASM - where you compress once at build time and serve the result millions of times. Use **quality 11** for this: speed doesn't matter because you pay the cost once, and brotli q11 delivers ratios that neither gzip nor zstd can match. Every browser shipped since 2016 supports `Content-Encoding: br`.
 
-For on-the-fly compression, brotli q5–6 is a strong choice if you're already using zstd at its highest level: q5 is often **faster** with a **better ratio**, and q6 is only slightly slower with an even better ratio. At lower compression levels, zstd is significantly faster — if throughput is your priority and you don't need the best ratio, zstd is the better tool for the job.
+For on-the-fly compression, brotli q5–6 is a strong choice if you're already using zstd at its highest level: q5 is often **faster** with a **better ratio**, and q6 is only slightly slower with an even better ratio. At lower compression levels, zstd is significantly faster - if throughput is your priority and you don't need the best ratio, zstd is the better tool for the job.
 
-If you compress per request in a webserver, keep `*brrr.Writer` instances in a `sync.Pool` and `Reset` each one into the response body rather than allocating a new Writer per request. See the [pooling example](#pooling-writers-for-per-request-http-compression) below.
+If you compress or decompress repeatedly (e.g. per request in a webserver), keep `*brrr.Writer` and `*brrr.Reader` instances in `sync.Pool`s and `Reset` each one into the next stream rather than allocating new instances each time. See the [pooling example](#pooling-writers-and-readers) below.
 
 ## A note on the code
 
@@ -235,7 +247,7 @@ Don't expect idiomatic Go. The library is tuned for throughput first, and the so
 - hand-specialized code for hot shapes,
 - APIs structured around escape analysis and inlining rather than aesthetics.
 
-If something looks oddly written, it's almost always deliberate — measured against benchmarks and kept because the "cleaner" version was slower.
+If something looks oddly written, it's almost always deliberate - measured against benchmarks and kept because the "cleaner" version was slower.
 
 ## Acknowledgments
 
@@ -316,7 +328,7 @@ Compared against pure Go brotli libraries. **go-brrr** is the base in all compar
 <!-- /bench:decompresso -->
 
 
-The `VariedPayloads` benchmark rotates through a heterogeneous mix of files, guarding against benchmark-shaped optimizations — wins that only show up when the same input is fed back-to-back should not move these rows. Payloads span small JSON API responses, mid-size HTML and JS bundles, and larger English prose, drawn from the [Brotli reference test corpus](https://github.com/google/brotli/tree/master/tests/testdata) and the local [testdata/](testdata/) directory.
+The `VariedPayloads` benchmark rotates through a heterogeneous mix of files, guarding against benchmark-shaped optimizations - wins that only show up when the same input is fed back-to-back should not move these rows. Payloads span small JSON API responses, mid-size HTML and JS bundles, and larger English prose, drawn from the [Brotli reference test corpus](https://github.com/google/brotli/tree/master/tests/testdata) and the local [testdata/](testdata/) directory.
 
 | File                  | Size   | Source     |
 |-----------------------|-------:|------------|
