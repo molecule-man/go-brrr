@@ -2,6 +2,7 @@
 
 # go-brrr
 
+[![CI](https://github.com/molecule-man/go-brrr/actions/workflows/ci.yml/badge.svg)](https://github.com/molecule-man/go-brrr/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/molecule-man/go-brrr.svg)](https://pkg.go.dev/github.com/molecule-man/go-brrr)
 [![Go Report Card](https://goreportcard.com/badge/github.com/molecule-man/go-brrr)](https://goreportcard.com/report/github.com/molecule-man/go-brrr)
 [![Version](https://img.shields.io/github/v/tag/molecule-man/go-brrr?sort=semver)](https://github.com/molecule-man/go-brrr/tags)
