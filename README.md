@@ -295,7 +295,7 @@ goarch: amd64
 cpu: AMD Ryzen 5 7535HS with Radeon Graphics
 ```
 
-Compared against [klauspost/compress](https://github.com/klauspost/compress) zstd (pure Go) and stdlib gzip. Single CPU, no parallelism.
+Compared against [klauspost/compress](https://github.com/klauspost/compress) zstd (pure Go) and stdlib gzip. Single CPU, no parallelism. Compression speed plots measure reused streaming encoders: the timed loop resets a warmed writer and discards compressed output, while ratio is measured from a warmup buffer.
 
 | Compression | Decompression |
 |---|---|

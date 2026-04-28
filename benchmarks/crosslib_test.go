@@ -1,4 +1,5 @@
 // Cross-library compression benchmarks for comparing speed vs compression ratio.
+// Compression timings reset reused streaming encoders and discard timed output.
 //go:build bench
 
 package benchmarks

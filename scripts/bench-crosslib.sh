@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Run cross-library benchmarks and produce CSV for plotting.
+# Compression results measure reused streaming encoders with timed output discarded.
 #
 # Usage: scripts/bench-crosslib.sh [bench-regex] [output.csv]
 #
