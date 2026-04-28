@@ -13,6 +13,22 @@ import (
 	"github.com/molecule-man/go-brrr"
 )
 
+func Example_compress() {
+	input := []byte("Hello, brotli!")
+
+	var compressed bytes.Buffer
+	w, err := brrr.NewWriter(&compressed, 6)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if _, err := w.Write(input); err != nil {
+		log.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		log.Fatal(err)
+	}
+}
+
 func Example_roundtrip() {
 	// Compress
 	original := []byte("Hello, brotli! This is a round-trip compression example.")

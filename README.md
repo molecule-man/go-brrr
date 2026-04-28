@@ -2,14 +2,37 @@
 
 # go-brrr
 
-Pure Go implementation of the Brotli compression algorithm (RFC 7932). Encoder and decoder, no cgo, output byte-compatible with the C reference.
+[![Go Reference](https://pkg.go.dev/badge/github.com/molecule-man/go-brrr.svg)](https://pkg.go.dev/github.com/molecule-man/go-brrr)
+[![Go Report Card](https://goreportcard.com/badge/github.com/molecule-man/go-brrr)](https://goreportcard.com/report/github.com/molecule-man/go-brrr)
+[![Version](https://img.shields.io/github/v/tag/molecule-man/go-brrr?sort=semver)](https://github.com/molecule-man/go-brrr/tags)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+Brotli compression library for Go (RFC 7932), with encoder and decoder support.
 
 ## Highlights
 
-- **Pure Go.** No cgo, no C toolchain.
+- **No C toolchain.** Builds with standard Go tooling.
 - **Faster than other pure-Go brotli libraries** at every quality level we measure (see [Benchmarks](#benchmarks)).
 - **Compound dictionaries.**
 - **Encoder tuning.** `LGWin` (window size) and `SizeHint` (expected total input size) are exposed via `WriterOptions`. `SizeHint` lets the encoder pick context modeling and hasher parameters tuned for the actual payload size.
+
+## Performance summary
+
+Against [andybalholm/brotli](https://github.com/andybalholm/brotli) on the mixed benchmark corpus:
+
+- Compression: **58.8% faster geomean**
+- Streaming decompression: **70.3% faster geomean**
+- One-shot decompression: **74.9% faster geomean**
+
+Encoder + decoder.
+
+## Status
+
+v0.1.0. The encoder and decoder are covered by compatibility tests and fuzzing, but the public API may still evolve before v1.0.0.
+
+## Compatibility
+
+go-brrr implements Brotli RFC 7932 and is tested against the Brotli reference corpus. Encoded output is byte-compatible with the C reference implementation.
 
 ## Compared to other Go brotli libraries
 
@@ -41,200 +64,15 @@ The import path is `github.com/molecule-man/go-brrr`; the package name is `brrr`
 
 ## Examples
 
-### Round-trip compression and decompression
+### Compression
 
-[embedmd]:# (example_test.go go /func Example_roundtrip/ /^}/)
+[embedmd]:# (example_test.go go /func Example_compress/ /^}/)
 ```go
-func Example_roundtrip() {
-	// Compress
-	original := []byte("Hello, brotli! This is a round-trip compression example.")
+func Example_compress() {
+	input := []byte("Hello, brotli!")
+
 	var compressed bytes.Buffer
 	w, err := brrr.NewWriter(&compressed, 6)
-	if err != nil {
-		log.Fatal(err)
-	}
-	if _, err := w.Write(original); err != nil {
-		log.Fatal(err)
-	}
-	if err := w.Close(); err != nil {
-		log.Fatal(err)
-	}
-
-	// Decompress
-	r := brrr.NewReader(&compressed)
-	decompressed, err := io.ReadAll(r)
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println(string(decompressed))
-	// Output: Hello, brotli! This is a round-trip compression example.
-}
-```
-
-### One-shot decompression
-
-[embedmd]:# (example_test.go go /func Example_decompress/ /^}/)
-```go
-func Example_decompress() {
-	// Compress some data first.
-	original := []byte("Decompress restores the original bytes from a brotli-compressed slice.")
-	var compressed bytes.Buffer
-	w, err := brrr.NewWriter(&compressed, 4)
-	if err != nil {
-		log.Fatal(err)
-	}
-	if _, err = w.Write(original); err != nil {
-		log.Fatal(err)
-	}
-	if err = w.Close(); err != nil {
-		log.Fatal(err)
-	}
-
-	// One-shot decompression from a byte slice.
-	result, err := brrr.Decompress(compressed.Bytes())
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println(string(result))
-	// Output: Decompress restores the original bytes from a brotli-compressed slice.
-}
-```
-
-### Reusing Writer and Reader
-
-[embedmd]:# (example_test.go go /func Example_reuse/ /^}/)
-```go
-func Example_reuse() {
-	// Reset lets you reuse a Writer and Reader across multiple payloads,
-	// avoiding repeated allocations.
-	payloads := []string{
-		"First payload: the quick brown fox jumps over the lazy dog.",
-		"Second payload: pack my box with five dozen liquor jugs.",
-	}
-
-	var compressed bytes.Buffer
-	w, err := brrr.NewWriter(&compressed, 4)
-	if err != nil {
-		log.Fatal(err)
-	}
-	r := brrr.NewReader(nil)
-
-	for _, payload := range payloads {
-		// Compress
-		compressed.Reset()
-		w.Reset(&compressed)
-		if _, err := w.Write([]byte(payload)); err != nil {
-			log.Fatal(err)
-		}
-		if err := w.Close(); err != nil {
-			log.Fatal(err)
-		}
-
-		// Decompress
-		r.Reset(&compressed)
-		result, err := io.ReadAll(r)
-		if err != nil {
-			log.Fatal(err)
-		}
-		fmt.Println(string(result))
-	}
-	// Output:
-	// First payload: the quick brown fox jumps over the lazy dog.
-	// Second payload: pack my box with five dozen liquor jugs.
-}
-```
-
-### Pooling Writers and Readers
-
-When you compress or decompress repeatedly - per-request in a webserver, per-message in a stream processor, per-record in a batch job - allocating a fresh `*brrr.Writer` or `*brrr.Reader` each time wastes work on encoder hash tables, decoder ring buffers, and scratch buffers. Keep them in `sync.Pool`s and `Reset` each instance into the next stream.
-
-[embedmd]:# (example_test.go go /func Example_pool/ /^}/)
-```go
-func Example_pool() {
-	// For repeated compression and decompression (e.g. per-request in an
-	// HTTP server, per-message in a stream processor), keep *brrr.Writer
-	// and *brrr.Reader instances in sync.Pools. Get, Reset, use, Put back.
-	// This avoids allocating encoder hash tables and decoder ring buffers
-	// each time.
-	writerPool := sync.Pool{
-		New: func() any {
-			w, err := brrr.NewWriter(io.Discard, 5)
-			if err != nil {
-				// NewWriter only fails for an invalid level, which is
-				// static here.
-				panic(err)
-			}
-			return w
-		},
-	}
-	readerPool := sync.Pool{
-		New: func() any { return brrr.NewReader(nil) },
-	}
-
-	compress := func(dst io.Writer, payload []byte) error {
-		w := writerPool.Get().(*brrr.Writer)
-		defer writerPool.Put(w)
-
-		w.Reset(dst)
-		if _, err := w.Write(payload); err != nil {
-			return err
-		}
-		return w.Close()
-	}
-
-	decompress := func(src io.Reader) ([]byte, error) {
-		r := readerPool.Get().(*brrr.Reader)
-		defer readerPool.Put(r)
-
-		r.Reset(src)
-		return io.ReadAll(r)
-	}
-
-	payloads := []string{
-		"First response body.",
-		"Second response body.",
-	}
-	for _, p := range payloads {
-		var buf bytes.Buffer
-		if err := compress(&buf, []byte(p)); err != nil {
-			log.Fatal(err)
-		}
-		out, err := decompress(&buf)
-		if err != nil {
-			log.Fatal(err)
-		}
-		fmt.Println(string(out))
-	}
-	// Output:
-	// First response body.
-	// Second response body.
-}
-```
-
-### Compound dictionary
-
-[embedmd]:# (example_test.go go /func Example_compoundDictionary/ /^}/)
-```go
-func Example_compoundDictionary() {
-	// A compound dictionary supplies extra reference data that both the
-	// encoder and decoder can use for backward references. This is useful
-	// when compressing data that shares content with a known corpus.
-	dict := []byte(strings.Repeat("common dictionary content that appears in many documents. ", 50))
-	input := []byte("This document references common dictionary content that appears in many documents. " +
-		"It benefits from the shared dictionary because repeated phrases compress better.")
-
-	// Build the encoder-side hash table once. The same *PreparedDictionary
-	// can be shared across many Writers, including across goroutines.
-	pd, err := brrr.PrepareDictionary(dict)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Compress with compound dictionary.
-	var compressed bytes.Buffer
-	w, err := brrr.NewWriterOptions(&compressed, 4, brrr.WriterOptions{
-		Dictionaries: []*brrr.PreparedDictionary{pd},
-	})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -244,22 +82,10 @@ func Example_compoundDictionary() {
 	if err := w.Close(); err != nil {
 		log.Fatal(err)
 	}
-
-	// Decompress with the same compound dictionary.
-	r, err := brrr.NewReaderOptions(&compressed, brrr.ReaderOptions{
-		Dictionaries: [][]byte{dict},
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
-	result, err := io.ReadAll(r)
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println(string(result))
-	// Output: This document references common dictionary content that appears in many documents. It benefits from the shared dictionary because repeated phrases compress better.
 }
 ```
+
+More examples are available in [example_test.go](example_test.go) and the [Go package docs](https://pkg.go.dev/github.com/molecule-man/go-brrr#pkg-examples): round-trip compression and decompression, one-shot decompression, reusing writers and readers, pooling, and compound dictionaries.
 
 ## When to use go-brrr
 
@@ -267,18 +93,11 @@ The best use case for brotli is **static asset compression** - CSS, JS, HTML, fo
 
 For on-the-fly compression, brotli q5–6 is a strong choice if you're already using zstd at its highest level: q5 is often **faster** with a **better ratio**, and q6 is only slightly slower with an even better ratio. At lower compression levels, zstd is significantly faster - if throughput is your priority and you don't need the best ratio, zstd is the better tool for the job.
 
-If you compress or decompress repeatedly (e.g. per request in a webserver), keep `*brrr.Writer` and `*brrr.Reader` instances in `sync.Pool`s and `Reset` each one into the next stream rather than allocating new instances each time. See the [pooling example](#pooling-writers-and-readers) below.
+If you compress or decompress repeatedly (e.g. per request in a webserver), keep `*brrr.Writer` and `*brrr.Reader` instances in `sync.Pool`s and `Reset` each one into the next stream rather than allocating new instances each time. See the [compiled examples](example_test.go).
 
-## A note on the code
+## Implementation notes
 
-Don't expect idiomatic Go. The library is tuned for throughput first, and the source reflects that:
-
-- giant functions that would normally be split up,
-- duplicated loops where a shared helper would force a slow path,
-- hand-specialized code for hot shapes,
-- APIs structured around escape analysis and inlining rather than aesthetics.
-
-If something looks oddly written, it's almost always deliberate - measured against benchmarks and kept because the "cleaner" version was slower.
+go-brrr is optimized for throughput. Some hot paths intentionally use larger functions, duplicated loops, and specialized code where benchmarks showed measurable wins. These choices stay local to performance-sensitive encoder and decoder internals; public APIs stay small and conventional.
 
 ## Acknowledgments
 
