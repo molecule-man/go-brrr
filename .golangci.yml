@@ -133,7 +133,6 @@ output:
       path: stdout
       print-linter-name: true
       colors: true
-  sort-results: true
   sort-order:
     - linter
     - severity
