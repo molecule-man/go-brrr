@@ -13,8 +13,8 @@ git worktree add --quiet --detach "$WORKTREE_DIR" "$BASE_BRANCH"
 ln -s "$PWD/lib" "$WORKTREE_DIR/lib"
 rm -rf "$WORKTREE_DIR/brotli-ref"
 ln -s "$PWD/brotli-ref" "$WORKTREE_DIR/brotli-ref"
-(cd "$WORKTREE_DIR" && go test -c -o "$BEFORE_BIN" ./benchmarks/)
+(cd "$WORKTREE_DIR/benchmarks" && go test -c -o "$BEFORE_BIN" .)
 trap_worktree
 
 echo "Building test binary for the current workdir ..."
-go test -c -o "$AFTER_BIN" ./benchmarks/
+(cd benchmarks && go test -c -o "$AFTER_BIN" .)

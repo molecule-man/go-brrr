@@ -4,14 +4,18 @@
 package benchcache
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 )
+
+const repoModulePath = "github.com/molecule-man/go-brrr"
 
 const cacheDirName = ".cache"
 
@@ -97,9 +101,13 @@ func cacheDir() string {
 	return filepath.Join(RepoRoot(), cacheDirName)
 }
 
+// findGoMod walks upward from dir until it finds a go.mod whose module path
+// is the go-brrr repo root. Sub-modules (e.g. benchmarks/, brotli-ref/go/*)
+// declare their own module paths and are skipped, so the returned directory
+// is always the repo root regardless of which sub-module the caller lives in.
 func findGoMod(dir string) (string, bool) {
 	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+		if path, err := readModulePath(filepath.Join(dir, "go.mod")); err == nil && path == repoModulePath {
 			return dir, true
 		}
 		parent := filepath.Dir(dir)
@@ -108,4 +116,20 @@ func findGoMod(dir string) (string, bool) {
 		}
 		dir = parent
 	}
+}
+
+func readModulePath(goModPath string) (string, error) {
+	f, err := os.Open(goModPath)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if rest, ok := strings.CutPrefix(line, "module"); ok && (rest == "" || rest[0] == ' ' || rest[0] == '\t') {
+			return strings.Trim(strings.TrimSpace(rest), `"`), nil
+		}
+	}
+	return "", scanner.Err()
 }
