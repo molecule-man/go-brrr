@@ -133,18 +133,18 @@ Read these rows as repeated complete-stream compression through the Go APIs. The
 <!-- bench:compress -->
 | | go-brrr (sec/op) | andybalholm (sec/op) | cbrotli (sec/op) |
 | --- | --- | --- | --- |
-| CompressOneshot/q=0/payload=VariedPayloads | 7.731m ± 1% | 12.257m ± 0%   +58.55% (p=0.000 n=8) | 6.833m ± 0%   -11.62% (p=0.000 n=8) |
-| CompressOneshot/q=1/payload=VariedPayloads | 10.65m ± 0% | 20.23m ± 0%   +89.93% (p=0.000 n=8) | 10.79m ± 0%    +1.27% (p=0.000 n=8) |
-| CompressOneshot/q=2/payload=VariedPayloads | 16.53m ± 0% | 38.73m ± 2%  +134.26% (p=0.000 n=8) | 17.79m ± 0%    +7.59% (p=0.000 n=8) |
-| CompressOneshot/q=3/payload=VariedPayloads | 18.14m ± 0% | 43.69m ± 1%  +140.88% (p=0.000 n=8) | 20.61m ± 0%   +13.63% (p=0.000 n=8) |
-| CompressOneshot/q=4/payload=VariedPayloads | 26.57m ± 0% | 60.86m ± 1%  +129.10% (p=0.000 n=8) | 29.93m ± 0%   +12.66% (p=0.000 n=8) |
-| CompressOneshot/q=5/payload=VariedPayloads | 39.83m ± 0% | 79.93m ± 1%  +100.70% (p=0.000 n=8) | 47.31m ± 0%   +18.78% (p=0.000 n=8) |
-| CompressOneshot/q=6/payload=VariedPayloads | 44.46m ± 0% | 90.02m ± 1%  +102.49% (p=0.000 n=8) | 54.96m ± 0%   +23.62% (p=0.000 n=8) |
-| CompressOneshot/q=7/payload=VariedPayloads | 53.99m ± 0% | 127.20m ± 1%  +135.59% (p=0.000 n=8) | 107.72m ± 0%   +99.52% (p=0.000 n=8) |
-| CompressOneshot/q=8/payload=VariedPayloads | 63.04m ± 0% | 146.76m ± 1%  +132.82% (p=0.000 n=8) | 82.13m ± 0%   +30.28% (p=0.000 n=8) |
-| CompressOneshot/q=9/payload=VariedPayloads | 86.94m ± 0% | 212.10m ± 2%  +143.98% (p=0.000 n=8) | 234.17m ± 0%  +169.36% (p=0.000 n=8) |
-| CompressOneshot/q=10/payload=VariedPayloads | 1236.4m ± 0% | 1375.7m ± 1%   +11.27% (p=0.000 n=8) | 862.3m ± 0%   -30.25% (p=0.000 n=8) |
-| CompressOneshot/q=11/payload=VariedPayloads | 3.081 ± 1% | 3.441 ± 1%   +11.67% (p=0.000 n=8) | 2.263 ± 0%   -26.55% (p=0.000 n=8) |
+| CompressOneshot/q=0/payload=VariedPayloads | 7.731m ± 1% | 12.257m ± 0%   +58.55%  | 6.833m ± 0%   -11.62%  |
+| CompressOneshot/q=1/payload=VariedPayloads | 10.65m ± 0% | 20.23m ± 0%   +89.93%  | 10.79m ± 0%    +1.27%  |
+| CompressOneshot/q=2/payload=VariedPayloads | 16.53m ± 0% | 38.73m ± 2%  +134.26%  | 17.79m ± 0%    +7.59%  |
+| CompressOneshot/q=3/payload=VariedPayloads | 18.14m ± 0% | 43.69m ± 1%  +140.88%  | 20.61m ± 0%   +13.63%  |
+| CompressOneshot/q=4/payload=VariedPayloads | 26.57m ± 0% | 60.86m ± 1%  +129.10%  | 29.93m ± 0%   +12.66%  |
+| CompressOneshot/q=5/payload=VariedPayloads | 39.83m ± 0% | 79.93m ± 1%  +100.70%  | 47.31m ± 0%   +18.78%  |
+| CompressOneshot/q=6/payload=VariedPayloads | 44.46m ± 0% | 90.02m ± 1%  +102.49%  | 54.96m ± 0%   +23.62%  |
+| CompressOneshot/q=7/payload=VariedPayloads | 53.99m ± 0% | 127.20m ± 1%  +135.59%  | 107.72m ± 0%   +99.52%  |
+| CompressOneshot/q=8/payload=VariedPayloads | 63.04m ± 0% | 146.76m ± 1%  +132.82%  | 82.13m ± 0%   +30.28%  |
+| CompressOneshot/q=9/payload=VariedPayloads | 86.94m ± 0% | 212.10m ± 2%  +143.98%  | 234.17m ± 0%  +169.36%  |
+| CompressOneshot/q=10/payload=VariedPayloads | 1236.4m ± 0% | 1375.7m ± 1%   +11.27%  | 862.3m ± 0%   -30.25%  |
+| CompressOneshot/q=11/payload=VariedPayloads | 3.081 ± 1% | 3.441 ± 1%   +11.67%  | 2.263 ± 0%   -26.55%  |
 | **geomean** | 57.51m | 110.9m        +92.75% | 67.21m        +16.87% |
 <!-- /bench:compress -->
 
@@ -157,10 +157,10 @@ As cbrotli doesn't have the "resettable" API it's not included here.
 <!-- bench:decompress -->
 | | go-brrr (sec/op) | andybalholm (sec/op) |
 | --- | --- | --- |
-| Decompress/q=4/payload=VariedPayloads | 5.378m ± 0% | 9.539m ± 0%  +77.36% (p=0.000 n=12) |
-| Decompress/q=5/payload=VariedPayloads | 5.302m ± 0% | 9.143m ± 0%  +72.43% (p=0.000 n=12) |
-| Decompress/q=6/payload=VariedPayloads | 5.146m ± 0% | 8.881m ± 0%  +72.56% (p=0.000 n=12) |
-| Decompress/q=11/payload=VariedPayloads | 5.621m ± 0% | 8.959m ± 0%  +59.37% (p=0.000 n=12) |
+| Decompress/q=4/payload=VariedPayloads | 5.378m ± 0% | 9.539m ± 0%  +77.36%  |
+| Decompress/q=5/payload=VariedPayloads | 5.302m ± 0% | 9.143m ± 0%  +72.43%  |
+| Decompress/q=6/payload=VariedPayloads | 5.146m ± 0% | 8.881m ± 0%  +72.56%  |
+| Decompress/q=11/payload=VariedPayloads | 5.621m ± 0% | 8.959m ± 0%  +59.37%  |
 | **geomean** | 5.359m | 9.127m       +70.30% |
 <!-- /bench:decompress -->
 
@@ -169,10 +169,10 @@ As cbrotli doesn't have the "resettable" API it's not included here.
 <!-- bench:decompresso -->
 | | go-brrr (sec/op) | andybalholm (sec/op) | cbrotli (sec/op) | google-brotli (sec/op) |
 | --- | --- | --- | --- | --- |
-| DecompressOneshot/q=4/payload=VariedPayloads | 5.458m ± 0% | 10.042m ± 0%  +84.01% (p=0.000 n=12) | 5.191m ±  2%   -4.89% (p=0.000 n=12) | 10.595m ± 0%  +94.13% (p=0.000 n=12) |
-| DecompressOneshot/q=5/payload=VariedPayloads | 5.458m ± 1% | 9.609m ± 0%  +76.07% (p=0.000 n=12) | 5.022m ± 11%        ~ (p=0.514 n=12) | 10.541m ± 0%  +93.14% (p=0.000 n=12) |
-| DecompressOneshot/q=6/payload=VariedPayloads | 5.329m ± 1% | 9.384m ± 0%  +76.11% (p=0.000 n=12) | 4.916m ±  4%   -7.74% (p=0.001 n=12) | 10.240m ± 1%  +92.17% (p=0.000 n=12) |
-| DecompressOneshot/q=11/payload=VariedPayloads | 5.816m ± 1% | 9.540m ± 0%  +64.03% (p=0.000 n=12) | 6.981m ±  1%  +20.03% (p=0.000 n=12) | **crashed** |
+| DecompressOneshot/q=4/payload=VariedPayloads | 5.458m ± 0% | 10.042m ± 0%  +84.01%  | 5.191m ±  2%   -4.89%  | 10.595m ± 0%  +94.13%  |
+| DecompressOneshot/q=5/payload=VariedPayloads | 5.458m ± 1% | 9.609m ± 0%  +76.07%  | 5.022m ± 11%        ~  | 10.541m ± 0%  +93.14%  |
+| DecompressOneshot/q=6/payload=VariedPayloads | 5.329m ± 1% | 9.384m ± 0%  +76.11%  | 4.916m ±  4%   -7.74%  | 10.240m ± 1%  +92.17%  |
+| DecompressOneshot/q=11/payload=VariedPayloads | 5.816m ± 1% | 9.540m ± 0%  +64.03%  | 6.981m ±  1%  +20.03%  | **crashed** |
 | **geomean** | 5.512m | 9.641m       +74.91% | 5.469m         -0.78% | 10.46m       +93.14%                 |
 <!-- /bench:decompresso -->
 
