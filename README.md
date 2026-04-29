@@ -134,21 +134,21 @@ Compared against other Go brotli libraries. **go-brrr** is the base in all compa
 ### Compression
 
 <!-- bench:compress -->
-| | go-brrr (sec/op) | andybalholm (sec/op) |
-| --- | --- | --- |
-| Compress/q=0/payload=VariedPayloads | 7.603m ± 0% | 11.530m ± 1%  +51.65% (p=0.002 n=6) |
-| Compress/q=1/payload=VariedPayloads | 10.49m ± 0% | 16.19m ± 0%  +54.42% (p=0.002 n=6) |
-| Compress/q=2/payload=VariedPayloads | 16.46m ± 0% | 29.26m ± 0%  +77.73% (p=0.002 n=6) |
-| Compress/q=3/payload=VariedPayloads | 18.17m ± 0% | 34.56m ± 0%  +90.21% (p=0.002 n=6) |
-| Compress/q=4/payload=VariedPayloads | 26.97m ± 0% | 47.53m ± 0%  +76.23% (p=0.002 n=6) |
-| Compress/q=5/payload=VariedPayloads | 39.57m ± 0% | 65.49m ± 3%  +65.50% (p=0.002 n=6) |
-| Compress/q=6/payload=VariedPayloads | 44.50m ± 0% | 74.82m ± 0%  +68.13% (p=0.002 n=6) |
-| Compress/q=7/payload=VariedPayloads | 54.50m ± 0% | 95.70m ± 0%  +75.60% (p=0.002 n=6) |
-| Compress/q=8/payload=VariedPayloads | 62.87m ± 0% | 113.77m ± 4%  +80.95% (p=0.002 n=6) |
-| Compress/q=9/payload=VariedPayloads | 83.32m ± 1% | 143.06m ± 0%  +71.71% (p=0.002 n=6) |
-| Compress/q=10/payload=VariedPayloads | 1.191 ± 0% | 1.310 ± 0%   +9.99% (p=0.002 n=6) |
-| Compress/q=11/payload=VariedPayloads | 3.036 ± 0% | 3.357 ± 0%  +10.56% (p=0.002 n=6) |
-| **geomean** | 56.97m | 90.49m       +58.82% |
+| | go-brrr (sec/op) | andybalholm (sec/op) | cbrotli (sec/op) |
+| --- | --- | --- | --- |
+| CompressOneshot/q=0/payload=VariedPayloads | 7.731m ± 1% | 12.257m ± 0%   +58.55% (p=0.000 n=8) | 6.833m ± 0%   -11.62% (p=0.000 n=8) |
+| CompressOneshot/q=1/payload=VariedPayloads | 10.65m ± 0% | 20.23m ± 0%   +89.93% (p=0.000 n=8) | 10.79m ± 0%    +1.27% (p=0.000 n=8) |
+| CompressOneshot/q=2/payload=VariedPayloads | 16.53m ± 0% | 38.73m ± 2%  +134.26% (p=0.000 n=8) | 17.79m ± 0%    +7.59% (p=0.000 n=8) |
+| CompressOneshot/q=3/payload=VariedPayloads | 18.14m ± 0% | 43.69m ± 1%  +140.88% (p=0.000 n=8) | 20.61m ± 0%   +13.63% (p=0.000 n=8) |
+| CompressOneshot/q=4/payload=VariedPayloads | 26.57m ± 0% | 60.86m ± 1%  +129.10% (p=0.000 n=8) | 29.93m ± 0%   +12.66% (p=0.000 n=8) |
+| CompressOneshot/q=5/payload=VariedPayloads | 39.83m ± 0% | 79.93m ± 1%  +100.70% (p=0.000 n=8) | 47.31m ± 0%   +18.78% (p=0.000 n=8) |
+| CompressOneshot/q=6/payload=VariedPayloads | 44.46m ± 0% | 90.02m ± 1%  +102.49% (p=0.000 n=8) | 54.96m ± 0%   +23.62% (p=0.000 n=8) |
+| CompressOneshot/q=7/payload=VariedPayloads | 53.99m ± 0% | 127.20m ± 1%  +135.59% (p=0.000 n=8) | 107.72m ± 0%   +99.52% (p=0.000 n=8) |
+| CompressOneshot/q=8/payload=VariedPayloads | 63.04m ± 0% | 146.76m ± 1%  +132.82% (p=0.000 n=8) | 82.13m ± 0%   +30.28% (p=0.000 n=8) |
+| CompressOneshot/q=9/payload=VariedPayloads | 86.94m ± 0% | 212.10m ± 2%  +143.98% (p=0.000 n=8) | 234.17m ± 0%  +169.36% (p=0.000 n=8) |
+| CompressOneshot/q=10/payload=VariedPayloads | 1236.4m ± 0% | 1375.7m ± 1%   +11.27% (p=0.000 n=8) | 862.3m ± 0%   -30.25% (p=0.000 n=8) |
+| CompressOneshot/q=11/payload=VariedPayloads | 3.081 ± 1% | 3.441 ± 1%   +11.67% (p=0.000 n=8) | 2.263 ± 0%   -26.55% (p=0.000 n=8) |
+| **geomean** | 57.51m | 110.9m        +92.75% | 67.21m        +16.87% |
 <!-- /bench:compress -->
 
 *Streaming* uses `brrr.NewReader` + `io.ReadAll`; *one-shot* uses `brrr.Decompress` on a complete in-memory blob.
