@@ -14,18 +14,9 @@ Brotli compression library for Go (RFC 7932), with encoder and decoder support.
 
 - **No C toolchain.** Builds with standard Go tooling.
 - **Faster than other pure-Go brotli libraries** at every quality level we measure (see [Benchmarks](#benchmarks)).
+- **Even faster than CGO brotli** on levels 2-9.
 - **Compound dictionaries.**
 - **Encoder tuning.** `LGWin` (window size) and `SizeHint` (expected total input size) are exposed via `WriterOptions`. `SizeHint` lets the encoder pick context modeling and hasher parameters tuned for the actual payload size.
-
-## Performance summary
-
-Against [andybalholm/brotli](https://github.com/andybalholm/brotli) on the mixed benchmark corpus:
-
-- Compression: **58.8% faster geomean**
-- Streaming decompression: **70.3% faster geomean**
-- One-shot decompression: **74.9% faster geomean**
-
-Encoder + decoder.
 
 ## Status
 
@@ -49,7 +40,7 @@ go-brrr implements Brotli RFC 7932 and is tested against the Brotli reference co
 | Writer `Reset` | ✓ | ✓ | n/a | ✗ |
 | Reader `Reset` | ✓ | ✓ | ✗ | ✗ |
 
-If you're using `andybalholm/brotli`, go-brrr is a near drop-in upgrade with higher throughput on both compression and decompression, plus compound-dictionary and `SizeHint` support. If you're using `cbrotli`, go-brrr trades roughly 7% on one-shot decompression (3.99 ms vs 3.71 ms geomean - see [Benchmarks](#benchmarks)) for: no cgo, multi-chunk compound dictionaries, and poolable `Writer`/`Reader` (cbrotli has no `Reset`, so each stream allocates a fresh encoder/decoder state - noticeable on many-small-file workloads).
+If you're using `andybalholm/brotli`, go-brrr is a near drop-in upgrade with higher throughput on both compression and decompression, plus compound-dictionary and `SizeHint` support. If you're using `cbrotli`, go-brrr gives up cgo, adds multi-chunk compound dictionaries, and exposes poolable `Writer`/`Reader` instances. `cbrotli` has no `Reset`, so each stream allocates a fresh encoder/decoder state, which is noticeable on many-small-file workloads.
 
 ## Install
 
@@ -115,7 +106,7 @@ goarch: amd64
 cpu: AMD Ryzen 5 7535HS with Radeon Graphics
 ```
 
-Compared against [klauspost/compress](https://github.com/klauspost/compress) zstd (pure Go) and stdlib gzip. Single CPU, no parallelism. Compression speed plots measure reused streaming encoders: the timed loop resets a warmed writer and discards compressed output, while ratio is measured from a warmup buffer.
+Compared against [klauspost/compress](https://github.com/klauspost/compress) zstd (pure Go) and stdlib gzip. Single CPU, no parallelism. These plots measure reused streaming encoders: the timed loop resets a warmed writer and discards compressed output, while ratio is measured from a warmup buffer.
 
 | Compression | Decompression |
 |---|---|
@@ -129,9 +120,15 @@ Compared against other Go brotli libraries. **go-brrr** is the base in all compa
 
 - **andybalholm** - [github.com/andybalholm/brotli](https://github.com/andybalholm/brotli), pure Go encoder and decoder.
 - **google-brotli** - [github.com/google/brotli/go/brotli](https://github.com/google/brotli/tree/master/go/brotli), Google's official pure Go decoder, transpiled from the Java reference. Decompression only, no encoder.
-- **cbrotli** - [github.com/google/brotli/go/cbrotli](https://github.com/google/brotli/tree/master/go/cbrotli), Google's official cgo bindings to the C reference implementation. Including a cgo library in a pure Go comparison isn't apples-to-apples, but it provides a useful ceiling for how fast brotli can go with C under the hood.
+- **cbrotli** - [github.com/google/brotli/go/cbrotli](https://github.com/google/brotli/tree/master/go/cbrotli), Google's official cgo bindings to the C reference implementation. Including a cgo library in a pure Go comparison isn't apples-to-apples, but it is a useful comparison against Google's C implementation as exposed through its Go bindings.
 
-### Compression
+### One-shot Compression
+
+The table below measures end-to-end throughput through each package's public Go API for many independent brotli streams, not only the inner compression loop. Each payload is written as a complete stream with a fresh public writer instance so `cbrotli`, which has no resettable writer API, can be included.
+
+`go-brrr` still benefits from internal reuse in that shape: encoder arenas, hashers, hash tables, and scratch buffers are kept reusable through reset paths and internal `sync.Pool`s. That avoids repeated large allocations and zeroing, which matters for small and mid-size payloads. `cbrotli` uses the C reference encoder underneath, but each payload creates a new `BrotliEncoderState` through `cbrotli.NewWriter` and destroys it on `Close`, paying setup, teardown, cgo, and allocation costs for every stream.
+
+Read these rows as repeated complete-stream compression through the Go APIs. They are not a claim that every pure-Go compression hot path is faster than the C implementation; the same table shows quality levels where `cbrotli` is faster.
 
 <!-- bench:compress -->
 | | go-brrr (sec/op) | andybalholm (sec/op) | cbrotli (sec/op) |
@@ -154,6 +151,8 @@ Compared against other Go brotli libraries. **go-brrr** is the base in all compa
 *Streaming* uses `brrr.NewReader` + `io.ReadAll`; *one-shot* uses `brrr.Decompress` on a complete in-memory blob.
 
 ### Streaming Decompression
+
+As cbrotli doesn't have the "resettable" API it's not included here.
 
 <!-- bench:decompress -->
 | | go-brrr (sec/op) | andybalholm (sec/op) |
