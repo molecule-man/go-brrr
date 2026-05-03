@@ -159,10 +159,10 @@ func createHuffmanTree(data []uint32, treeLimit int, tree []huffmanTreeNode, dep
 	// would need this, we would be better off with the Katajainen algorithm.
 	for countLimit := uint32(1); ; countLimit *= 2 {
 		n := 0
-		for i := len(data) - 1; i >= 0; i-- {
-			if data[i] != 0 {
+		for i, c := range slices.Backward(data) {
+			if c != 0 {
 				tree[n] = huffmanTreeNode{
-					totalCount:   max(data[i], countLimit),
+					totalCount:   max(c, countLimit),
 					left:         -1,
 					rightOrValue: int16(i),
 				}

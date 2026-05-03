@@ -9,6 +9,20 @@ const (
 	cutoffTransforms      = uint64(0x071B520ADA2D3200)
 )
 
+// staticDictHashEntries packs (firstByte, length, wordIndex) for each hash
+// bucket so a single load brings all three filter inputs into the same cache
+// line. Layout: bits [0:8] firstByte, [8:16] length, [16:32] wordIndex.
+// Built at startup from the unpacked arrays.
+var staticDictHashEntries [32768]uint32
+
+func init() {
+	for i := range staticDictHashEntries {
+		staticDictHashEntries[i] = uint32(staticDictHashFirstBytes[i]) |
+			uint32(staticDictHashLengths[i])<<8 |
+			uint32(staticDictHashWords[i])<<16
+	}
+}
+
 // hash14 computes a 14-bit hash from 4 bytes for dictionary hash table lookup.
 func hash14(data []byte) uint32 {
 	return (loadU32LE(data, 0) * hashMul32) >> 18
@@ -131,9 +145,10 @@ func searchStaticDictAt(data []byte, pos, maxLength uint, dictNumLookups, dictNu
 	}
 	key := ((loadU32LE(data, pos) * hashMul32) >> 18) << 1
 	*dictNumLookups++
-	lb := staticDictHashLengths[key]
-	if loadByte(data, pos) == staticDictHashFirstBytes[key] && lb != 0 && uint(lb) <= maxLength {
-		return uint(lb), uint(staticDictHashWords[key]), true
+	e := staticDictHashEntries[key]
+	lb := uint(byte(e >> 8))
+	if loadByte(data, pos) == byte(e) && lb != 0 && lb <= maxLength {
+		return lb, uint(e >> 16), true
 	}
 	return
 }
