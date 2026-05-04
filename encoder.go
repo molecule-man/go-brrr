@@ -392,7 +392,7 @@ func (e *encoderArena) reset(quality, lgwin int, sizeHint uint) {
 		switch {
 		case quality <= 2:
 			e.hasher = poolH2.Get().(*h2)
-		case lgwin <= 16:
+		case lgwin <= 16 && sizeHint > 0 && sizeHint <= 1<<16:
 			e.hasher = poolH3lg16.Get().(*h3lg16)
 		default:
 			e.hasher = poolH3.Get().(*h3)
