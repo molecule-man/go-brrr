@@ -118,16 +118,14 @@ func (h *h5b8) findLongestMatch(
 	bestLen := out.len
 	key := h.hash(data, curMasked)
 	bucket := h.buckets[uint(key)<<h5b8BlockBits:]
+	// Issue the Phase 2 num[] load early so its (often L3-miss) latency is
+	// hidden by Phase 1. n is held in a register until Phase 2.
+	n := h.num[key]
 
 	// Speculatively load from the next position's bucket to warm the cache.
 	nextKey := h.hash(data, (cur+1)&ringBufferMask)
 	nextBase := uint(nextKey) << h5b8BlockBits
-	nextN := h.num[nextKey]
 	h.nextBucket = h.buckets[nextBase]
-	if nextN > 0 {
-		p := uint(h.buckets[nextBase+uint((nextN-1)&h5b8BlockMask)]) & ringBufferMask
-		h.nextBucket = uint32(data[p])
-	}
 
 	out.len = 0
 	out.lenCodeDelta = 0
@@ -472,7 +470,6 @@ func (h *h5b8) findLongestMatch(
 	// Phase 2: scan hash bucket entries.
 	// Same tail guarantee: ring buffer end checks are omitted for the fast path.
 	// backward == 0 is impossible here: cur is stored after this scan.
-	n := h.num[key]
 	down := uint(0)
 	if uint(n) > h5b8BlockSize {
 		down = uint(n) - h5b8BlockSize
@@ -505,8 +502,8 @@ func (h *h5b8) findLongestMatch(
 	}
 
 	// Store current position in the bucket.
-	h.buckets[uint(h.num[key]&h5b8BlockMask)+uint(key)<<h5b8BlockBits] = uint32(cur)
-	h.num[key]++
+	h.buckets[uint(n&h5b8BlockMask)+uint(key)<<h5b8BlockBits] = uint32(cur)
+	h.num[key] = n + 1
 
 	// Phase 3: static dictionary fallback when no hash match was found.
 	if out.score == minScore {
@@ -529,16 +526,14 @@ func (h *h5b8) findLongestMatchSmallBuf(
 	bestLen := out.len
 	key := h.hash(data, curMasked)
 	bucket := h.buckets[uint(key)<<h5b8BlockBits:]
+	// Issue the Phase 2 num[] load early so its (often L3-miss) latency is
+	// hidden by Phase 1. n is held in a register until Phase 2.
+	n := h.num[key]
 
 	// Speculatively load from the next position's bucket to warm the cache.
 	nextKey := h.hash(data, (cur+1)&ringBufferMask)
 	nextBase := uint(nextKey) << h5b8BlockBits
-	nextN := h.num[nextKey]
 	h.nextBucket = h.buckets[nextBase]
-	if nextN > 0 {
-		p := uint(h.buckets[nextBase+uint((nextN-1)&h5b8BlockMask)]) & ringBufferMask
-		h.nextBucket = uint32(data[p])
-	}
 
 	out.len = 0
 	out.lenCodeDelta = 0
@@ -588,7 +583,6 @@ func (h *h5b8) findLongestMatchSmallBuf(
 	// Phase 2: scan hash bucket entries.
 	// Wrap-around guards are omitted for the same reason as Phase 1.
 	// backward == 0 is impossible here: cur is stored after this scan.
-	n := h.num[key]
 	down := uint(0)
 	if uint(n) > h5b8BlockSize {
 		down = uint(n) - h5b8BlockSize
@@ -621,8 +615,8 @@ func (h *h5b8) findLongestMatchSmallBuf(
 	}
 
 	// Store current position in the bucket.
-	h.buckets[uint(h.num[key]&h5b8BlockMask)+uint(key)<<h5b8BlockBits] = uint32(cur)
-	h.num[key]++
+	h.buckets[uint(n&h5b8BlockMask)+uint(key)<<h5b8BlockBits] = uint32(cur)
+	h.num[key] = n + 1
 
 	// Phase 3: static dictionary fallback when no hash match was found.
 	if out.score == minScore {
