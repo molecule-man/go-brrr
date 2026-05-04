@@ -102,7 +102,7 @@ func (h *h6b5) stitchToPreviousBlock(numBytes, position uint, ringBuffer []byte,
 //     search the static dictionary with shallow=false (deep search).
 func (h *h6b5) findLongestMatch(
 	data []byte, ringBufferMask uint,
-	distCache *[16]int,
+	distCache *[4]uint,
 	cur, maxLength, maxBackward, dictDistance uint,
 	dictNumLookups, dictNumMatches *uint,
 	out *hasherSearchResult,
@@ -144,7 +144,7 @@ func (h *h6b5) findLongestMatch(
 	// backward-1 >= maxBackward is a single check replacing both
 	// "prev >= cur" (backward==0) and "backward > maxBackward".
 	for i := range uint(h6b5NumLastDistances) {
-		backward := uint(distCache[i])
+		backward := distCache[i]
 		if backward-1 >= maxBackward {
 			continue
 		}
@@ -226,7 +226,7 @@ func (h *h6b5) findLongestMatch(
 // when the ring buffer backing array is smaller than ringBufferMask+1.
 func (h *h6b5) findLongestMatchSmallBuf(
 	data []byte, ringBufferMask uint,
-	distCache *[16]int,
+	distCache *[4]uint,
 	cur, maxLength, maxBackward, dictDistance uint,
 	dictNumLookups, dictNumMatches *uint,
 	out *hasherSearchResult,
@@ -254,7 +254,7 @@ func (h *h6b5) findLongestMatchSmallBuf(
 	// backward-1 >= maxBackward is a single check replacing both
 	// "prev >= cur" (backward==0) and "backward > maxBackward".
 	for i := range uint(h6b5NumLastDistances) {
-		backward := uint(distCache[i])
+		backward := distCache[i]
 		if backward-1 >= maxBackward {
 			continue
 		}
@@ -364,12 +364,7 @@ func (h *h6b5) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32
 
 	origCmdCount := uint(len(s.commands))
 
-	// Expand the 4-entry distance cache to 10 derived entries.
-	var distCache [16]int
-	for i, d := range s.distCache {
-		distCache[i] = int(d)
-	}
-	prepareDistanceCache(distCache[:])
+	distCache := &s.distCache
 
 	for position+h6b5HashTypeLength < posEnd {
 		maxLength := posEnd - position
@@ -378,7 +373,7 @@ func (h *h6b5) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32
 		var sr hasherSearchResult
 		sr.score = minScore
 
-		h.findLongestMatch(data, mask, &distCache,
+		h.findLongestMatch(data, mask, distCache,
 			position, maxLength, maxDistance, maxDistance+gap,
 			&s.dictNumLookups, &s.dictNumMatches, &sr)
 		if hasCompound {
@@ -396,7 +391,7 @@ func (h *h6b5) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32
 				sr2.score = minScore
 				maxDistance = min(position+1, maxBackwardLimit)
 
-				h.findLongestMatch(data, mask, &distCache,
+				h.findLongestMatch(data, mask, distCache,
 					position+1, maxLength, maxDistance, maxDistance+gap,
 					&s.dictNumLookups, &s.dictNumMatches, &sr2)
 				if hasCompound {
@@ -444,11 +439,6 @@ func (h *h6b5) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32
 			h.storeRange(data, mask, rangeStart, rangeEnd)
 
 			position += sr.len
-
-			for i, d := range s.distCache {
-				distCache[i] = int(d)
-			}
-			prepareDistanceCache(distCache[:])
 		} else {
 			insertLength++
 			position++
