@@ -136,9 +136,6 @@ func (h *h5) findLongestMatch(
 	nextKey := h.hash(data, (cur+1)&ringBufferMask)
 	h.nextBucket = h.buckets[uint(nextKey)<<h5BlockBits]
 
-	out.len = 0
-	out.lenCodeDelta = 0
-
 	// Phase 1: try cached distances.
 	// In the fast path, the ring buffer has a mirrored tail of tailSize bytes
 	// beyond ringBufferMask (see copyInputToRingBuffer). Since bestLen ≤
