@@ -1,0 +1,465 @@
+// H4 variant for one-shot inputs with lgwin <= 16 and sizeHint <= 64 KiB.
+// Stores uint16 positions in buckets, halving the table from 512 KB to 256 KB.
+// The dispatch contract guarantees position never exceeds 2^16, so
+// `uint16(pos)` is lossless and the maxDistance check rejects all out-of-range
+// entries at register cost — no aliasing, no stale-probe overhead.
+
+package brrr
+
+// h4lg16 is the H4 hasher with uint16 bucket slots, dispatched only when the
+// encoder knows the input fits in 64 KiB and uses lgwin <= 16. Under that
+// contract every stored position is in [0, 65535], so `uint16(pos)` storage
+// is lossless and `position - prev` (uint subtraction) is directly the real
+// backward distance — no modular truncation needed. Semantics match h4 at
+// half the memory; the lookup arithmetic is the same shape.
+type h4lg16 struct {
+	buckets [h4BucketSize]uint16
+	hasherCommon
+}
+
+func (h *h4lg16) common() *hasherCommon { return &h.hasherCommon }
+
+// reset clears or selectively zeroes the hash table before use.
+func (h *h4lg16) reset(oneShot bool, inputSize uint, data []byte) {
+	partialPrepareThreshold := h4BucketSize >> 5
+	if oneShot && inputSize <= uint(partialPrepareThreshold) {
+		buckets := &h.buckets
+		for i := range inputSize {
+			key := h.hash(data, i)
+			buckets[key] = 0
+			buckets[(key+8)&h4BucketMask] = 0
+			buckets[(key+16)&h4BucketMask] = 0
+			buckets[(key+24)&h4BucketMask] = 0
+		}
+	} else {
+		h.buckets = [h4BucketSize]uint16{}
+	}
+	h.ready = true
+}
+
+// store records position pos in the bucket for the 5-byte sequence at
+// data[pos & mask]. Uses the sweep offset to distribute entries.
+func (h *h4lg16) store(data []byte, mask, pos uint) {
+	key := h.hash(data, pos&mask)
+	off := uint32(pos) & h4BucketSweepMsk
+	h.buckets[(key+off)&h4BucketMask] = uint16(pos)
+}
+
+// stitchToPreviousBlock seeds the hash table with the last 3 positions of
+// the previous block so that cross-block matches can be found.
+func (h *h4lg16) stitchToPreviousBlock(numBytes, position uint, ringBuffer []byte, ringBufferMask uint) {
+	if numBytes >= hashTypeLength-1 && position >= 3 {
+		h.store(ringBuffer, ringBufferMask, position-3)
+		h.store(ringBuffer, ringBufferMask, position-2)
+		h.store(ringBuffer, ringBufferMask, position-1)
+	}
+}
+
+// createBackwardReferences finds backward reference matches using this hasher
+// and populates s.commands. The hot findLongestMatch/store calls are direct
+// (non-virtual) since the receiver is concrete.
+//
+// H4 uses BUCKET_SWEEP=4 and USE_DICTIONARY=1, so static dictionary lookups
+// are performed when no hash-table match is found.
+func (h *h4lg16) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) {
+	data := s.data
+	mask := uint(s.mask)
+	maxBackwardLimit := (uint(1) << s.lgwin) - windowGap
+	gap := s.compound.totalSize
+	hasCompound := s.compound.numChunks > 0
+
+	insertLength := s.lastInsertLen
+	position := uint(wrappedPos)
+	posEnd := position + uint(bytes)
+
+	storeEnd := position
+	if uint(bytes) >= hashTypeLength {
+		storeEnd = posEnd - hashTypeLength + 1
+	}
+
+	const randomHeuristicsWindowSize = 64
+	applyRandomHeuristics := position + randomHeuristicsWindowSize
+
+	origCmdCount := uint(len(s.commands))
+	buckets := &h.buckets
+
+	for position+hashTypeLength < posEnd {
+		maxLength := posEnd - position
+		maxDistance := min(position, maxBackwardLimit)
+
+		var sr hasherSearchResult
+		sr.len = 0
+		sr.lenCodeDelta = 0
+		sr.distance = 0
+		sr.score = minScore
+
+		{
+			lastDistance := s.distCache[0]
+			curMasked := position & mask
+			guardByte := loadByte(data, curMasked)
+			key := h.hash(data, curMasked)
+			bestScore := sr.score
+			bestLen := uint(0)
+
+			hkey0 := key
+			hkey1 := (key + 8) & h4BucketMask
+			hkey2 := (key + 16) & h4BucketMask
+			hkey3 := (key + 24) & h4BucketMask
+
+			keyOut := (key + uint32(position&h4BucketSweepMsk)) & h4BucketMask
+
+			prev0 := uint(buckets[hkey0])
+			prev1 := uint(buckets[hkey1])
+			prev2 := uint(buckets[hkey2])
+			prev3 := uint(buckets[hkey3])
+
+			limit := int(maxLength)
+
+			{
+				prev := position - lastDistance
+				if prev < position && lastDistance <= maxDistance {
+					prev &= mask
+					if loadByte(data, prev+bestLen) == guardByte {
+						length := matchLenAt(data, prev, curMasked, limit)
+						if length >= 4 {
+							score := backwardReferenceScoreUsingLastDistance(uint(length))
+							if bestScore < score {
+								bestLen = uint(length)
+								sr.len = bestLen
+								sr.distance = lastDistance
+								sr.score = score
+								bestScore = score
+								guardByte = loadByte(data, curMasked+bestLen)
+							}
+						}
+					}
+				}
+			}
+
+			{
+				backward := position - prev0
+				prev0 &= mask
+				if loadByte(data, prev0+bestLen) == guardByte && backward != 0 && backward <= maxDistance {
+					length := matchLenAt(data, prev0, curMasked, limit)
+					if length >= 4 {
+						score := backwardReferenceScore(uint(length), backward)
+						if bestScore < score {
+							bestLen = uint(length)
+							sr.len = bestLen
+							guardByte = loadByte(data, curMasked+bestLen)
+							bestScore = score
+							sr.score = score
+							sr.distance = backward
+						}
+					}
+				}
+			}
+
+			{
+				backward := position - prev1
+				prev1 &= mask
+				if loadByte(data, prev1+bestLen) == guardByte && backward != 0 && backward <= maxDistance {
+					length := matchLenAt(data, prev1, curMasked, limit)
+					if length >= 4 {
+						score := backwardReferenceScore(uint(length), backward)
+						if bestScore < score {
+							bestLen = uint(length)
+							sr.len = bestLen
+							guardByte = loadByte(data, curMasked+bestLen)
+							bestScore = score
+							sr.score = score
+							sr.distance = backward
+						}
+					}
+				}
+			}
+
+			{
+				backward := position - prev2
+				prev2 &= mask
+				if loadByte(data, prev2+bestLen) == guardByte && backward != 0 && backward <= maxDistance {
+					length := matchLenAt(data, prev2, curMasked, limit)
+					if length >= 4 {
+						score := backwardReferenceScore(uint(length), backward)
+						if bestScore < score {
+							bestLen = uint(length)
+							sr.len = bestLen
+							guardByte = loadByte(data, curMasked+bestLen)
+							bestScore = score
+							sr.score = score
+							sr.distance = backward
+						}
+					}
+				}
+			}
+
+			{
+				backward := position - prev3
+				prev3 &= mask
+				if loadByte(data, prev3+bestLen) == guardByte && backward != 0 && backward <= maxDistance {
+					length := matchLenAt(data, prev3, curMasked, limit)
+					if length >= 4 {
+						score := backwardReferenceScore(uint(length), backward)
+						if bestScore < score {
+							sr.len = uint(length)
+							sr.score = score
+							sr.distance = backward
+						}
+					}
+				}
+			}
+
+			buckets[keyOut] = uint16(position)
+		}
+
+		if sr.score == minScore {
+			posM := position & mask
+			if wl, wi, ok := searchStaticDictAt(data, posM, maxLength, &s.dictNumLookups, &s.dictNumMatches); ok {
+				if matchStaticDictEntryAt(data, posM, wl, wi, maxDistance+gap, sr.score, &sr) {
+					s.dictNumMatches++
+				}
+			}
+		}
+
+		if hasCompound {
+			s.compound.lookupMatch(data, mask,
+				&s.distCache, position, maxLength,
+				maxDistance, &sr)
+		}
+
+		if sr.score > minScore {
+			delayedBackwardReferencesInRow := 0
+			maxLength--
+			for {
+				const costDiffLazy = 175
+				var sr2 hasherSearchResult
+				sr2.len = min(sr.len-1, maxLength)
+				sr2.lenCodeDelta = 0
+				sr2.distance = 0
+				sr2.score = minScore
+				maxDistance = min(position+1, maxBackwardLimit)
+
+				{
+					cur2 := position + 1
+					lastDistance := s.distCache[0]
+					curMasked := cur2 & mask
+					bestLen := sr2.len
+					guardByte := loadByte(data, curMasked+bestLen)
+					key := h.hash(data, curMasked)
+					bestScore := sr2.score
+
+					hkey0 := key
+					hkey1 := (key + 8) & h4BucketMask
+					hkey2 := (key + 16) & h4BucketMask
+					hkey3 := (key + 24) & h4BucketMask
+
+					keyOut := (key + uint32(cur2&h4BucketSweepMsk)) & h4BucketMask
+
+					prev0 := uint(buckets[hkey0])
+					prev1 := uint(buckets[hkey1])
+					prev2 := uint(buckets[hkey2])
+					prev3 := uint(buckets[hkey3])
+
+					limit := int(maxLength)
+
+					{
+						prev := cur2 - lastDistance
+						if prev < cur2 && lastDistance <= maxDistance {
+							prev &= mask
+							if loadByte(data, prev+bestLen) == guardByte {
+								length := matchLenAt(data, prev, curMasked, limit)
+								if length >= 4 {
+									score := backwardReferenceScoreUsingLastDistance(uint(length))
+									if bestScore < score {
+										bestLen = uint(length)
+										sr2.len = bestLen
+										sr2.distance = lastDistance
+										sr2.score = score
+										bestScore = score
+										guardByte = loadByte(data, curMasked+bestLen)
+									}
+								}
+							}
+						}
+					}
+
+					{
+						backward := cur2 - prev0
+						prev0 &= mask
+						if loadByte(data, prev0+bestLen) == guardByte && backward != 0 && backward <= maxDistance {
+							length := matchLenAt(data, prev0, curMasked, limit)
+							if length >= 4 {
+								score := backwardReferenceScore(uint(length), backward)
+								if bestScore < score {
+									bestLen = uint(length)
+									sr2.len = bestLen
+									guardByte = loadByte(data, curMasked+bestLen)
+									bestScore = score
+									sr2.score = score
+									sr2.distance = backward
+								}
+							}
+						}
+					}
+
+					{
+						backward := cur2 - prev1
+						prev1 &= mask
+						if loadByte(data, prev1+bestLen) == guardByte && backward != 0 && backward <= maxDistance {
+							length := matchLenAt(data, prev1, curMasked, limit)
+							if length >= 4 {
+								score := backwardReferenceScore(uint(length), backward)
+								if bestScore < score {
+									bestLen = uint(length)
+									sr2.len = bestLen
+									guardByte = loadByte(data, curMasked+bestLen)
+									bestScore = score
+									sr2.score = score
+									sr2.distance = backward
+								}
+							}
+						}
+					}
+
+					{
+						backward := cur2 - prev2
+						prev2 &= mask
+						if loadByte(data, prev2+bestLen) == guardByte && backward != 0 && backward <= maxDistance {
+							length := matchLenAt(data, prev2, curMasked, limit)
+							if length >= 4 {
+								score := backwardReferenceScore(uint(length), backward)
+								if bestScore < score {
+									bestLen = uint(length)
+									sr2.len = bestLen
+									guardByte = loadByte(data, curMasked+bestLen)
+									bestScore = score
+									sr2.score = score
+									sr2.distance = backward
+								}
+							}
+						}
+					}
+
+					{
+						backward := cur2 - prev3
+						prev3 &= mask
+						if loadByte(data, prev3+bestLen) == guardByte && backward != 0 && backward <= maxDistance {
+							length := matchLenAt(data, prev3, curMasked, limit)
+							if length >= 4 {
+								score := backwardReferenceScore(uint(length), backward)
+								if bestScore < score {
+									sr2.len = uint(length)
+									sr2.score = score
+									sr2.distance = backward
+								}
+							}
+						}
+					}
+
+					buckets[keyOut] = uint16(cur2)
+				}
+
+				if sr2.score == minScore {
+					posM2 := (position + 1) & mask
+					if wl2, wi2, ok2 := searchStaticDictAt(data, posM2, maxLength, &s.dictNumLookups, &s.dictNumMatches); ok2 {
+						if matchStaticDictEntryAt(data, posM2, wl2, wi2, maxDistance+gap, sr2.score, &sr2) {
+							s.dictNumMatches++
+						}
+					}
+				}
+
+				if hasCompound {
+					s.compound.lookupMatch(data, mask,
+						&s.distCache, position+1, maxLength,
+						maxDistance, &sr2)
+				}
+
+				if sr2.score >= sr.score+costDiffLazy {
+					position++
+					insertLength++
+					sr = sr2
+					delayedBackwardReferencesInRow++
+					if delayedBackwardReferencesInRow < 4 &&
+						position+hashTypeLength < posEnd {
+						maxLength--
+						continue
+					}
+				}
+				break
+			}
+
+			applyRandomHeuristics = position + 2*sr.len + randomHeuristicsWindowSize
+
+			maxDistance = min(position, maxBackwardLimit)
+			distanceCode := computeDistanceCode(sr.distance, maxDistance+gap, &s.distCache)
+			if sr.distance <= maxDistance+gap && distanceCode > 0 {
+				s.distCache[3] = s.distCache[2]
+				s.distCache[2] = s.distCache[1]
+				s.distCache[1] = s.distCache[0]
+				s.distCache[0] = sr.distance
+			}
+
+			delta := uint32(uint8(int8(sr.lenCodeDelta)))
+			distPrefix, distExtra := prefixEncodeSimpleDistance(distanceCode)
+			effectiveCopyLen := uint(int(sr.len) + sr.lenCodeDelta)
+			insCode := getInsertLenCode(insertLength)
+			copyCode := getCopyLenCode(effectiveCopyLen)
+			cmdPrefix := combineLengthCodes(insCode, copyCode, (distPrefix&0x3FF) == 0)
+			s.commands = append(s.commands, command{
+				insertLen:  uint32(insertLength),
+				copyLen:    uint32(sr.len) | (delta << 25),
+				distExtra:  distExtra,
+				cmdPrefix:  cmdPrefix,
+				distPrefix: distPrefix,
+			})
+			s.numLiterals += insertLength
+			insertLength = 0
+
+			rangeStart := position + 2
+			rangeEnd := min(position+sr.len, storeEnd)
+			if sr.distance < sr.len>>2 {
+				rangeStart = min(rangeEnd, max(rangeStart, position+sr.len-(sr.distance<<2)))
+			}
+			for i := rangeStart; i < rangeEnd; i++ {
+				key := h.hash(data, i&mask)
+				off := uint32(i) & h4BucketSweepMsk
+				buckets[(key+off)&h4BucketMask] = uint16(i)
+			}
+
+			position += sr.len
+		} else {
+			insertLength++
+			position++
+
+			if position > applyRandomHeuristics {
+				if position > applyRandomHeuristics+4*randomHeuristicsWindowSize {
+					posJump := min(position+16, posEnd-(hashTypeLength-1))
+					for position < posJump {
+						h.store(data, mask, position)
+						insertLength += 4
+						position += 4
+					}
+				} else {
+					posJump := min(position+8, posEnd-(hashTypeLength-1))
+					for position < posJump {
+						h.store(data, mask, position)
+						insertLength += 2
+						position += 2
+					}
+				}
+			}
+		}
+	}
+
+	insertLength += posEnd - position
+	s.lastInsertLen = insertLength
+	s.numCommands += uint(len(s.commands)) - origCmdCount
+}
+
+// hash computes the h4 17-bit hash from 5 bytes at data[off:off+8]
+// using an unsafe load, avoiding sub-slice creation and bounds checks.
+func (*h4lg16) hash(data []byte, off uint) uint32 {
+	v := loadU64LE(data, off)
+	h := (v << (64 - 8*hashLen)) * hashMul64
+	return uint32(h >> (64 - h4BucketBits))
+}

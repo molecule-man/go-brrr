@@ -23,6 +23,7 @@ var (
 	poolH3           = sync.Pool{New: func() any { return new(h3) }}
 	poolH3lg16       = sync.Pool{New: func() any { return new(h3lg16) }}
 	poolH4           = sync.Pool{New: func() any { return new(h4) }}
+	poolH4lg16       = sync.Pool{New: func() any { return new(h4lg16) }}
 	poolH5           = sync.Pool{New: func() any { return new(h5) }}
 	poolH54          = sync.Pool{New: func() any { return new(h54) }}
 	poolH5b5         = sync.Pool{New: func() any { return new(h5b5) }}
@@ -190,6 +191,8 @@ func releaseHasher(h streamHasher) {
 		poolH3lg16.Put(h)
 	case *h4:
 		poolH4.Put(h)
+	case *h4lg16:
+		poolH4lg16.Put(h)
 	case *h5:
 		poolH5.Put(h)
 	case *h54:
@@ -828,14 +831,22 @@ func (e *encoderSplit) chooseHasher() {
 	e.prevHasher = nil
 	switch {
 	case s.quality <= 4:
-		if s.quality == 4 && s.sizeHint >= 1<<20 {
+		switch {
+		case s.quality == 4 && s.sizeHint >= 1<<20:
 			if h, ok := prev.(*h54); ok {
 				e.hasher = h
 			} else {
 				releaseHasher(prev)
 				e.hasher = poolH54.Get().(*h54)
 			}
-		} else {
+		case s.lgwin <= 16 && s.sizeHint > 0 && s.sizeHint <= 1<<16:
+			if h, ok := prev.(*h4lg16); ok {
+				e.hasher = h
+			} else {
+				releaseHasher(prev)
+				e.hasher = poolH4lg16.Get().(*h4lg16)
+			}
+		default:
 			if h, ok := prev.(*h4); ok {
 				e.hasher = h
 			} else {
