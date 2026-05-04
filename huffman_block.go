@@ -33,7 +33,13 @@ func (block huffmanBlock) writeData(b *bitWriter) { //nolint:gocritic // stack c
 		// insert/copy length prefix classes for every command.
 		{
 			lut := cmdLut[cmdCode]
-			effCopyLen := uint(cmd.copyLenCode())
+			copyLenCode := cmd.copyLen
+			// Most copy commands have no encoded length delta; avoid the
+			// sign-extension path unless the high delta bits are present.
+			if copyLenCode>>25 != 0 {
+				copyLenCode = cmd.copyLenCode()
+			}
+			effCopyLen := uint(copyLenCode)
 			insNumExtra := lut.insertLenExtraBits
 			b.writeBits(uint(insNumExtra+lut.copyLenExtraBits),
 				((uint64(effCopyLen)-uint64(lut.copyLenOffset))<<insNumExtra)|
