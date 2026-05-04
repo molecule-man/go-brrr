@@ -17,6 +17,9 @@ var combineLengthCodesBase = [3][3]uint16{
 	{448, 576, 640},
 }
 
+var insertLenCodeLUT = initInsertLenCodeLUT()
+var copyLenCodeLUT = initCopyLenCodeLUT()
+
 // commandConfig holds the inputs for constructing a command from a LZ77 match.
 type commandConfig struct {
 	insertLen uint
@@ -73,6 +76,22 @@ type command struct {
 	distExtra  uint32 // distance extra bits
 	cmdPrefix  uint16 // the combined insert-and-copy length code (Section 5)
 	distPrefix uint16 // distance code (low 10 bits) + extra bits length (high 6 bits)
+}
+
+func initInsertLenCodeLUT() [130]uint16 {
+	var lut [130]uint16
+	for i := range lut {
+		lut[i] = getInsertLenCodeSlow(uint(i))
+	}
+	return lut
+}
+
+func initCopyLenCodeLUT() [134]uint16 {
+	var lut [134]uint16
+	for i := uint(2); i < uint(len(lut)); i++ {
+		lut[i] = getCopyLenCodeSlow(i)
+	}
+	return lut
 }
 
 // newCommand creates a command for a literal insertion followed by a backward
@@ -203,6 +222,13 @@ func (c command) distanceCode(numDirectCodes, postfixBits uint) uint32 {
 //	13    4      50–65         22    14     6210–22593
 //	                           23    24     22594–16799809
 func getInsertLenCode(insertLen uint) uint16 {
+	if insertLen < uint(len(insertLenCodeLUT)) {
+		return insertLenCodeLUT[insertLen]
+	}
+	return getInsertLenCodeSlow(insertLen)
+}
+
+func getInsertLenCodeSlow(insertLen uint) uint16 {
 	switch {
 	case insertLen < 6: // codes 0–5: one-to-one mapping
 		return uint16(insertLen)
@@ -239,6 +265,13 @@ func getInsertLenCode(insertLen uint) uint16 {
 //	                           22    10     1094–2117
 //	                           23    24     2118–16779333
 func getCopyLenCode(copyLen uint) uint16 {
+	if copyLen < uint(len(copyLenCodeLUT)) && copyLen >= 2 {
+		return copyLenCodeLUT[copyLen]
+	}
+	return getCopyLenCodeSlow(copyLen)
+}
+
+func getCopyLenCodeSlow(copyLen uint) uint16 {
 	switch {
 	case copyLen < 10: // codes 0–7: one-to-one mapping (offset by 2)
 		return uint16(copyLen - 2)
