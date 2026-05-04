@@ -27,18 +27,18 @@ func loadU64LE(b []byte, i uint) uint64 {
 func (b *bitWriter) writeBits(nbits uint, value uint64) {
 	bytePos := b.bitOffset >> 3
 	bitOff := b.bitOffset & 7
-	p := (*uint64)(unsafe.Pointer(&b.buf[bytePos]))
+	p := (*uint64)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(b.buf)), bytePos))
 	*p = uint64(*(*byte)(unsafe.Pointer(p))) | value<<bitOff
 	b.bitOffset += nbits
 }
 
 func (b *bitWriter) writeLiteralBits(input []byte, depths *[256]byte, bits *[256]uint16) {
-	buf := b.buf
+	bufBase := unsafe.Pointer(unsafe.SliceData(b.buf))
 	bitOffset := b.bitOffset
 	for _, lit := range input {
 		bytePos := bitOffset >> 3
 		bitOff := bitOffset & 7
-		p := (*uint64)(unsafe.Pointer(&buf[bytePos]))
+		p := (*uint64)(unsafe.Add(bufBase, bytePos))
 		*p = uint64(*(*byte)(unsafe.Pointer(p))) | uint64(bits[lit])<<bitOff
 		bitOffset += uint(depths[lit])
 	}
