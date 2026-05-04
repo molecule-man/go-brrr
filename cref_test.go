@@ -169,9 +169,13 @@ func testMatchesCRef(t *testing.T, quality, lgwin int, sizeHint uint) {
 			//   - Q5–9 lgwin>16: h5/h6 hashers elide ring-buffer end checks
 			//     (the tail mirror makes them redundant), which can produce
 			//     different match selections vs the C reference.
-			// In both cases accept output within 0.02% of C's size; roundtrip
+			//   - Q3 lgwin<=16: h3lg16 stores uint16-truncated positions, so
+			//     stale entries (older than 64K positions) alias to small
+			//     backward distances and probe at a different offset than
+			//     C's h3, occasionally finding a different valid match.
+			// In all cases accept output within 0.02% of C's size; roundtrip
 			// correctness is already verified above via C and Go decompression.
-			if quality >= 10 || (quality >= 5 && lgwin > 16) {
+			if quality >= 10 || (quality >= 5 && lgwin > 16) || (quality == 3 && lgwin <= 16) {
 				goLen := len(goOut)
 				cLen := len(cOut)
 				threshold := float64(cLen) * 1.0002
@@ -198,10 +202,11 @@ func testMatchesCRef(t *testing.T, quality, lgwin int, sizeHint uint) {
 }
 
 // TestMatchesCRef verifies the Go streaming encoder against the C reference
-// across quality levels, window sizes, and size hints. For Q5–9 lgwin>16 and
-// Q10–11 it checks roundtrip correctness and that compressed size is within
-// 0.02% of C. Other combinations check byte-identical output. All qualities
-// verify roundtrip via C and Go decompression.
+// across quality levels, window sizes, and size hints. For Q3 lgwin<=16,
+// Q5–9 lgwin>16, and Q10–11 it checks roundtrip correctness and that
+// compressed size is within 0.02% of C. Other combinations check
+// byte-identical output. All qualities verify roundtrip via C and Go
+// decompression.
 func TestMatchesCRef(t *testing.T) {
 	t.Parallel()
 

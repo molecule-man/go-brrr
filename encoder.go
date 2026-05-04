@@ -21,6 +21,7 @@ var (
 	poolEncoderSplit = sync.Pool{New: func() any { return new(encoderSplit) }}
 	poolH2           = sync.Pool{New: func() any { return new(h2) }}
 	poolH3           = sync.Pool{New: func() any { return new(h3) }}
+	poolH3lg16       = sync.Pool{New: func() any { return new(h3lg16) }}
 	poolH4           = sync.Pool{New: func() any { return new(h4) }}
 	poolH5           = sync.Pool{New: func() any { return new(h5) }}
 	poolH54          = sync.Pool{New: func() any { return new(h54) }}
@@ -185,6 +186,8 @@ func releaseHasher(h streamHasher) {
 		poolH2.Put(h)
 	case *h3:
 		poolH3.Put(h)
+	case *h3lg16:
+		poolH3lg16.Put(h)
 	case *h4:
 		poolH4.Put(h)
 	case *h5:
@@ -386,9 +389,12 @@ func (e *encoderArena) reset(quality, lgwin int, sizeHint uint) {
 	e.encodeState.reset(quality, lgwin, sizeHint)
 
 	if e.hasher == nil {
-		if quality <= 2 {
+		switch {
+		case quality <= 2:
 			e.hasher = poolH2.Get().(*h2)
-		} else {
+		case lgwin <= 16:
+			e.hasher = poolH3lg16.Get().(*h3lg16)
+		default:
 			e.hasher = poolH3.Get().(*h3)
 		}
 	}
