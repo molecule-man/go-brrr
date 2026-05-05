@@ -830,8 +830,10 @@ func (e *encoderSplit) reset(quality, lgwin int, sizeHint uint) {
 // is available. This matches the C reference's HasherSetup → ChooseHasher flow.
 // When a previous hasher of the same type is stashed in prevHasher (from a
 // prior reset cycle), it is reused to avoid re-allocating large hash tables.
-func (e *encoderSplit) chooseHasher() {
+func (e *encoderSplit) chooseHasher(isLast bool) {
 	s := &e.encodeState
+	oneShotSmall := isLast && s.lastProcessedPos == 0 &&
+		s.unprocessedInputSize() > 0 && s.unprocessedInputSize() <= 1<<16
 	prev := e.prevHasher
 	e.prevHasher = nil
 	switch {
@@ -844,7 +846,7 @@ func (e *encoderSplit) chooseHasher() {
 				releaseHasher(prev)
 				e.hasher = poolH54.Get().(*h54)
 			}
-		case s.lgwin <= 16 && s.sizeHint > 0 && s.sizeHint <= 1<<16:
+		case (s.lgwin <= 16 && s.sizeHint > 0 && s.sizeHint <= 1<<16) || oneShotSmall:
 			if h, ok := prev.(*h4lg16); ok {
 				e.hasher = h
 			} else {
@@ -988,7 +990,7 @@ func (e *encoderSplit) chooseHasher() {
 
 func (e *encoderSplit) encodeData(isLast, forceFlush bool) []byte {
 	if e.hasher == nil {
-		e.chooseHasher()
+		e.chooseHasher(isLast)
 	}
 	metablockSize, earlyResult, ready := e.prepareMetaBlock(isLast, forceFlush)
 	if !ready {
