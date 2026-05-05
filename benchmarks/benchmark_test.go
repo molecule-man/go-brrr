@@ -120,7 +120,26 @@ func benchSizeHint() uint {
 	return 0
 }
 
-// benchParamSuffix returns slash-separated lgwin/sizeHint name sections
+// benchChunkSize returns the chunk size for streaming Write calls in
+// benchCompress. 0 means "single Write of the full payload" (the default).
+// Set BENCH_CHUNK_SIZE=32768 to model an HTTP server feeding the encoder via
+// io.Copy with a 32 KiB buffer.
+func benchChunkSize() int {
+	s := os.Getenv("BENCH_CHUNK_SIZE")
+	if s == "" {
+		return 0
+	}
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		panic(fmt.Sprintf("invalid BENCH_CHUNK_SIZE=%q: %v", s, err))
+	}
+	if v < 0 {
+		panic(fmt.Sprintf("invalid BENCH_CHUNK_SIZE=%q: must be >= 0", s))
+	}
+	return v
+}
+
+// benchParamSuffix returns slash-separated lgwin/sizeHint/chunk name sections
 // to append after the payload section when their env vars are set.
 func benchParamSuffix(lgwin int, sizeHint uint) string {
 	var s string
@@ -129,6 +148,9 @@ func benchParamSuffix(lgwin int, sizeHint uint) string {
 	}
 	if os.Getenv("BENCH_SIZE_HINT") != "" && sizeHint > 0 {
 		s += fmt.Sprintf("/sizeHint=%d", sizeHint)
+	}
+	if c := benchChunkSize(); c > 0 {
+		s += fmt.Sprintf("/chunk=%d", c)
 	}
 	return s
 }
@@ -342,13 +364,28 @@ func benchCompress(b *testing.B, w compressor, payloads [][]byte) {
 	b.SetBytes(int64(totalBytes))
 	b.ReportAllocs()
 
+	chunkSize := benchChunkSize()
+	writeAll := func(data []byte) error {
+		if chunkSize <= 0 || chunkSize >= len(data) {
+			_, err := w.Write(data)
+			return err
+		}
+		for off := 0; off < len(data); off += chunkSize {
+			end := min(off+chunkSize, len(data))
+			if _, err := w.Write(data[off:end]); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
 	var buf bytes.Buffer
 
 	for b.Loop() {
 		for _, data := range payloads {
 			buf.Reset()
 			w.Reset(&buf)
-			if _, err := w.Write(data); err != nil {
+			if err := writeAll(data); err != nil {
 				b.Fatal(err)
 			}
 			if err := w.Close(); err != nil {
@@ -362,7 +399,7 @@ func benchCompress(b *testing.B, w compressor, payloads [][]byte) {
 		for _, data := range payloads {
 			buf.Reset()
 			w.Reset(&buf)
-			if _, err := w.Write(data); err != nil {
+			if err := writeAll(data); err != nil {
 				b.Fatal(err)
 			}
 			if err := w.Close(); err != nil {
