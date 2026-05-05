@@ -6,6 +6,8 @@
 
 package brrr
 
+import "unsafe"
+
 // h2lg16 is the H2 hasher with uint16 bucket slots, dispatched only when the
 // encoder knows the input fits in 64 KiB and uses lgwin <= 16. Under that
 // contract every stored position is in [0, 65535], so `uint16(pos)` storage
@@ -21,12 +23,18 @@ type h2lg16 struct {
 func (h *h2lg16) common() *hasherCommon { return &h.hasherCommon }
 
 // reset clears or selectively zeroes the hash table before use.
+//
+// The partial path views buckets through a uint32 alias and zeroes pairs of
+// adjacent uint16 slots per store. This avoids the length-changing-prefix
+// (66h) predecode stalls that `MOVW $0, mem` triggers when fetched from
+// MITE — clearing the partner slot in each pair is harmless: it would be
+// either stale (and is meant to be cleared) or already zero.
 func (h *h2lg16) reset(oneShot bool, inputSize uint, data []byte) {
 	partialPrepareThreshold := bucketSize >> 5
 	if oneShot && inputSize <= uint(partialPrepareThreshold) {
+		buckets32 := (*[bucketSize / 2]uint32)(unsafe.Pointer(&h.buckets))
 		for i := range inputSize {
-			key := hashBytes(data, i)
-			h.buckets[key] = 0
+			buckets32[hashBytes(data, i)>>1] = 0
 		}
 	} else {
 		h.buckets = [bucketSize]uint16{}

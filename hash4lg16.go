@@ -6,6 +6,8 @@
 
 package brrr
 
+import "unsafe"
+
 // h4lg16 is the H4 hasher with uint16 bucket slots, dispatched only when the
 // encoder knows the input fits in 64 KiB and uses lgwin <= 16. Under that
 // contract every stored position is in [0, 65535], so `uint16(pos)` storage
@@ -20,16 +22,24 @@ type h4lg16 struct {
 func (h *h4lg16) common() *hasherCommon { return &h.hasherCommon }
 
 // reset clears or selectively zeroes the hash table before use.
+//
+// The partial path views buckets through a uint32 alias and zeroes pairs of
+// adjacent uint16 slots per store. This avoids the length-changing-prefix
+// (66h) predecode stalls that `MOVW $0, mem` triggers when fetched from
+// MITE, and is exact for the four sweep slots after rounding the hash key
+// down to even — clearing the partner slot in each pair is harmless: it
+// would be either stale (and is meant to be cleared) or already zero.
 func (h *h4lg16) reset(oneShot bool, inputSize uint, data []byte) {
 	partialPrepareThreshold := h4BucketSize >> 5
 	if oneShot && inputSize <= uint(partialPrepareThreshold) {
-		buckets := &h.buckets
+		const mask32 = h4BucketSize/2 - 1
+		buckets32 := (*[h4BucketSize / 2]uint32)(unsafe.Pointer(&h.buckets))
 		for i := range inputSize {
-			key := h.hash(data, i)
-			buckets[key] = 0
-			buckets[(key+8)&h4BucketMask] = 0
-			buckets[(key+16)&h4BucketMask] = 0
-			buckets[(key+24)&h4BucketMask] = 0
+			k := h.hash(data, i) >> 1
+			buckets32[k] = 0
+			buckets32[(k+4)&mask32] = 0
+			buckets32[(k+8)&mask32] = 0
+			buckets32[(k+12)&mask32] = 0
 		}
 	} else {
 		h.buckets = [h4BucketSize]uint16{}
