@@ -172,14 +172,30 @@ func searchStaticDictionaryDeep(data []byte, maxLength, maxBackward, maxDistance
 	for i := range uint32(2) {
 		k := key + i
 		*dictNumLookups++
-		if firstByte == staticDictHashFirstBytes[k] &&
-			staticDictHashLengths[k] != 0 && uint(staticDictHashLengths[k]) <= maxLength {
-			if m, ok := matchStaticDictEntry(data, uint(staticDictHashLengths[k]), uint(staticDictHashWords[k]),
-				maxBackward, maxDistance, out.score); ok {
-				out.len = m.len
-				out.lenCodeDelta = m.lenCodeDelta
-				out.distance = m.distance
-				out.score = m.score
+		e := staticDictHashEntries[k]
+		wordLen := uint(byte(e >> 8))
+		if firstByte == byte(e) && wordLen != 0 && wordLen <= maxLength {
+			wordIndex := uint(e >> 16)
+			offset := uint(dictOffsetsByLength[wordLen]) + wordLen*wordIndex
+
+			ml := uint(findMatchLenDict(data[:wordLen], dictData[offset:offset+wordLen]))
+			if ml+cutoffTransformsCount <= wordLen || ml == 0 {
+				continue
+			}
+
+			cut := wordLen - ml
+			transformID := (cut << 2) + uint((cutoffTransforms>>(cut*6))&0x3F)
+			backward := maxBackward + 1 + wordIndex + (transformID << dictSizeBitsByLength[wordLen])
+			if backward > maxDistance {
+				continue
+			}
+
+			score := backwardReferenceScore(ml, backward)
+			if score >= out.score {
+				out.len = ml
+				out.lenCodeDelta = int(wordLen) - int(ml)
+				out.distance = backward
+				out.score = score
 				*dictNumMatches++
 			}
 		}
