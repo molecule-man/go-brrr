@@ -20,10 +20,6 @@ const (
 	h5BlockMask  = h5BlockSize - 1
 	h5HashShift  = 32 - h5BucketBits // 18
 
-	// Small one-shot inputs benefit from unrolled distance-cache probes, while
-	// larger payloads keep the compact loop to avoid instruction-cache cost.
-	h5SmallInputThreshold = 6 << 10
-
 	// h5HashTypeLength is the minimum number of bytes needed to compute
 	// the hash and verify a match (StoreLookahead in C).
 	h5HashTypeLength = 4
@@ -39,7 +35,6 @@ type h5 struct {
 	num        [h5BucketSize]uint16               // entry count per bucket
 	buckets    [h5BucketSize * h5BlockSize]uint32 // position ring buffers
 	nextBucket uint32                             // speculative load to warm cache
-	smallInput bool                               // use size-specialized probes for small one-shot inputs
 	hasherCommon
 }
 
@@ -55,7 +50,6 @@ func (h *h5) hash(data []byte, i uint) uint32 {
 // When oneShot is true and the input is small, only the touched buckets
 // are cleared (partial prepare). Otherwise the full count array is zeroed.
 func (h *h5) reset(oneShot bool, inputSize uint, data []byte) {
-	h.smallInput = oneShot && inputSize <= h5SmallInputThreshold
 	partialPrepareThreshold := h5BucketSize >> 6
 	if oneShot && inputSize <= uint(partialPrepareThreshold) {
 		for i := range inputSize {
@@ -149,14 +143,33 @@ func (h *h5) findLongestMatch(
 	// the per-iteration wrap-around bounds guards are not needed here.
 	// backward-1 >= maxBackward is a single check replacing both
 	// "prev >= cur" (backward==0) and "backward > maxBackward".
-	if h.smallInput {
-		backward := distCache[0]
-		if backward-1 < maxBackward {
-			prev := (cur - backward) & ringBufferMask
-			if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
-				ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
-				if ml >= 3 || ml == 2 {
-					score := backwardReferenceScoreUsingLastDistance(ml)
+	backward := distCache[0]
+	if backward-1 < maxBackward {
+		prev := (cur - backward) & ringBufferMask
+		if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+			if ml >= 3 || ml == 2 {
+				score := backwardReferenceScoreUsingLastDistance(ml)
+				if bestScore < score {
+					bestScore = score
+					bestLen = ml
+					out.len = bestLen
+					out.distance = backward
+					out.score = bestScore
+				}
+			}
+		}
+	}
+
+	backward = distCache[1]
+	if backward-1 < maxBackward {
+		prev := (cur - backward) & ringBufferMask
+		if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+			if ml >= 3 || ml == 2 {
+				score := backwardReferenceScoreUsingLastDistance(ml)
+				if bestScore < score {
+					score -= backwardReferencePenaltyUsingLastDistance(1)
 					if bestScore < score {
 						bestScore = score
 						bestLen = ml
@@ -167,88 +180,38 @@ func (h *h5) findLongestMatch(
 				}
 			}
 		}
+	}
 
-		backward = distCache[1]
-		if backward-1 < maxBackward {
-			prev := (cur - backward) & ringBufferMask
-			if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
-				ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
-				if ml >= 3 || ml == 2 {
-					score := backwardReferenceScoreUsingLastDistance(ml)
-					if bestScore < score {
-						score -= backwardReferencePenaltyUsingLastDistance(1)
-						if bestScore < score {
-							bestScore = score
-							bestLen = ml
-							out.len = bestLen
-							out.distance = backward
-							out.score = bestScore
-						}
-					}
-				}
-			}
-		}
-
-		backward = distCache[2]
-		if backward-1 < maxBackward {
-			prev := (cur - backward) & ringBufferMask
-			if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
-				ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
-				if ml >= 3 {
-					score := backwardReferenceScoreUsingLastDistance(ml)
-					if bestScore < score {
-						score -= backwardReferencePenaltyUsingLastDistance(2)
-						if bestScore < score {
-							bestScore = score
-							bestLen = ml
-							out.len = bestLen
-							out.distance = backward
-							out.score = bestScore
-						}
-					}
-				}
-			}
-		}
-
-		backward = distCache[3]
-		if backward-1 < maxBackward {
-			prev := (cur - backward) & ringBufferMask
-			if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
-				ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
-				if ml >= 3 {
-					score := backwardReferenceScoreUsingLastDistance(ml)
-					if bestScore < score {
-						score -= backwardReferencePenaltyUsingLastDistance(3)
-						if bestScore < score {
-							bestScore = score
-							bestLen = ml
-							out.len = bestLen
-							out.distance = backward
-							out.score = bestScore
-						}
-					}
-				}
-			}
-		}
-	} else {
-		for i := range uint(h5NumLastDistances) {
-			backward := distCache[i]
-			if backward-1 >= maxBackward {
-				continue
-			}
-			prev := (cur - backward) & ringBufferMask
-
-			if loadByte(data, curMasked+bestLen) != loadByte(data, prev+bestLen) {
-				continue
-			}
-
+	backward = distCache[2]
+	if backward-1 < maxBackward {
+		prev := (cur - backward) & ringBufferMask
+		if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
 			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
-			if ml >= 3 || (ml == 2 && i < 2) {
+			if ml >= 3 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
 				if bestScore < score {
-					if i != 0 {
-						score -= backwardReferencePenaltyUsingLastDistance(i)
+					score -= backwardReferencePenaltyUsingLastDistance(2)
+					if bestScore < score {
+						bestScore = score
+						bestLen = ml
+						out.len = bestLen
+						out.distance = backward
+						out.score = bestScore
 					}
+				}
+			}
+		}
+	}
+
+	backward = distCache[3]
+	if backward-1 < maxBackward {
+		prev := (cur - backward) & ringBufferMask
+		if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+			if ml >= 3 {
+				score := backwardReferenceScoreUsingLastDistance(ml)
+				if bestScore < score {
+					score -= backwardReferencePenaltyUsingLastDistance(3)
 					if bestScore < score {
 						bestScore = score
 						bestLen = ml
