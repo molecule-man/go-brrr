@@ -147,7 +147,7 @@ func (h *h5) findLongestMatch(
 	if backward-1 < maxBackward {
 		prev := (cur - backward) & ringBufferMask
 		if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
-			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+			ml := uint(matchLenSIMD(data, prev, curMasked, int(maxLength)))
 			if ml >= 3 || ml == 2 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
 				if bestScore < score {
@@ -165,7 +165,7 @@ func (h *h5) findLongestMatch(
 	if backward-1 < maxBackward {
 		prev := (cur - backward) & ringBufferMask
 		if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
-			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+			ml := uint(matchLenSIMD(data, prev, curMasked, int(maxLength)))
 			if ml >= 3 || ml == 2 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
 				if bestScore < score {
@@ -186,7 +186,7 @@ func (h *h5) findLongestMatch(
 	if backward-1 < maxBackward {
 		prev := (cur - backward) & ringBufferMask
 		if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
-			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+			ml := uint(matchLenSIMD(data, prev, curMasked, int(maxLength)))
 			if ml >= 3 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
 				if bestScore < score {
@@ -207,7 +207,7 @@ func (h *h5) findLongestMatch(
 	if backward-1 < maxBackward {
 		prev := (cur - backward) & ringBufferMask
 		if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
-			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+			ml := uint(matchLenSIMD(data, prev, curMasked, int(maxLength)))
 			if ml >= 3 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
 				if bestScore < score {
@@ -257,7 +257,7 @@ func (h *h5) findLongestMatch(
 			continue
 		}
 
-		ml := uint(matchLenAtNoInline(data, prevMasked, curMasked, int(maxLength)))
+		ml := uint(matchLenSIMD(data, prevMasked, curMasked, int(maxLength)))
 		if ml >= 4 {
 			backward := cur - prevRaw
 			score := backwardReferenceScore(ml, backward)
@@ -326,7 +326,7 @@ func (h *h5) findLongestMatchSmallBuf(
 			continue
 		}
 
-		ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+		ml := uint(matchLenSIMD(data, prev, curMasked, int(maxLength)))
 		if ml >= 3 || (ml == 2 && i < 2) {
 			score := backwardReferenceScoreUsingLastDistance(ml)
 			if bestScore < score {
@@ -370,7 +370,7 @@ func (h *h5) findLongestMatchSmallBuf(
 			continue
 		}
 
-		ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+		ml := uint(matchLenSIMD(data, prev, curMasked, int(maxLength)))
 		if ml >= 4 {
 			score := backwardReferenceScore(ml, backward)
 			if bestScore < score {
