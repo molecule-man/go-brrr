@@ -1,25 +1,25 @@
-// H4 variant for one-shot inputs with lgwin <= 16 and sizeHint <= 64 KiB.
+// H4 variant for inputs bounded to 64 KiB.
 // Stores uint16 positions in buckets, halving the table from 512 KB to 256 KB.
 // The dispatch contract guarantees position never exceeds 2^16, so
-// `uint16(pos)` is lossless and the maxDistance check rejects all out-of-range
-// entries at register cost — no aliasing, no stale-probe overhead.
+// `uint16(pos)` is lossless — no aliasing, no stale-probe overhead.
 
 package brrr
 
 import "unsafe"
 
-// h4lg16 is the H4 hasher with uint16 bucket slots, dispatched only when the
-// encoder knows the input fits in 64 KiB and uses lgwin <= 16. Under that
-// contract every stored position is in [0, 65535], so `uint16(pos)` storage
-// is lossless and `position - prev` (uint subtraction) is directly the real
-// backward distance — no modular truncation needed. Semantics match h4 at
-// half the memory; the lookup arithmetic is the same shape.
-type h4lg16 struct {
+// h4u16 is the H4 hasher with uint16 bucket slots, dispatched only when the
+// encoder knows the input fits in 64 KiB (either via a user-supplied sizeHint
+// or via the one-shot isLast guarantee). Under that contract every stored
+// position is in [0, 65535], so `uint16(pos)` storage is lossless and
+// `position - prev` (uint subtraction) is directly the real backward distance
+// — no modular truncation needed. Semantics match h4 at half the memory; the
+// lookup arithmetic is the same shape.
+type h4u16 struct {
 	buckets [h4BucketSize]uint16
 	hasherCommon
 }
 
-func (h *h4lg16) common() *hasherCommon { return &h.hasherCommon }
+func (h *h4u16) common() *hasherCommon { return &h.hasherCommon }
 
 // reset clears or selectively zeroes the hash table before use.
 //
@@ -29,7 +29,7 @@ func (h *h4lg16) common() *hasherCommon { return &h.hasherCommon }
 // MITE, and is exact for the four sweep slots after rounding the hash key
 // down to even — clearing the partner slot in each pair is harmless: it
 // would be either stale (and is meant to be cleared) or already zero.
-func (h *h4lg16) reset(oneShot bool, inputSize uint, data []byte) {
+func (h *h4u16) reset(oneShot bool, inputSize uint, data []byte) {
 	partialPrepareThreshold := h4BucketSize >> 5
 	if oneShot && inputSize <= uint(partialPrepareThreshold) {
 		const mask32 = h4BucketSize/2 - 1
@@ -49,7 +49,7 @@ func (h *h4lg16) reset(oneShot bool, inputSize uint, data []byte) {
 
 // store records position pos in the bucket for the 5-byte sequence at
 // data[pos & mask]. Uses the sweep offset to distribute entries.
-func (h *h4lg16) store(data []byte, mask, pos uint) {
+func (h *h4u16) store(data []byte, mask, pos uint) {
 	key := h.hash(data, pos&mask)
 	off := uint32(pos) & h4BucketSweepMsk
 	h.buckets[(key+off)&h4BucketMask] = uint16(pos)
@@ -57,7 +57,7 @@ func (h *h4lg16) store(data []byte, mask, pos uint) {
 
 // stitchToPreviousBlock seeds the hash table with the last 3 positions of
 // the previous block so that cross-block matches can be found.
-func (h *h4lg16) stitchToPreviousBlock(numBytes, position uint, ringBuffer []byte, ringBufferMask uint) {
+func (h *h4u16) stitchToPreviousBlock(numBytes, position uint, ringBuffer []byte, ringBufferMask uint) {
 	if numBytes >= hashTypeLength-1 && position >= 3 {
 		h.store(ringBuffer, ringBufferMask, position-3)
 		h.store(ringBuffer, ringBufferMask, position-2)
@@ -71,7 +71,7 @@ func (h *h4lg16) stitchToPreviousBlock(numBytes, position uint, ringBuffer []byt
 //
 // H4 uses BUCKET_SWEEP=4 and USE_DICTIONARY=1, so static dictionary lookups
 // are performed when no hash-table match is found.
-func (h *h4lg16) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) {
+func (h *h4u16) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) {
 	data := s.data
 	mask := uint(s.mask)
 	maxBackwardLimit := (uint(1) << s.lgwin) - windowGap
@@ -468,7 +468,7 @@ func (h *h4lg16) createBackwardReferences(s *encodeState, bytes, wrappedPos uint
 
 // hash computes the h4 17-bit hash from 5 bytes at data[off:off+8]
 // using an unsafe load, avoiding sub-slice creation and bounds checks.
-func (*h4lg16) hash(data []byte, off uint) uint32 {
+func (*h4u16) hash(data []byte, off uint) uint32 {
 	v := loadU64LE(data, off)
 	h := (v << (64 - 8*hashLen)) * hashMul64
 	return uint32(h >> (64 - h4BucketBits))

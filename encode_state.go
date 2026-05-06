@@ -69,6 +69,13 @@ type encodeState struct {
 
 	prevByte  byte
 	prevByte2 byte
+
+	// userSizeHint records whether the caller supplied a non-zero sizeHint
+	// (vs. the auto-detected value set by updateSizeHint from the first
+	// Write). Routing decisions that trust the hint at face value (e.g. the
+	// h*u16 fast path) require this; the auto-detected value can mislead
+	// when the first chunk is small but the stream is large.
+	userSizeHint bool
 }
 
 // reset (re)initializes the encoder state for streaming compression (quality >= 2).
@@ -76,6 +83,7 @@ func (s *encodeState) reset(quality, lgwin int, sizeHint uint) {
 	s.quality = quality
 	s.lgwin = lgwin
 	s.sizeHint = sizeHint
+	s.userSizeHint = sizeHint > 0
 
 	// ComputeLgBlock (quality.h):
 	//   quality < 4    → lgblock = 14 (no block splitting)

@@ -1,26 +1,26 @@
-// H2 variant for one-shot inputs with lgwin <= 16 and sizeHint <= 64 KiB.
+// H2 variant for inputs bounded to 64 KiB.
 // Stores uint16 positions in buckets, halving the table from 256 KB to 128 KB.
 // The dispatch contract guarantees position never exceeds 2^16, so
-// `uint16(pos)` is lossless and the maxDistance check rejects all out-of-range
-// entries at register cost — no aliasing, no stale-probe overhead.
+// `uint16(pos)` is lossless — no aliasing, no stale-probe overhead.
 
 package brrr
 
 import "unsafe"
 
-// h2lg16 is the H2 hasher with uint16 bucket slots, dispatched only when the
-// encoder knows the input fits in 64 KiB and uses lgwin <= 16. Under that
-// contract every stored position is in [0, 65535], so `uint16(pos)` storage
-// is lossless and `position - prev` (uint subtraction) is directly the real
-// backward distance — no modular truncation needed. Semantics match h2 at
-// half the memory; the lookup arithmetic is the same shape.
-type h2lg16 struct {
+// h2u16 is the H2 hasher with uint16 bucket slots, dispatched only when the
+// encoder knows the input fits in 64 KiB (either via a user-supplied sizeHint
+// or via the one-shot isLast guarantee). Under that contract every stored
+// position is in [0, 65535], so `uint16(pos)` storage is lossless and
+// `position - prev` (uint subtraction) is directly the real backward distance
+// — no modular truncation needed. Semantics match h2 at half the memory; the
+// lookup arithmetic is the same shape.
+type h2u16 struct {
 	buckets    [bucketSize]uint16
 	nextBucket uint16 // speculative load to warm cache for the next match lookup
 	hasherCommon
 }
 
-func (h *h2lg16) common() *hasherCommon { return &h.hasherCommon }
+func (h *h2u16) common() *hasherCommon { return &h.hasherCommon }
 
 // reset clears or selectively zeroes the hash table before use.
 //
@@ -29,7 +29,7 @@ func (h *h2lg16) common() *hasherCommon { return &h.hasherCommon }
 // (66h) predecode stalls that `MOVW $0, mem` triggers when fetched from
 // MITE — clearing the partner slot in each pair is harmless: it would be
 // either stale (and is meant to be cleared) or already zero.
-func (h *h2lg16) reset(oneShot bool, inputSize uint, data []byte) {
+func (h *h2u16) reset(oneShot bool, inputSize uint, data []byte) {
 	partialPrepareThreshold := bucketSize >> 5
 	if oneShot && inputSize <= uint(partialPrepareThreshold) {
 		buckets32 := (*[bucketSize / 2]uint32)(unsafe.Pointer(&h.buckets))
@@ -44,13 +44,13 @@ func (h *h2lg16) reset(oneShot bool, inputSize uint, data []byte) {
 
 // store records position pos in the bucket for the 5-byte sequence at
 // data[pos & mask].
-func (h *h2lg16) store(data []byte, mask, pos uint) {
+func (h *h2u16) store(data []byte, mask, pos uint) {
 	key := hashBytes(data, pos&mask)
 	h.buckets[key] = uint16(pos)
 }
 
 // storeRange records positions [start, end) in the hash table.
-func (h *h2lg16) storeRange(data []byte, mask, start, end uint) {
+func (h *h2u16) storeRange(data []byte, mask, start, end uint) {
 	for i := start; i < end; i++ {
 		h.store(data, mask, i)
 	}
@@ -58,7 +58,7 @@ func (h *h2lg16) storeRange(data []byte, mask, start, end uint) {
 
 // stitchToPreviousBlock seeds the hash table with the last 3 positions of
 // the previous block so that cross-block matches can be found.
-func (h *h2lg16) stitchToPreviousBlock(numBytes, position uint, ringBuffer []byte, ringBufferMask uint) {
+func (h *h2u16) stitchToPreviousBlock(numBytes, position uint, ringBuffer []byte, ringBufferMask uint) {
 	if numBytes >= hashTypeLength-1 && position >= 3 {
 		h.store(ringBuffer, ringBufferMask, position-3)
 		h.store(ringBuffer, ringBufferMask, position-2)
@@ -69,7 +69,7 @@ func (h *h2lg16) stitchToPreviousBlock(numBytes, position uint, ringBuffer []byt
 // createBackwardReferences finds backward reference matches using this hasher
 // and populates s.commands. Mirrors h2.createBackwardReferences with uint16
 // bucket slots; positions in [0, 65535] make the storage lossless.
-func (h *h2lg16) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) {
+func (h *h2u16) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) {
 	data := s.data
 	mask := uint(s.mask)
 	maxBackwardLimit := (uint(1) << s.lgwin) - windowGap

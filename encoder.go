@@ -20,11 +20,11 @@ var (
 	poolEncoderArena = sync.Pool{New: func() any { return new(encoderArena) }}
 	poolEncoderSplit = sync.Pool{New: func() any { return new(encoderSplit) }}
 	poolH2           = sync.Pool{New: func() any { return new(h2) }}
-	poolH2lg16       = sync.Pool{New: func() any { return new(h2lg16) }}
+	poolH2u16        = sync.Pool{New: func() any { return new(h2u16) }}
 	poolH3           = sync.Pool{New: func() any { return new(h3) }}
-	poolH3lg16       = sync.Pool{New: func() any { return new(h3lg16) }}
+	poolH3u16        = sync.Pool{New: func() any { return new(h3u16) }}
 	poolH4           = sync.Pool{New: func() any { return new(h4) }}
-	poolH4lg16       = sync.Pool{New: func() any { return new(h4lg16) }}
+	poolH4u16        = sync.Pool{New: func() any { return new(h4u16) }}
 	poolH5           = sync.Pool{New: func() any { return new(h5) }}
 	poolH54          = sync.Pool{New: func() any { return new(h54) }}
 	poolH5b5         = sync.Pool{New: func() any { return new(h5b5) }}
@@ -63,6 +63,7 @@ type encoderCore struct {
 // encoderArena is the Q2/Q3 streaming encoder. It uses a fixed-size arena for
 // histogram accumulation and Huffman code building.
 type encoderArena struct {
+	prevHasher streamHasher // stashed hasher from previous reset for reuse in chooseHasher
 	encoderCore
 	arena metablockArena
 }
@@ -159,6 +160,14 @@ func (e *encoderSplit) releaseBuffers() {
 	e.encoderCore.releaseBuffers()
 }
 
+// releaseBuffers extends encoderCore.releaseBuffers to also return the stashed
+// prevHasher to its pool.
+func (e *encoderArena) releaseBuffers() {
+	releaseHasher(e.prevHasher)
+	e.prevHasher = nil
+	e.encoderCore.releaseBuffers()
+}
+
 // resetHasher marks the hasher as needing re-initialization and updates the
 // hashers tracking slice.
 func (c *encoderCore) resetHasher() {
@@ -186,16 +195,16 @@ func releaseHasher(h streamHasher) {
 	switch h := h.(type) {
 	case *h2:
 		poolH2.Put(h)
-	case *h2lg16:
-		poolH2lg16.Put(h)
+	case *h2u16:
+		poolH2u16.Put(h)
 	case *h3:
 		poolH3.Put(h)
-	case *h3lg16:
-		poolH3lg16.Put(h)
+	case *h3u16:
+		poolH3u16.Put(h)
 	case *h4:
 		poolH4.Put(h)
-	case *h4lg16:
-		poolH4lg16.Put(h)
+	case *h4u16:
+		poolH4u16.Put(h)
 	case *h5:
 		poolH5.Put(h)
 	case *h54:
@@ -394,14 +403,26 @@ func (c *encoderCore) finishMetaBlock() []byte {
 func (e *encoderArena) reset(quality, lgwin int, sizeHint uint) {
 	e.encodeState.reset(quality, lgwin, sizeHint)
 
+	// Defer hasher creation to chooseHasher (called lazily from encodeData)
+	// when sizeHint is unknown, mirroring encoderSplit. This lets one-shot
+	// small inputs route to the u16 variant once isLast is known, even if
+	// the user never supplied a sizeHint.
+	if sizeHint == 0 {
+		if e.hasher != nil {
+			e.prevHasher = e.hasher
+			e.hasher = nil
+		}
+		return
+	}
+
 	if e.hasher == nil {
 		switch {
-		case quality <= 2 && lgwin <= 16 && sizeHint > 0 && sizeHint <= 1<<16:
-			e.hasher = poolH2lg16.Get().(*h2lg16)
+		case quality <= 2 && sizeHint <= 1<<16:
+			e.hasher = poolH2u16.Get().(*h2u16)
 		case quality <= 2:
 			e.hasher = poolH2.Get().(*h2)
-		case lgwin <= 16 && sizeHint > 0 && sizeHint <= 1<<16:
-			e.hasher = poolH3lg16.Get().(*h3lg16)
+		case sizeHint <= 1<<16:
+			e.hasher = poolH3u16.Get().(*h3u16)
 		default:
 			e.hasher = poolH3.Get().(*h3)
 		}
@@ -410,8 +431,62 @@ func (e *encoderArena) reset(quality, lgwin int, sizeHint uint) {
 	e.resetHasher()
 }
 
+// chooseHasher selects and creates the hasher for this encoder. Called lazily
+// from encodeData so that the auto-calculated sizeHint (from the first Write)
+// or the actual one-shot input size (when isLast is set) is available.
+// When a previous hasher is stashed in prevHasher, it is reused if its type
+// matches the new selection to avoid re-allocating hash tables.
+func (e *encoderArena) chooseHasher(isLast bool) {
+	s := &e.encodeState
+	useLg16 := (s.userSizeHint && s.sizeHint <= 1<<16) ||
+		(isLast && s.lastProcessedPos == 0 &&
+			s.unprocessedInputSize() > 0 && s.unprocessedInputSize() <= 1<<16)
+	prev := e.prevHasher
+	e.prevHasher = nil
+	switch {
+	case s.quality <= 2:
+		switch {
+		case useLg16:
+			if h, ok := prev.(*h2u16); ok {
+				e.hasher = h
+			} else {
+				releaseHasher(prev)
+				e.hasher = poolH2u16.Get().(*h2u16)
+			}
+		default:
+			if h, ok := prev.(*h2); ok {
+				e.hasher = h
+			} else {
+				releaseHasher(prev)
+				e.hasher = poolH2.Get().(*h2)
+			}
+		}
+	default:
+		switch {
+		case useLg16:
+			if h, ok := prev.(*h3u16); ok {
+				e.hasher = h
+			} else {
+				releaseHasher(prev)
+				e.hasher = poolH3u16.Get().(*h3u16)
+			}
+		default:
+			if h, ok := prev.(*h3); ok {
+				e.hasher = h
+			} else {
+				releaseHasher(prev)
+				e.hasher = poolH3.Get().(*h3)
+			}
+		}
+	}
+	e.resetHasher()
+}
+
 func (e *encoderArena) encodeData(isLast, forceFlush bool) []byte {
 	s := &e.encodeState
+	if e.hasher == nil {
+		e.chooseHasher(isLast)
+	}
 	// For qualities 2 and 3, initialize histogram slices on the first block of
 	// each metablock so that createBackwardReferences can accumulate them
 	// inline, skipping the separate tally pass in writeMetaBlockFast /
@@ -832,8 +907,9 @@ func (e *encoderSplit) reset(quality, lgwin int, sizeHint uint) {
 // prior reset cycle), it is reused to avoid re-allocating large hash tables.
 func (e *encoderSplit) chooseHasher(isLast bool) {
 	s := &e.encodeState
-	oneShotSmall := isLast && s.lastProcessedPos == 0 &&
-		s.unprocessedInputSize() > 0 && s.unprocessedInputSize() <= 1<<16
+	useLg16 := (s.userSizeHint && s.sizeHint <= 1<<16) ||
+		(isLast && s.lastProcessedPos == 0 &&
+			s.unprocessedInputSize() > 0 && s.unprocessedInputSize() <= 1<<16)
 	prev := e.prevHasher
 	e.prevHasher = nil
 	switch {
@@ -846,12 +922,12 @@ func (e *encoderSplit) chooseHasher(isLast bool) {
 				releaseHasher(prev)
 				e.hasher = poolH54.Get().(*h54)
 			}
-		case (s.lgwin <= 16 && s.sizeHint > 0 && s.sizeHint <= 1<<16) || oneShotSmall:
-			if h, ok := prev.(*h4lg16); ok {
+		case useLg16:
+			if h, ok := prev.(*h4u16); ok {
 				e.hasher = h
 			} else {
 				releaseHasher(prev)
-				e.hasher = poolH4lg16.Get().(*h4lg16)
+				e.hasher = poolH4u16.Get().(*h4u16)
 			}
 		default:
 			if h, ok := prev.(*h4); ok {
