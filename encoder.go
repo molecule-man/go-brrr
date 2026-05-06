@@ -438,7 +438,7 @@ func (e *encoderArena) reset(quality, lgwin int, sizeHint uint) {
 // matches the new selection to avoid re-allocating hash tables.
 func (e *encoderArena) chooseHasher(isLast bool) {
 	s := &e.encodeState
-	useLg16 := (s.userSizeHint && s.sizeHint <= 1<<16) ||
+	useU16 := (s.userSizeHint && s.sizeHint <= 1<<16) ||
 		(isLast && s.lastProcessedPos == 0 &&
 			s.unprocessedInputSize() > 0 && s.unprocessedInputSize() <= 1<<16)
 	prev := e.prevHasher
@@ -446,7 +446,7 @@ func (e *encoderArena) chooseHasher(isLast bool) {
 	switch {
 	case s.quality <= 2:
 		switch {
-		case useLg16:
+		case useU16:
 			if h, ok := prev.(*h2u16); ok {
 				e.hasher = h
 			} else {
@@ -463,7 +463,7 @@ func (e *encoderArena) chooseHasher(isLast bool) {
 		}
 	default:
 		switch {
-		case useLg16:
+		case useU16:
 			if h, ok := prev.(*h3u16); ok {
 				e.hasher = h
 			} else {
@@ -907,7 +907,7 @@ func (e *encoderSplit) reset(quality, lgwin int, sizeHint uint) {
 // prior reset cycle), it is reused to avoid re-allocating large hash tables.
 func (e *encoderSplit) chooseHasher(isLast bool) {
 	s := &e.encodeState
-	useLg16 := (s.userSizeHint && s.sizeHint <= 1<<16) ||
+	useU16 := (s.userSizeHint && s.sizeHint <= 1<<16) ||
 		(isLast && s.lastProcessedPos == 0 &&
 			s.unprocessedInputSize() > 0 && s.unprocessedInputSize() <= 1<<16)
 	prev := e.prevHasher
@@ -922,7 +922,7 @@ func (e *encoderSplit) chooseHasher(isLast bool) {
 				releaseHasher(prev)
 				e.hasher = poolH54.Get().(*h54)
 			}
-		case useLg16:
+		case useU16:
 			if h, ok := prev.(*h4u16); ok {
 				e.hasher = h
 			} else {
