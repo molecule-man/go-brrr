@@ -53,29 +53,19 @@ func (h *h40) hash(data []byte, i uint) uint32 {
 	return (loadU32LE(data, i) * hashMul32) >> h40HashShift
 }
 
-// reset prepares the hasher for use. Fills addr with 0xCCCCCCCC (sentinel),
-// zeroes head, tinyHash, and freeSlotIdx.
+// reset prepares the hasher for use. addr stores positions as one's complement
+// (^uint32(pos)) so a zeroed slot decodes to 0xFFFFFFFF — far enough in the
+// "future" that `cur - decoded` always exceeds maxBackward. That lets the
+// full-sweep path use clear()/memclr instead of a scalar fill of 0xCCCCCCCC.
 func (h *h40) reset(oneShot bool, inputSize uint, data []byte) {
 	partialPrepareThreshold := h40BucketSize >> 6
 	if oneShot && inputSize <= uint(partialPrepareThreshold) {
 		for i := range inputSize {
 			bucket := h.hash(data, i)
-			h.addr[bucket] = 0xCCCCCCCC
-			h.head[bucket] = 0xCCCC
+			h.addr[bucket] = 0
 		}
 	} else {
-		if oneShot && inputSize <= 16*1024 {
-			for i := 0; i < len(h.addr); i += 4 {
-				h.addr[i] = 0xCCCCCCCC
-				h.addr[i+1] = 0xCCCCCCCC
-				h.addr[i+2] = 0xCCCCCCCC
-				h.addr[i+3] = 0xCCCCCCCC
-			}
-		} else {
-			for i := range h.addr {
-				h.addr[i] = 0xCCCCCCCC
-			}
-		}
+		clear(h.addr[:])
 		h.head = [h40BucketSize]uint16{}
 	}
 	h.tinyHash = [65536]uint8{}
@@ -84,31 +74,32 @@ func (h *h40) reset(oneShot bool, inputSize uint, data []byte) {
 }
 
 // store records position ix in the chain for the 4-byte sequence at
-// data[ix & mask].
+// data[ix & mask]. Positions are stored as one's complement (^uint32(ix))
+// so the cleared/zero-init state decodes as a sentinel — see reset.
 func (h *h40) store(data []byte, mask, ix uint) {
 	key := h.hash(data, ix&mask)
 	idx := h.freeSlotIdx
 	h.freeSlotIdx++
-	delta := ix - uint(h.addr[key])
+	delta := ix - uint(^h.addr[key])
 	h.tinyHash[uint16(ix)] = uint8(key)
 	if delta > 0xFFFF {
 		delta = 0xFFFF
 	}
 	h.slots[idx] = h40PackedSlot(uint32(delta) | uint32(h.head[key])<<16)
-	h.addr[key] = uint32(ix)
+	h.addr[key] = ^uint32(ix)
 	h.head[key] = idx
 }
 
 func (h *h40) storeWithKey(key uint32, ix uint) {
 	idx := h.freeSlotIdx
 	h.freeSlotIdx++
-	delta := ix - uint(h.addr[key])
+	delta := ix - uint(^h.addr[key])
 	h.tinyHash[uint16(ix)] = uint8(key)
 	if delta > 0xFFFF {
 		delta = 0xFFFF
 	}
 	h.slots[idx] = h40PackedSlot(uint32(delta) | uint32(h.head[key])<<16)
-	h.addr[key] = uint32(ix)
+	h.addr[key] = ^uint32(ix)
 	h.head[key] = idx
 }
 
@@ -209,7 +200,7 @@ func (h *h40) findLongestMatch(
 	// chain's serial slot loads. The walk still traverses the old chain — the
 	// newly-stored slot is only reachable via the new head, which we don't use.
 	{
-		oldAddr := uint(h.addr[key])
+		oldAddr := uint(^h.addr[key])
 		oldHead := h.head[key]
 
 		newIdx := h.freeSlotIdx
@@ -220,7 +211,7 @@ func (h *h40) findLongestMatch(
 			storeDelta = 0xFFFF
 		}
 		h.slots[newIdx] = h40PackedSlot(uint32(storeDelta) | uint32(oldHead)<<16)
-		h.addr[key] = uint32(cur)
+		h.addr[key] = ^uint32(cur)
 		h.head[key] = newIdx
 
 		backward := uint(0)
@@ -324,7 +315,7 @@ func (h *h40) findLongestMatchSmallBuf(
 		bank := key & (h40NumBanks - 1)
 		backward := uint(0)
 		hops := h.maxHops
-		delta := cur - uint(h.addr[key])
+		delta := cur - uint(^h.addr[key])
 		slot := h.head[key]
 		slotBase := uint(bank) * h40BankSize
 		for hops > 0 {
