@@ -9,36 +9,23 @@ import (
 	"sync"
 )
 
-var (
-	poolOnePassArena = sync.Pool{New: func() any { return new(onePassArena) }}
-	poolTwoPassArena = sync.Pool{New: func() any { return new(twoPassArena) }}
-	poolFastOutBuf   sync.Pool
-	poolFastTable32  sync.Pool
-	poolFastCommands sync.Pool
-	poolFastLiterals sync.Pool
-)
+var poolOnePassArena = sync.Pool{New: func() any { return new(onePassArena) }}
+var poolTwoPassArena = sync.Pool{New: func() any { return new(twoPassArena) }}
 
 // Writer compresses data into brotli format.
 //
 // Callers must Close the Writer to finalize the brotli stream.
 type Writer struct {
-	dst         io.Writer
-	err         error
-	enc         streamEncoder // non-nil for quality >= 2
-	onePass     *onePassArena // non-nil when quality == 0
-	twoPass     *twoPassArena // non-nil when quality == 1
-	buf         []byte        // buffered uncompressed input (quality 0-1)
-	outBuf      []byte        // scratch space for compressed output (quality 0-1)
-	table       []uint32
-	commandBuf  []uint32
-	literalBuf  []byte
-	dicts       []*PreparedDictionary // from WriterOptions, preserved across Reset
-	quality     int                   // 0 = one-pass, 1 = two-pass, 2+ = streaming
-	lgwin       int
-	sizeHint    uint // from WriterOptions, preserved across Reset
-	wroteHeader bool
-	closed      bool
-	reused      bool // true after first Reset; suppresses pool release on Close
+	dst      io.Writer
+	err      error
+	enc      streamEncoder         // non-nil for quality >= 2
+	c        compressor            // non-nil for quality <= 1 (q0/q1 backend)
+	dicts    []*PreparedDictionary // from WriterOptions, preserved across Reset
+	quality  int                   // 0 = one-pass, 1 = two-pass, 2+ = streaming
+	lgwin    int
+	sizeHint uint // from WriterOptions, preserved across Reset
+	closed   bool
+	reused   bool // true after first Reset; suppresses pool release on Close
 }
 
 // NewWriter returns a new Writer compressing data to dst at the given
@@ -92,10 +79,8 @@ func (w *Writer) Write(p []byte) (int, error) {
 		return 0, io.ErrClosedPipe
 	}
 
-	if w.enc == nil {
-		// Quality 0-1: buffer input for batch compression.
-		w.buf = append(w.buf, p...)
-		return len(p), nil
+	if w.c != nil {
+		return w.c.Write(w.dst, p)
 	}
 
 	// Quality >= 2: streaming ring-buffer approach.
@@ -131,10 +116,7 @@ func (w *Writer) Flush() error {
 		return w.flushStreaming()
 	}
 
-	if len(w.buf) == 0 {
-		return nil
-	}
-	w.err = w.compress(false)
+	w.err = w.c.Flush(w.dst)
 	return w.err
 }
 
@@ -166,9 +148,10 @@ func (w *Writer) Close() error {
 		return w.err
 	}
 
-	w.err = w.compress(true)
+	w.err = w.c.Close(w.dst)
 	if !w.reused {
-		w.releaseFastBuffers()
+		w.c.Release()
+		w.c = nil
 	}
 	return w.err
 }
@@ -212,18 +195,11 @@ func (w *Writer) Reset(dst io.Writer) {
 		return
 	}
 
-	w.buf = w.buf[:0]
-	w.wroteHeader = false
-	// No need to clear w.table here: compress() clears table[:htsize]
-	// per block, so only the entries actually used are zeroed.
-	if w.quality == 0 {
-		if w.onePass == nil {
-			w.onePass = poolOnePassArena.Get().(*onePassArena)
-		}
-		w.onePass.initCommandPrefixCodes()
-	} else if w.twoPass == nil {
-		w.twoPass = poolTwoPassArena.Get().(*twoPassArena)
+	if w.c == nil {
+		w.c = newFastCompressor(w.quality, w.lgwin)
+		return
 	}
+	w.c.Reset()
 }
 
 func (w *Writer) init() {
@@ -239,222 +215,10 @@ func (w *Writer) init() {
 		w.enc = e
 		return
 	}
-	// Quality 0-1: table, commandBuf, and literalBuf are lazily allocated
+	// Quality 0-1: fastCompressor lazily allocates table/commandBuf/literalBuf
 	// in compress() based on actual block size, avoiding large upfront
 	// allocations that dominate cost for small inputs.
-	switch w.quality {
-	case 0:
-		w.onePass = poolOnePassArena.Get().(*onePassArena)
-		w.onePass.initCommandPrefixCodes()
-	case 1:
-		w.twoPass = poolTwoPassArena.Get().(*twoPassArena)
-	}
-}
-
-// compress runs the fast encoder on buffered data and writes the
-// compressed output to dst. If isLast is true the brotli stream
-// is finalized.
-func (w *Writer) compress(isLast bool) error {
-	// The C reference limits each fragment to 1<<lgwin bytes.
-	blockSizeLimit := 1 << w.lgwin
-
-	// Ensure the output buffer is large enough for the largest fragment.
-	// Worst case: uncompressed meta-block = header + data + padding.
-	maxBlock := min(len(w.buf), blockSizeLimit)
-	needed := maxBlock*2 + 1024
-	if len(w.outBuf) < needed {
-		w.outBuf = getFastByteBuffer(&poolFastOutBuf, needed)
-	}
-	w.outBuf[0] = 0
-
-	b := bitWriter{buf: w.outBuf}
-
-	if !w.wroteHeader {
-		// For quality 0-1 the C reference clamps the header lgwin to at
-		// least 18 since these modes don't use a sliding window.
-		headerLGWin := max(w.lgwin, 18)
-		lastBytes, lastBytesBits := encodeWindowBits(headerLGWin)
-		b.writeBits(uint(lastBytesBits), uint64(lastBytes))
-		w.wroteHeader = true
-	}
-
-	// Lazily grow command/literal buffers for q=1, sized to actual need.
-	if w.quality == 1 {
-		bufSize := min(maxBlock, twoPassBlockSize)
-		if len(w.commandBuf) < bufSize {
-			w.commandBuf = getFastCommandBuffer(bufSize)
-		}
-		if len(w.literalBuf) < bufSize {
-			w.literalBuf = getFastByteBuffer(&poolFastLiterals, bufSize)
-		}
-	}
-
-	input := w.buf
-	var smallTable32 [1024]uint32
-	var table32 []uint32
-	var table32Ptr *[]uint32
-	for len(input) > 0 || isLast {
-		blockSize := min(len(input), blockSizeLimit)
-		blockIsLast := isLast && blockSize == len(input)
-		block := input[:blockSize]
-		input = input[blockSize:]
-
-		// Size and clear hash table per block, matching the C reference.
-		htsize := fastHashTableSize(w.quality, blockSize)
-
-		switch w.quality {
-		case 0:
-			if htsize <= len(smallTable32) {
-				table := smallTable32[:htsize]
-				clear(table)
-				compressFragmentFast(w.onePass, block, blockIsLast, table, &b)
-				break
-			}
-			if len(table32) < htsize {
-				if table32Ptr == nil {
-					table32Ptr, table32 = getFastUint32Buffer(htsize)
-				} else {
-					*table32Ptr = make([]uint32, htsize)
-					table32 = *table32Ptr
-				}
-				clear(table32)
-			} else {
-				clear(table32[:htsize])
-			}
-			table := table32[:htsize]
-			compressFragmentFast(w.onePass, block, blockIsLast, table, &b)
-		case 1:
-			if len(w.table) < htsize {
-				w.table = getFastUint32Slice(htsize)
-				clear(w.table)
-			} else {
-				clear(w.table[:htsize])
-			}
-			table := w.table[:htsize]
-			compressFragmentTwoPass(w.twoPass, block, blockIsLast, w.commandBuf[:min(blockSize, twoPassBlockSize)], w.literalBuf[:min(blockSize, twoPassBlockSize)], table, &b)
-		}
-
-		// Flush compressed bytes between blocks to keep memory bounded.
-		n := b.bitOffset / 8
-		if n > 0 {
-			if _, err := w.dst.Write(w.outBuf[:n]); err != nil {
-				putFastUint32Buffer(table32Ptr, table32)
-				return err
-			}
-			// Carry trailing sub-byte bits to the start of the buffer.
-			w.outBuf[0] = w.outBuf[n]
-			b.bitOffset &= 7
-		}
-
-		if blockIsLast {
-			break
-		}
-	}
-	w.buf = w.buf[:0]
-
-	// Write any remaining sub-byte bits.
-	n := (b.bitOffset + 7) / 8
-	if n > 0 {
-		_, err := w.dst.Write(w.outBuf[:n])
-		if err != nil {
-			putFastUint32Buffer(table32Ptr, table32)
-			return err
-		}
-	}
-	putFastUint32Buffer(table32Ptr, table32)
-	return nil
-}
-
-func getFastByteBuffer(pool *sync.Pool, n int) []byte {
-	if v := pool.Get(); v != nil {
-		buf := *v.(*[]byte)
-		if cap(buf) >= n {
-			return buf[:n]
-		}
-	}
-	return make([]byte, n)
-}
-
-func putFastByteBuffer(pool *sync.Pool, buf []byte) {
-	if cap(buf) != 0 {
-		buf = buf[:0]
-		pool.Put(&buf)
-	}
-}
-
-func getFastUint32Slice(n int) []uint32 {
-	if v := poolFastTable32.Get(); v != nil {
-		buf := *v.(*[]uint32)
-		if cap(buf) >= n {
-			return buf[:n]
-		}
-	}
-	return make([]uint32, n)
-}
-
-func putFastUint32Slice(buf []uint32) {
-	if cap(buf) != 0 {
-		buf = buf[:0]
-		poolFastTable32.Put(&buf)
-	}
-}
-
-func getFastUint32Buffer(n int) (*[]uint32, []uint32) {
-	if v := poolFastTable32.Get(); v != nil {
-		p := v.(*[]uint32)
-		buf := *p
-		if cap(buf) >= n {
-			return p, buf[:n]
-		}
-		*p = make([]uint32, n)
-		return p, *p
-	}
-	p := new([]uint32)
-	*p = make([]uint32, n)
-	return p, *p
-}
-
-func putFastUint32Buffer(p *[]uint32, buf []uint32) {
-	if p != nil && cap(buf) != 0 {
-		*p = buf[:0]
-		poolFastTable32.Put(p)
-	}
-}
-
-func getFastCommandBuffer(n int) []uint32 {
-	if v := poolFastCommands.Get(); v != nil {
-		buf := *v.(*[]uint32)
-		if cap(buf) >= n {
-			return buf[:n]
-		}
-	}
-	return make([]uint32, n)
-}
-
-func putFastCommandBuffer(buf []uint32) {
-	if cap(buf) != 0 {
-		buf = buf[:0]
-		poolFastCommands.Put(&buf)
-	}
-}
-
-func (w *Writer) releaseFastBuffers() {
-	if w.onePass != nil {
-		poolOnePassArena.Put(w.onePass)
-		w.onePass = nil
-	}
-	if w.twoPass != nil {
-		poolTwoPassArena.Put(w.twoPass)
-		w.twoPass = nil
-	}
-	putFastByteBuffer(&poolFastOutBuf, w.outBuf)
-	w.outBuf = nil
-	putFastUint32Slice(w.table)
-	w.table = nil
-	putFastCommandBuffer(w.commandBuf)
-	w.commandBuf = nil
-	putFastByteBuffer(&poolFastLiterals, w.literalBuf)
-	w.literalBuf = nil
+	w.c = newFastCompressor(w.quality, w.lgwin)
 }
 
 // writeEncoded writes encoder output to the underlying writer.
@@ -525,22 +289,4 @@ func (w *Writer) closeStreaming() error {
 		}
 	}
 	return nil
-}
-
-// fastHashTableSize returns the hash table size for a given quality and block
-// size, matching the C reference GetHashTable logic.
-func fastHashTableSize(quality, blockSize int) int {
-	maxTableSize := 1 << 15 // q0
-	if quality == 1 {
-		maxTableSize = 1 << 17
-	}
-	htsize := 256
-	for htsize < maxTableSize && htsize < blockSize {
-		htsize <<= 1
-	}
-	// Q0 requires odd-bit tables (9, 11, 13, 15).
-	if quality == 0 && (htsize&0xAAAAA) == 0 {
-		htsize <<= 1
-	}
-	return htsize
 }
