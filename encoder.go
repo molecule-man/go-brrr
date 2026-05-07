@@ -7,35 +7,14 @@ import (
 	"sync"
 )
 
-// Hasher pools keyed by concrete type. Using sync.Pool avoids the expensive
-// zero-initialization of large bucket arrays (up to 32 MB for h5b8/h6b8) on
-// every oneshot compression. The hasher's reset() method only zeroes the small
-// num[] counter array, not the full bucket storage.
-//
-// poolEncoderSplit recycles encoderSplit instances across oneshot calls. The
-// encoder's reusable slice buffers (commands, outBuf, splitBufs, etc.) retain
-// their capacity, so subsequent calls skip the large per-call allocations that
-// would otherwise dominate GC pressure for small inputs.
+// poolEncoderArena and poolEncoderSplit recycle the streaming encoder shells
+// across oneshot calls. The encoder's reusable slice buffers (commands,
+// outBuf, splitBufs, etc.) retain their capacity, so subsequent calls skip the
+// large per-call allocations that would otherwise dominate GC pressure for
+// small inputs. Per-hasher pools live in hasher_pool.go.
 var (
 	poolEncoderArena = sync.Pool{New: func() any { return new(encoderArena) }}
 	poolEncoderSplit = sync.Pool{New: func() any { return new(encoderSplit) }}
-	poolH2           = sync.Pool{New: func() any { return new(h2) }}
-	poolH2u16        = sync.Pool{New: func() any { return new(h2u16) }}
-	poolH3           = sync.Pool{New: func() any { return new(h3) }}
-	poolH3u16        = sync.Pool{New: func() any { return new(h3u16) }}
-	poolH4           = sync.Pool{New: func() any { return new(h4) }}
-	poolH4u16        = sync.Pool{New: func() any { return new(h4u16) }}
-	poolH5           = sync.Pool{New: func() any { return new(h5) }}
-	poolH54          = sync.Pool{New: func() any { return new(h54) }}
-	poolH5b5         = sync.Pool{New: func() any { return new(h5b5) }}
-	poolH5b6         = sync.Pool{New: func() any { return new(h5b6) }}
-	poolH5b7         = sync.Pool{New: func() any { return new(h5b7) }}
-	poolH5b8         = sync.Pool{New: func() any { return new(h5b8) }}
-	poolH6           = sync.Pool{New: func() any { return new(h6) }}
-	poolH6b5         = sync.Pool{New: func() any { return new(h6b5) }}
-	poolH6b6         = sync.Pool{New: func() any { return new(h6b6) }}
-	poolH6b7         = sync.Pool{New: func() any { return new(h6b7) }}
-	poolH6b8         = sync.Pool{New: func() any { return new(h6b8) }}
 )
 
 // streamEncoder is the interface connecting the Writer to quality-specific
@@ -188,46 +167,6 @@ func (c *encoderCore) releaseBuffers() {
 	c.releaseRingBuffer()
 	releaseHasher(c.hasher)
 	c.hasher = nil
-}
-
-// releaseHasher returns a hasher to its type-specific pool.
-func releaseHasher(h streamHasher) {
-	switch h := h.(type) {
-	case *h2:
-		poolH2.Put(h)
-	case *h2u16:
-		poolH2u16.Put(h)
-	case *h3:
-		poolH3.Put(h)
-	case *h3u16:
-		poolH3u16.Put(h)
-	case *h4:
-		poolH4.Put(h)
-	case *h4u16:
-		poolH4u16.Put(h)
-	case *h5:
-		poolH5.Put(h)
-	case *h54:
-		poolH54.Put(h)
-	case *h5b5:
-		poolH5b5.Put(h)
-	case *h5b6:
-		poolH5b6.Put(h)
-	case *h5b7:
-		poolH5b7.Put(h)
-	case *h5b8:
-		poolH5b8.Put(h)
-	case *h6:
-		poolH6.Put(h)
-	case *h6b5:
-		poolH6b5.Put(h)
-	case *h6b6:
-		poolH6b6.Put(h)
-	case *h6b7:
-		poolH6b7.Put(h)
-	case *h6b8:
-		poolH6b8.Put(h)
-	}
 }
 
 // stitchHasher resets the hash table on first use (or after a 32-bit position
