@@ -11,6 +11,9 @@ import (
 	"sync"
 	"testing"
 	"testing/iotest"
+
+	"github.com/molecule-man/go-brrr/internal/creftest"
+	"github.com/molecule-man/go-brrr/internal/encoder"
 )
 
 // testdataCache shares corpus file contents across the many parallel
@@ -141,7 +144,7 @@ func testMatchesCRef(t *testing.T, quality, lgwin int, sizeHint uint) {
 			goOut := goBuf.Bytes()
 
 			// Roundtrip: decompress with C reference and verify correctness.
-			decompressed := brotliDecompress(t, goOut)
+			decompressed := creftest.BrotliDecompress(t, goOut)
 			if !bytes.Equal(decompressed, tt.input) {
 				t.Fatalf("roundtrip mismatch: decompressed %d bytes, want %d bytes",
 					len(decompressed), len(tt.input))
@@ -166,7 +169,7 @@ func testMatchesCRef(t *testing.T, quality, lgwin int, sizeHint uint) {
 				t.Fatalf("Go streaming roundtrip mismatch: %v", err)
 			}
 
-			cOut := brotliCompress(t, tt.input, quality, lgwin, sizeHint)
+			cOut := creftest.BrotliCompress(t, tt.input, quality, lgwin, sizeHint)
 
 			// Conditions where Go output may differ from C but both are valid:
 			//   - Q10+: Zopfli optimal parsing where Go's math.Log2 diverges
@@ -286,24 +289,13 @@ func TestPositionWrap(t *testing.T) {
 
 // seedEncoderPosForTest advances the streaming encoder's stream-position
 // fields to pos so the next Write straddles the 32-bit wrap boundary without
-// having to compress GiB of input first. The ring buffer is left empty (the
-// encoder only references data we subsequently write), and lgwin caps
-// distances so references stay within the in-metablock region.
+// having to compress GiB of input first. Delegates to encoder package since
+// the field pokes are not visible from this package.
 func seedEncoderPosForTest(t *testing.T, w *Writer, pos uint64) {
 	t.Helper()
-	var es *encodeState
-	switch enc := w.c.(type) {
-	case *encoderArena:
-		es = &enc.encodeState
-	case *encoderSplit:
-		es = &enc.encodeState
-	default:
+	if !encoder.SeedStreamPosForTest(w.c, pos) {
 		t.Fatalf("unexpected encoder type %T (Q0/Q1 do not use the wrap path)", w.c)
 	}
-	es.inputPos = pos
-	es.lastProcessedPos = pos
-	es.lastFlushPos = pos
-	es.ringBufPos = uint32(pos & uint64(es.mask))
 }
 
 func readTestdata(t *testing.T, path string) []byte {
@@ -396,7 +388,7 @@ func testCompoundDictMatchesCRef(t *testing.T, quality, lgwin int, sizeHint uint
 	goOut := goBuf.Bytes()
 
 	// C reference encoder with compound dictionary.
-	cOut := brotliCompressDict(t, input, dict, quality, lgwin, sizeHint)
+	cOut := creftest.BrotliCompressDict(t, input, dict, quality, lgwin, sizeHint)
 
 	if !bytes.Equal(goOut, cOut) {
 		t.Errorf("output mismatch: Go produced %d bytes, C produced %d bytes",
@@ -518,7 +510,7 @@ func TestCompoundDictDecoderCRef(t *testing.T) {
 				t.Parallel()
 
 				// C encoder with compound dictionary.
-				compressed := brotliCompressDict(t, input, dict, quality, lgwin, 0)
+				compressed := creftest.BrotliCompressDict(t, input, dict, quality, lgwin, 0)
 
 				// Go decoder with compound dictionary.
 				r, err := NewReaderOptions(bytes.NewReader(compressed), ReaderOptions{

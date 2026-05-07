@@ -7,6 +7,8 @@ import (
 	"io"
 	"sync"
 	"testing"
+
+	"github.com/molecule-man/go-brrr/internal/creftest"
 )
 
 // writerLevels are the quality levels exercised by round-trip tests.
@@ -36,7 +38,7 @@ func TestWriterMultipleWrites(t *testing.T) {
 				t.Fatalf("Close: %v", err)
 			}
 
-			decompressed := brotliDecompress(t, buf.Bytes())
+			decompressed := creftest.BrotliDecompress(t, buf.Bytes())
 			if !bytes.Equal(decompressed, input) {
 				t.Errorf("round-trip mismatch: got %d bytes, want %d bytes",
 					len(decompressed), len(input))
@@ -82,7 +84,7 @@ func TestWriterFlush(t *testing.T) {
 				t.Fatalf("Close: %v", err)
 			}
 
-			decompressed := brotliDecompress(t, buf.Bytes())
+			decompressed := creftest.BrotliDecompress(t, buf.Bytes())
 			if !bytes.Equal(decompressed, want) {
 				t.Errorf("round-trip mismatch: got %d bytes, want %d bytes",
 					len(decompressed), len(want))
@@ -104,7 +106,7 @@ func TestWriterEmpty(t *testing.T) {
 				t.Fatalf("Close: %v", err)
 			}
 
-			decompressed := brotliDecompress(t, buf.Bytes())
+			decompressed := creftest.BrotliDecompress(t, buf.Bytes())
 			if len(decompressed) != 0 {
 				t.Errorf("expected empty output, got %d bytes: %q", len(decompressed), decompressed)
 			}
@@ -142,12 +144,12 @@ func TestWriterReset(t *testing.T) {
 				t.Fatalf("Close 2: %v", err)
 			}
 
-			dec1 := brotliDecompress(t, buf1.Bytes())
+			dec1 := creftest.BrotliDecompress(t, buf1.Bytes())
 			if !bytes.Equal(dec1, input1) {
 				t.Errorf("stream 1 mismatch: got %q, want %q", dec1, input1)
 			}
 
-			dec2 := brotliDecompress(t, buf2.Bytes())
+			dec2 := creftest.BrotliDecompress(t, buf2.Bytes())
 			if !bytes.Equal(dec2, input2) {
 				t.Errorf("stream 2 mismatch: got %q, want %q", dec2, input2)
 			}

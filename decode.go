@@ -1091,7 +1091,7 @@ func (s *decodeState) readHuffmanCode(alphabetSizeMax, alphabetSizeLimit uint, t
 				s.err = decompressError("huffman space not zero")
 				return decoderResultError
 			}
-			sl := symbolList{storage: h.symbolLists, offset: symListBase}
+			sl := symbolList{Storage: h.symbolLists, Offset: symListBase}
 			tableSize := buildHuffmanTable(table, huffmanTableBits, sl, h.codeLengthHisto[:])
 			if optTableSize != nil {
 				*optTableSize = tableSize
@@ -1369,8 +1369,8 @@ slow:
 			// Fast path.
 			br.fillBitWindow16()
 			entry := p[br.bitsUnmasked()&bitMask(huffmanMaxCodeLengthCodeLength)]
-			br.dropBits(uint(entry.bits))
-			codeLen := uint(entry.value)
+			br.dropBits(uint(entry.Bits))
+			codeLen := uint(entry.Value)
 			if codeLen < repeatPreviousCodeLength {
 				h.processSingleCodeLength(codeLen)
 			} else {
@@ -1390,26 +1390,26 @@ slow:
 				bits = br.bitsUnmasked()
 			}
 			entry := p[bits&bitMask(huffmanMaxCodeLengthCodeLength)]
-			if uint(entry.bits) > availBits {
+			if uint(entry.Bits) > availBits {
 				if !br.pullByte() {
 					return decoderResultNeedsMoreInput
 				}
 				continue
 			}
-			codeLen := uint(entry.value)
+			codeLen := uint(entry.Value)
 			if codeLen < repeatPreviousCodeLength {
-				br.dropBits(uint(entry.bits))
+				br.dropBits(uint(entry.Bits))
 				h.processSingleCodeLength(codeLen)
 			} else {
 				extraBits := codeLen - 14
-				repeatDelta := uint((bits >> uint(entry.bits)) & bitMask(extraBits))
-				if availBits < uint(entry.bits)+extraBits {
+				repeatDelta := uint((bits >> uint(entry.Bits)) & bitMask(extraBits))
+				if availBits < uint(entry.Bits)+extraBits {
 					if !br.pullByte() {
 						return decoderResultNeedsMoreInput
 					}
 					continue
 				}
-				br.dropBits(uint(entry.bits) + extraBits)
+				br.dropBits(uint(entry.Bits) + extraBits)
 				h.processRepeatedCodeLength(codeLen, repeatDelta, alphabetSize)
 			}
 		}
@@ -1519,10 +1519,10 @@ commandBegin:
 		}
 
 		v = *(*cmdLutElement)(unsafe.Add(unsafe.Pointer(&cmdLut[0]), uintptr(cmdCode)*unsafe.Sizeof(cmdLutElement{})))
-		s.distanceCode = int(v.distanceCode)
-		s.distanceContext = int(v.context)
+		s.distanceCode = int(v.DistanceCode)
+		s.distanceContext = int(v.Context)
 		s.distCodesOffset = s.distCodesCache[s.distanceContext&3]
-		i = int(v.insertLenOffset)
+		i = int(v.InsertLenOffset)
 
 		// Combined drop + readBits for insertLenExtra + copyLenExtra:
 		// use local val/bitPos to avoid redundant stores/loads of br.val
@@ -1531,15 +1531,15 @@ commandBegin:
 		bitPos := br.bitPos - cmdDrop
 
 		insertLenExtra = 0
-		if v.insertLenExtraBits != 0 {
+		if v.InsertLenExtraBits != 0 {
 			if bitPos <= 32 {
 				val |= uint64(*(*uint32)(unsafe.Add(br.inputBase, br.pos))) << bitPos
 				bitPos += 32
 				br.pos += 4
 			}
-			insertLenExtra = val & bitMask(uint(v.insertLenExtraBits))
-			val >>= uint(v.insertLenExtraBits) & 63
-			bitPos -= uint(v.insertLenExtraBits)
+			insertLenExtra = val & bitMask(uint(v.InsertLenExtraBits))
+			val >>= uint(v.InsertLenExtraBits) & 63
+			bitPos -= uint(v.InsertLenExtraBits)
 		}
 
 		if bitPos <= 32 {
@@ -1547,14 +1547,14 @@ commandBegin:
 			bitPos += 32
 			br.pos += 4
 		}
-		copyExtra := val & bitMask(uint(v.copyLenExtraBits))
-		val >>= uint(v.copyLenExtraBits) & 63
-		bitPos -= uint(v.copyLenExtraBits)
+		copyExtra := val & bitMask(uint(v.CopyLenExtraBits))
+		val >>= uint(v.CopyLenExtraBits) & 63
+		bitPos -= uint(v.CopyLenExtraBits)
 
 		br.val = val
 		br.bitPos = bitPos
 
-		s.copyLength = int(v.copyLenOffset) + int(copyExtra)
+		s.copyLength = int(v.CopyLenOffset) + int(copyExtra)
 	} else {
 		cmdMemento := br.saveState()
 		cmdCode, ok = safeReadSymbol(s.htreeCommand, br)
@@ -1566,14 +1566,14 @@ commandBegin:
 		s.safeCmdMemento = cmdMemento
 
 		v = cmdLut[cmdCode]
-		s.distanceCode = int(v.distanceCode)
-		s.distanceContext = int(v.context)
+		s.distanceCode = int(v.DistanceCode)
+		s.distanceContext = int(v.Context)
 		s.distCodesOffset = s.distCodesCache[s.distanceContext]
-		i = int(v.insertLenOffset)
+		i = int(v.InsertLenOffset)
 
 		insertLenExtra = 0
-		if v.insertLenExtraBits != 0 {
-			insertLenExtra, ok = br.safeReadBits(uint(v.insertLenExtraBits))
+		if v.InsertLenExtraBits != 0 {
+			insertLenExtra, ok = br.safeReadBits(uint(v.InsertLenExtraBits))
 			if !ok {
 				br.restoreState(s.safeCmdMemento)
 				s.state = decoderStateCommandBegin
@@ -1582,14 +1582,14 @@ commandBegin:
 			}
 		}
 		var val uint64
-		val, ok = br.safeReadBits(uint(v.copyLenExtraBits))
+		val, ok = br.safeReadBits(uint(v.CopyLenExtraBits))
 		if !ok {
 			br.restoreState(s.safeCmdMemento)
 			s.state = decoderStateCommandBegin
 			s.pos = pos
 			return decoderResultNeedsMoreInput
 		}
-		s.copyLength = int(v.copyLenOffset) + int(val)
+		s.copyLength = int(v.CopyLenOffset) + int(val)
 	}
 	s.blockLength[1]--
 	i += int(insertLenExtra)
@@ -2066,16 +2066,16 @@ func decompressError(msg string) error {
 func decodeSymbol(bits uint64, table []huffmanCode, br *bitReader) uint {
 	idx := bits & huffmanTableMask
 	entry := table[idx]
-	drop := uint(entry.bits)
+	drop := uint(entry.Bits)
 	if drop > huffmanTableBits {
 		nbits := drop - huffmanTableBits
-		entry = table[idx+uint64(entry.value)+((bits>>huffmanTableBits)&bitMask(nbits))]
-		// Second-level entry.bits stores codeLen-rootBits; combine both drops
+		entry = table[idx+uint64(entry.Value)+((bits>>huffmanTableBits)&bitMask(nbits))]
+		// Second-level entry.Bits stores codeLen-rootBits; combine both drops
 		// into a single shift to reduce overhead on the hot path.
-		drop = huffmanTableBits + uint(entry.bits)
+		drop = huffmanTableBits + uint(entry.Bits)
 	}
 	br.dropBits(drop)
-	return uint(entry.value)
+	return uint(entry.Value)
 }
 
 // distanceSymbolEntryFast loads the first-level distance Huffman table entry.
@@ -2248,32 +2248,32 @@ func decodeLiteralsContextBatch(
 func safeDecodeSymbol(table []huffmanCode, br *bitReader) (uint, bool) {
 	availBits := br.availBits()
 	if availBits == 0 {
-		if table[0].bits == 0 {
-			return uint(table[0].value), true
+		if table[0].Bits == 0 {
+			return uint(table[0].Value), true
 		}
 		return 0, false
 	}
 	val := br.bitsUnmasked()
 	idx := val & huffmanTableMask
 	entry := table[idx]
-	if uint(entry.bits) <= huffmanTableBits {
-		if uint(entry.bits) <= availBits {
-			br.dropBits(uint(entry.bits))
-			return uint(entry.value), true
+	if uint(entry.Bits) <= huffmanTableBits {
+		if uint(entry.Bits) <= availBits {
+			br.dropBits(uint(entry.Bits))
+			return uint(entry.Value), true
 		}
 		return 0, false
 	}
 	if availBits <= huffmanTableBits {
 		return 0, false
 	}
-	sub := (val & bitMask(uint(entry.bits))) >> huffmanTableBits
+	sub := (val & bitMask(uint(entry.Bits))) >> huffmanTableBits
 	availBits -= huffmanTableBits
-	entry2 := table[idx+uint64(entry.value)+sub]
-	if availBits < uint(entry2.bits) {
+	entry2 := table[idx+uint64(entry.Value)+sub]
+	if availBits < uint(entry2.Bits) {
 		return 0, false
 	}
-	br.dropBits(huffmanTableBits + uint(entry2.bits))
-	return uint(entry2.value), true
+	br.dropBits(huffmanTableBits + uint(entry2.Bits))
+	return uint(entry2.Value), true
 }
 
 // safeReadSymbol tries the fast path (15 bits), falls back to safe decode.

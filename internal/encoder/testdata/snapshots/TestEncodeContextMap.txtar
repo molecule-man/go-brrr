@@ -1,0 +1,15 @@
+-- single_cluster --
+1 bits
+00000000  00                                                |.|
+-- two_clusters_simple --
+16 bits
+00000000  a1 f4                                             |..|
+-- three_clusters --
+27 bits
+00000000  43 1a 0d 04                                       |C...|
+-- many_zeros --
+34 bits
+00000000  51 92 d3 20 03                                    |Q.. .|
+-- four_clusters_mixed --
+41 bits
+00000000  53 b3 b5 97 24 01                                 |S...$.|
