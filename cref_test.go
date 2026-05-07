@@ -292,13 +292,13 @@ func TestPositionWrap(t *testing.T) {
 func seedEncoderPosForTest(t *testing.T, w *Writer, pos uint64) {
 	t.Helper()
 	var es *encodeState
-	switch enc := w.enc.(type) {
+	switch enc := w.c.(type) {
 	case *encoderArena:
 		es = &enc.encodeState
 	case *encoderSplit:
 		es = &enc.encodeState
 	default:
-		t.Fatalf("unexpected encoder type %T (Q0/Q1 do not use the wrap path)", w.enc)
+		t.Fatalf("unexpected encoder type %T (Q0/Q1 do not use the wrap path)", w.c)
 	}
 	es.inputPos = pos
 	es.lastProcessedPos = pos

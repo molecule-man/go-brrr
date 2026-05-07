@@ -12,6 +12,9 @@ import (
 var (
 	errFastCompoundDict = errors.New("brrr: compound dictionaries require quality >= 2")
 
+	poolOnePassArena = sync.Pool{New: func() any { return new(onePassArena) }}
+	poolTwoPassArena = sync.Pool{New: func() any { return new(twoPassArena) }}
+
 	poolFastOutBuf   sync.Pool
 	poolFastTable32  sync.Pool
 	poolFastCommands sync.Pool

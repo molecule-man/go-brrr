@@ -6,11 +6,7 @@ import (
 	"errors"
 	"io"
 	"strconv"
-	"sync"
 )
-
-var poolOnePassArena = sync.Pool{New: func() any { return new(onePassArena) }}
-var poolTwoPassArena = sync.Pool{New: func() any { return new(twoPassArena) }}
 
 // Writer compresses data into brotli format.
 //
@@ -18,8 +14,7 @@ var poolTwoPassArena = sync.Pool{New: func() any { return new(twoPassArena) }}
 type Writer struct {
 	dst      io.Writer
 	err      error
-	enc      streamEncoder         // non-nil for quality >= 2
-	c        compressor            // non-nil for quality <= 1 (q0/q1 backend)
+	c        compressor
 	dicts    []*PreparedDictionary // from WriterOptions, preserved across Reset
 	quality  int                   // 0 = one-pass, 1 = two-pass, 2+ = streaming
 	lgwin    int
@@ -61,9 +56,9 @@ func NewWriterOptions(dst io.Writer, level int, opts WriterOptions) (*Writer, er
 	}
 
 	w := &Writer{dst: dst, quality: level, lgwin: lgwin, sizeHint: opts.SizeHint, dicts: opts.Dictionaries}
-	w.init()
+	w.c = newCompressor(w.quality, w.lgwin, w.sizeHint)
 	for _, pd := range w.dicts {
-		_ = w.enc.attachDictionary(pd)
+		_ = w.c.AttachDictionary(pd)
 	}
 	return w, nil
 }
@@ -78,27 +73,11 @@ func (w *Writer) Write(p []byte) (int, error) {
 	if w.closed {
 		return 0, io.ErrClosedPipe
 	}
-
-	if w.c != nil {
-		return w.c.Write(w.dst, p)
+	n, err := w.c.Write(w.dst, p)
+	if err != nil {
+		w.err = err
 	}
-
-	// Quality >= 2: streaming ring-buffer approach.
-	w.enc.updateSizeHint(uint(len(p)))
-	written := len(p)
-	for len(p) > 0 {
-		remaining := w.enc.remainingInputBlockSize()
-		if remaining == 0 {
-			if err := w.writeEncoded(w.enc.encodeData(false, false)); err != nil {
-				return 0, err
-			}
-			continue
-		}
-		chunk := min(uint(len(p)), remaining)
-		w.enc.copyInputToRingBuffer(p[:chunk])
-		p = p[chunk:]
-	}
-	return written, nil
+	return n, err
 }
 
 // Flush compresses any buffered data and writes it to the underlying
@@ -111,11 +90,6 @@ func (w *Writer) Flush() error {
 	if w.closed {
 		return io.ErrClosedPipe
 	}
-
-	if w.enc != nil {
-		return w.flushStreaming()
-	}
-
 	w.err = w.c.Flush(w.dst)
 	return w.err
 }
@@ -131,23 +105,6 @@ func (w *Writer) Close() error {
 		return nil
 	}
 	w.closed = true
-
-	if w.enc != nil {
-		w.err = w.closeStreaming()
-		if !w.reused {
-			w.enc.releaseBuffers()
-			switch e := w.enc.(type) {
-			case *encoderSplit:
-				poolEncoderSplit.Put(e)
-				w.enc = nil
-			case *encoderArena:
-				poolEncoderArena.Put(e)
-				w.enc = nil
-			}
-		}
-		return w.err
-	}
-
 	w.err = w.c.Close(w.dst)
 	if !w.reused {
 		w.c.Release()
@@ -165,128 +122,13 @@ func (w *Writer) Reset(dst io.Writer) {
 	w.closed = false
 	w.reused = true
 
-	if w.enc != nil {
-		w.enc.reset(w.quality, w.lgwin, w.sizeHint)
-		for _, pd := range w.dicts {
-			_ = w.enc.attachDictionary(pd)
-		}
-		return
-	}
-
-	if w.quality >= 4 {
-		// enc was returned to pool on a previous Close; re-acquire.
-		e := poolEncoderSplit.Get().(*encoderSplit)
-		e.reset(w.quality, w.lgwin, w.sizeHint)
-		w.enc = e
-		for _, pd := range w.dicts {
-			_ = w.enc.attachDictionary(pd)
-		}
-		return
-	}
-
-	if w.quality >= 2 {
-		// enc was returned to pool on a previous Close; re-acquire.
-		e := poolEncoderArena.Get().(*encoderArena)
-		e.reset(w.quality, w.lgwin, w.sizeHint)
-		w.enc = e
-		for _, pd := range w.dicts {
-			_ = w.enc.attachDictionary(pd)
-		}
-		return
-	}
-
 	if w.c == nil {
-		w.c = newFastCompressor(w.quality, w.lgwin)
-		return
+		// Compressor was released on a previous Close; re-acquire.
+		w.c = newCompressor(w.quality, w.lgwin, w.sizeHint)
+	} else {
+		w.c.Reset()
 	}
-	w.c.Reset()
-}
-
-func (w *Writer) init() {
-	if w.quality >= 4 {
-		e := poolEncoderSplit.Get().(*encoderSplit)
-		e.reset(w.quality, w.lgwin, w.sizeHint)
-		w.enc = e
-		return
+	for _, pd := range w.dicts {
+		_ = w.c.AttachDictionary(pd)
 	}
-	if w.quality >= 2 {
-		e := poolEncoderArena.Get().(*encoderArena)
-		e.reset(w.quality, w.lgwin, w.sizeHint)
-		w.enc = e
-		return
-	}
-	// Quality 0-1: fastCompressor lazily allocates table/commandBuf/literalBuf
-	// in compress() based on actual block size, avoiding large upfront
-	// allocations that dominate cost for small inputs.
-	w.c = newFastCompressor(w.quality, w.lgwin)
-}
-
-// writeEncoded writes encoder output to the underlying writer.
-func (w *Writer) writeEncoded(out []byte) error {
-	if len(out) > 0 {
-		_, err := w.dst.Write(out)
-		if err != nil {
-			w.err = err
-			return err
-		}
-	}
-	return nil
-}
-
-// flushStreaming flushes the streaming encoder (quality >= 2).
-// Emits any accumulated data as a non-final meta-block, followed by a
-// byte-padding metadata block so the output is byte-aligned.
-func (w *Writer) flushStreaming() error {
-	if err := w.writeEncoded(w.enc.encodeData(false, true)); err != nil {
-		return err
-	}
-
-	// Inject byte-padding metadata block: ISLAST=0, MNIBBLES=11,
-	// reserved=0, MSKIPBYTES=00. This flushes any trailing sub-byte
-	// bits to the output.
-	lastBytes, lastBytesBits := w.enc.trailingBits()
-	seal := uint32(lastBytes)
-	sealBits := uint(lastBytesBits)
-	w.enc.clearTrailingBits()
-
-	seal |= 0x6 << sealBits
-	sealBits += 6
-
-	var padding [3]byte
-	padding[0] = byte(seal)
-	if sealBits > 8 {
-		padding[1] = byte(seal >> 8)
-	}
-	if sealBits > 16 {
-		padding[2] = byte(seal >> 16)
-	}
-	n := (sealBits + 7) / 8
-	if _, err := w.dst.Write(padding[:n]); err != nil {
-		w.err = err
-		return err
-	}
-	return nil
-}
-
-// closeStreaming finalizes the streaming encoder (quality >= 2).
-func (w *Writer) closeStreaming() error {
-	out := w.enc.encodeData(true, false)
-	if err := w.writeEncoded(out); err != nil {
-		return err
-	}
-
-	// If there are trailing sub-byte bits (edge case: empty stream header
-	// bits that weren't flushed by encodeData), emit them.
-	lastBytes, lastBytesBits := w.enc.trailingBits()
-	if lastBytesBits > 0 {
-		var trailing [2]byte
-		trailing[0] = byte(lastBytes)
-		trailing[1] = byte(lastBytes >> 8)
-		n := (lastBytesBits + 7) / 8
-		if _, err := w.dst.Write(trailing[:n]); err != nil {
-			w.err = err
-			return err
-		}
-	}
-	return nil
 }

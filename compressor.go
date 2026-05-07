@@ -33,3 +33,21 @@ type compressor interface {
 	// pools. The compressor must not be used after Release.
 	Release()
 }
+
+// newCompressor constructs a compressor for the given quality/lgwin/sizeHint,
+// dispatching to the appropriate backend (q0/q1 fast or q>=2 streaming) and
+// configuring it from its pool.
+func newCompressor(quality, lgwin int, sizeHint uint) compressor {
+	switch {
+	case quality >= 4:
+		e := poolEncoderSplit.Get().(*encoderSplit)
+		e.reset(quality, lgwin, sizeHint)
+		return e
+	case quality >= 2:
+		e := poolEncoderArena.Get().(*encoderArena)
+		e.reset(quality, lgwin, sizeHint)
+		return e
+	default:
+		return newFastCompressor(quality, lgwin)
+	}
+}
