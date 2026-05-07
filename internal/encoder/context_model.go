@@ -22,6 +22,8 @@
 
 package encoder
 
+import "github.com/molecule-man/go-brrr/internal/core"
+
 // maxStaticContexts is the maximum number of literal context clusters
 // produced by any static context map (the complex UTF-8 map uses 13).
 const maxStaticContexts = 13
@@ -201,7 +203,7 @@ func shouldUseComplexStaticContextMap(
 	}
 
 	endPos := startPos + length
-	utf8LUT := contextUTF8 << 9
+	utf8LUT := core.ContextUTF8 << 9
 
 	// Histograms over the top 5 bits of literal bytes:
 	// combined[0..31]  = single (no-context) histogram
@@ -215,7 +217,7 @@ func shouldUseComplexStaticContextMap(
 		prev1 := data[(pos+1)&mask]
 		for p := pos + 2; p < pos+64; p++ {
 			literal := data[p&mask]
-			ctx := staticContextMapComplexUTF8[contextLookupTable[utf8LUT+int(prev1)]|contextLookupTable[utf8LUT+256+int(prev2)]]
+			ctx := staticContextMapComplexUTF8[core.ContextLookupTable[utf8LUT+int(prev1)]|core.ContextLookupTable[utf8LUT+256+int(prev2)]]
 			total++
 			combined[literal>>3]++
 			contextHisto[ctx*32+uint32(literal>>3)]++

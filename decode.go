@@ -6,6 +6,8 @@ import (
 	"errors"
 	"sync"
 	"unsafe"
+
+	"github.com/molecule-man/go-brrr/internal/core"
 )
 
 // Decoder-specific constants.
@@ -17,7 +19,7 @@ const (
 
 	// symListBase is the offset into symbolListsArray that makes C-style
 	// negative indices in nextSymbol[] addressable.
-	symListBase = huffmanMaxCodeLength + 1
+	symListBase = core.HuffmanMaxCodeLength + 1
 )
 
 // Static prefix code for the complex code length code lengths (RFC 7932 §3.5).
@@ -107,7 +109,7 @@ func (s *decodeState) decompressStream(output *[]byte) decoderResult {
 			fallthrough
 
 		case decoderStateInitialize:
-			s.maxBackwardDistance = (1 << s.windowBits) - windowGap
+			s.maxBackwardDistance = (1 << s.windowBits) - core.WindowGap
 			allTrees := reuseHuffmanCodes(s.blockTypeTrees, 3*(huffmanMaxSize258+huffmanMaxSize26))
 			s.blockTypeTrees = allTrees[:3*huffmanMaxSize258]
 			s.blockLenTrees = allTrees[3*huffmanMaxSize258:]
@@ -150,7 +152,7 @@ func (s *decodeState) decompressStream(output *[]byte) decoderResult {
 			h := &s.headerArena
 			s.loopCounter = 0
 			h.subLoopCounter = 0
-			h.symbolLists = h.symbolListsArray[huffmanMaxCodeLength+1:]
+			h.symbolLists = h.symbolListsArray[core.HuffmanMaxCodeLength+1:]
 			h.substateHuffman = huffmanNone
 			h.substateTreeGroup = treeGroupNone
 			h.substateContextMap = contextMapNone
@@ -187,7 +189,7 @@ func (s *decodeState) decompressStream(output *[]byte) decoderResult {
 
 		case decoderStateHuffmanCode2:
 			treeOffset := s.loopCounter * huffmanMaxSize26
-			result := s.readHuffmanCode(alphabetSizeBlockCount, alphabetSizeBlockCount,
+			result := s.readHuffmanCode(core.AlphabetSizeBlockCount, core.AlphabetSizeBlockCount,
 				s.blockLenTrees[treeOffset:], nil)
 			if result != decoderResultSuccess {
 				return result
@@ -227,7 +229,7 @@ func (s *decodeState) decompressStream(output *[]byte) decoderResult {
 			fallthrough
 
 		case decoderStateContextMap1:
-			result := s.decodeContextMap(s.numBlockTypes[0]<<literalContextBits, &s.contextMap, &s.numLiteralHTrees)
+			result := s.decodeContextMap(s.numBlockTypes[0]<<core.LiteralContextBits, &s.contextMap, &s.numLiteralHTrees)
 			if result != decoderResultSuccess {
 				return result
 			}
@@ -238,16 +240,16 @@ func (s *decodeState) decompressStream(output *[]byte) decoderResult {
 		case decoderStateContextMap2:
 			npostfix := s.distancePostfixBits
 			ndirect := s.numDirectDistanceCodes
-			distAlphabetSizeMax := uint(numDistanceShortCodes) + ndirect + (uint(maxDistanceBits) << (npostfix + 1))
+			distAlphabetSizeMax := uint(core.NumDistanceShortCodes) + ndirect + (uint(core.MaxDistanceBits) << (npostfix + 1))
 			distAlphabetSizeLimit := distAlphabetSizeMax
 
-			result := s.decodeContextMap(s.numBlockTypes[2]<<distanceContextBits, &s.distContextMap, &s.numDistHTrees)
+			result := s.decodeContextMap(s.numBlockTypes[2]<<core.DistanceContextBits, &s.distContextMap, &s.numDistHTrees)
 			if result != decoderResultSuccess {
 				return result
 			}
 
-			s.literalHGroup.init(uint16(alphabetSizeLiteral), uint16(alphabetSizeLiteral), uint16(s.numLiteralHTrees))
-			s.insertCopyHGroup.init(uint16(alphabetSizeInsertAndCopyLength), uint16(alphabetSizeInsertAndCopyLength), uint16(s.numBlockTypes[1]))
+			s.literalHGroup.init(uint16(core.AlphabetSizeLiteral), uint16(core.AlphabetSizeLiteral), uint16(s.numLiteralHTrees))
+			s.insertCopyHGroup.init(uint16(core.AlphabetSizeInsertAndCopyLength), uint16(core.AlphabetSizeInsertAndCopyLength), uint16(s.numBlockTypes[1]))
 			s.distanceHGroup.init(uint16(distAlphabetSizeMax), uint16(distAlphabetSizeLimit), uint16(s.numDistHTrees))
 
 			s.loopCounter = 0
@@ -784,10 +786,10 @@ func (s *decodeState) decodeBlockTypeAndLength(safe bool, treeType int) bool {
 func (s *decodeState) detectTrivialLiteralBlockTypes() {
 	s.trivialLiteralContexts = [8]uint32{}
 	for i := range s.numBlockTypes[0] {
-		offset := i << literalContextBits
+		offset := i << core.LiteralContextBits
 		sample := s.contextMap[offset]
 		trivial := true
-		for j := range uint(1 << literalContextBits) {
+		for j := range uint(1 << core.LiteralContextBits) {
 			if s.contextMap[offset+j] != sample {
 				trivial = false
 				break
@@ -801,13 +803,13 @@ func (s *decodeState) detectTrivialLiteralBlockTypes() {
 
 func (s *decodeState) prepareLiteralDecoding() {
 	blockType := s.blockTypeRB[1]
-	contextOffset := blockType << literalContextBits
+	contextOffset := blockType << core.LiteralContextBits
 	s.contextMapSliceIdx = int(contextOffset)
 	trivial := s.trivialLiteralContexts[blockType>>5]
 	s.trivialLiteralContext = int((trivial >> (blockType & 31)) & 1)
 	s.literalHTree = s.literalHGroup.codes[s.literalHGroup.htrees[s.contextMap[s.contextMapSliceIdx]]:]
 	contextMode := s.contextModes[blockType] & 3
-	s.contextLookup = contextLookupTable[uint(contextMode)<<9:]
+	s.contextLookup = core.ContextLookupTable[uint(contextMode)<<9:]
 	if s.trivialLiteralContext == 0 {
 		ctxMap := s.contextMap[s.contextMapSliceIdx:]
 		htrees := s.literalHGroup.htrees
@@ -1002,7 +1004,7 @@ func (s *decodeState) huffmanTreeGroupDecode(group *huffmanTreeGroup) decoderRes
 
 // --- Read Huffman code ---
 
-func (s *decodeState) readHuffmanCode(alphabetSizeMax, alphabetSizeLimit uint, table []huffmanCode, optTableSize *uint32) decoderResult {
+func (s *decodeState) readHuffmanCode(alphabetSizeMax, alphabetSizeLimit uint, table []core.HuffmanCode, optTableSize *uint32) decoderResult {
 	br := &s.br
 	h := &s.headerArena
 
@@ -1019,7 +1021,7 @@ func (s *decodeState) readHuffmanCode(alphabetSizeMax, alphabetSizeLimit uint, t
 				h.space = 32
 				h.repeat = 0
 				h.codeLengthHisto = [16]uint16{}
-				h.codeLengthCodeLengths = [alphabetSizeCodeLengths]byte{}
+				h.codeLengthCodeLengths = [core.AlphabetSizeCodeLengths]byte{}
 				h.substateHuffman = huffmanComplex
 				continue
 			}
@@ -1051,7 +1053,7 @@ func (s *decodeState) readHuffmanCode(alphabetSizeMax, alphabetSizeLimit uint, t
 				}
 				h.symbol += uint(bits)
 			}
-			tableSize := buildSimpleHuffmanTable(table, huffmanTableBits,
+			tableSize := core.BuildSimpleHuffmanTable(table, huffmanTableBits,
 				h.symbolListsArray[:4], uint32(h.symbol))
 			if optTableSize != nil {
 				*optTableSize = tableSize
@@ -1064,18 +1066,18 @@ func (s *decodeState) readHuffmanCode(alphabetSizeMax, alphabetSizeLimit uint, t
 			if result != decoderResultSuccess {
 				return result
 			}
-			buildCodeLengthsHuffmanTable(h.table[:], h.codeLengthCodeLengths[:], h.codeLengthHisto[:])
+			core.BuildCodeLengthsHuffmanTable(h.table[:], h.codeLengthCodeLengths[:], h.codeLengthHisto[:])
 			h.codeLengthHisto = [16]uint16{}
 
-			// Initialize symbol lists for buildHuffmanTable.
+			// Initialize symbol lists for core.BuildHuffmanTable.
 			h.symbolLists = h.symbolListsArray[:]
-			for i := 0; i <= huffmanMaxCodeLength; i++ {
+			for i := 0; i <= core.HuffmanMaxCodeLength; i++ {
 				h.nextSymbol[i] = i - symListBase
 				h.symbolListsArray[i] = 0xFFFF
 			}
 
 			h.symbol = 0
-			h.prevCodeLen = initialRepeatedCodeLength
+			h.prevCodeLen = core.InitialRepeatedCodeLength
 			h.repeat = 0
 			h.repeatCodeLen = 0
 			h.space = 32768
@@ -1091,8 +1093,8 @@ func (s *decodeState) readHuffmanCode(alphabetSizeMax, alphabetSizeLimit uint, t
 				s.err = decompressError("huffman space not zero")
 				return decoderResultError
 			}
-			sl := symbolList{Storage: h.symbolLists, Offset: symListBase}
-			tableSize := buildHuffmanTable(table, huffmanTableBits, sl, h.codeLengthHisto[:])
+			sl := core.SymbolList{Storage: h.symbolLists, Offset: symListBase}
+			tableSize := core.BuildHuffmanTable(table, huffmanTableBits, sl, h.codeLengthHisto[:])
 			if optTableSize != nil {
 				*optTableSize = tableSize
 			}
@@ -1158,8 +1160,8 @@ func (s *decodeState) readCodeLengthCodeLengths() decoderResult {
 	numCodes := h.repeat
 	space := h.space
 	i := h.subLoopCounter
-	for i < alphabetSizeCodeLengths {
-		codeLenIdx := codeLengthCodeOrder[i]
+	for i < core.AlphabetSizeCodeLengths {
+		codeLenIdx := core.CodeLengthCodeOrder[i]
 		ix, prefixAvailable := br.safeGetBits(4)
 		if !prefixAvailable {
 			avail := br.availBits()
@@ -1213,7 +1215,7 @@ func (h *metablockHeaderArena) processSingleCodeLength(codeLen uint) {
 func (h *metablockHeaderArena) processRepeatedCodeLength(codeLen, repeatDelta, alphabetSize uint) {
 	extraBits := uint(3)
 	newLen := uint(0)
-	if codeLen == repeatPreviousCodeLength {
+	if codeLen == core.RepeatPreviousCodeLength {
 		newLen = h.prevCodeLen
 		extraBits = 2
 	}
@@ -1281,7 +1283,7 @@ func (s *decodeState) readSymbolCodeLengths(alphabetSize uint) decoderResult {
 			}
 
 			// Decode code length from table — the table has exactly 32 entries
-			// (1 << huffmanMaxCodeLengthCodeLength), so masking with 0x1F is
+			// (1 << core.HuffmanMaxCodeLengthCodeLength), so masking with 0x1F is
 			// always in bounds.
 			raw := *(*uint32)(unsafe.Add(tableBase, (val&0x1F)*4))
 			drop := uint(raw & 0xFF)
@@ -1290,12 +1292,12 @@ func (s *decodeState) readSymbolCodeLengths(alphabetSize uint) decoderResult {
 			bitPos -= drop
 			val >>= drop & 63
 
-			if codeLen >= repeatPreviousCodeLength {
+			if codeLen >= core.RepeatPreviousCodeLength {
 				// Handle repeat code: inline processRepeatedCodeLength
 				// to avoid function call overhead and unnecessary br write-backs.
 				extraBits := uint(2)
 				newLen := uint(0)
-				if codeLen == repeatPreviousCodeLength {
+				if codeLen == core.RepeatPreviousCodeLength {
 					newLen = h.prevCodeLen
 				} else {
 					extraBits = 3
@@ -1368,14 +1370,14 @@ slow:
 		if br.checkInputAmount() {
 			// Fast path.
 			br.fillBitWindow16()
-			entry := p[br.bitsUnmasked()&bitMask(huffmanMaxCodeLengthCodeLength)]
+			entry := p[br.bitsUnmasked()&bitMask(core.HuffmanMaxCodeLengthCodeLength)]
 			br.dropBits(uint(entry.Bits))
 			codeLen := uint(entry.Value)
-			if codeLen < repeatPreviousCodeLength {
+			if codeLen < core.RepeatPreviousCodeLength {
 				h.processSingleCodeLength(codeLen)
 			} else {
 				extraBits := uint(2)
-				if codeLen != repeatPreviousCodeLength {
+				if codeLen != core.RepeatPreviousCodeLength {
 					extraBits = 3
 				}
 				repeatDelta := uint(br.bitsUnmasked() & bitMask(extraBits))
@@ -1389,7 +1391,7 @@ slow:
 			if availBits != 0 {
 				bits = br.bitsUnmasked()
 			}
-			entry := p[bits&bitMask(huffmanMaxCodeLengthCodeLength)]
+			entry := p[bits&bitMask(core.HuffmanMaxCodeLengthCodeLength)]
 			if uint(entry.Bits) > availBits {
 				if !br.pullByte() {
 					return decoderResultNeedsMoreInput
@@ -1397,7 +1399,7 @@ slow:
 				continue
 			}
 			codeLen := uint(entry.Value)
-			if codeLen < repeatPreviousCodeLength {
+			if codeLen < core.RepeatPreviousCodeLength {
 				br.dropBits(uint(entry.Bits))
 				h.processSingleCodeLength(codeLen)
 			} else {
@@ -1435,7 +1437,7 @@ func (s *decodeState) calculateDistanceLut() {
 
 	postfix := uint(1) << npostfix
 
-	i := uint(numDistanceShortCodes)
+	i := uint(core.NumDistanceShortCodes)
 
 	// Fill direct codes.
 	for j := range ndirect {
@@ -1472,7 +1474,7 @@ func (s *decodeState) processCommands() decoderResult {
 	i := s.loopCounter
 	var cmdCode uint
 	var ok bool
-	var v cmdLutElement
+	var v core.CmdLutElement
 	var insertLenExtra uint64
 	var literal uint
 	var p1, p2 byte
@@ -1518,7 +1520,7 @@ commandBegin:
 			cmdCode = uint(raw >> 16)
 		}
 
-		v = *(*cmdLutElement)(unsafe.Add(unsafe.Pointer(&cmdLut[0]), uintptr(cmdCode)*unsafe.Sizeof(cmdLutElement{})))
+		v = *(*core.CmdLutElement)(unsafe.Add(unsafe.Pointer(&core.CmdLut[0]), uintptr(cmdCode)*unsafe.Sizeof(core.CmdLutElement{})))
 		s.distanceCode = int(v.DistanceCode)
 		s.distanceContext = int(v.Context)
 		s.distCodesOffset = s.distCodesCache[s.distanceContext&3]
@@ -1565,7 +1567,7 @@ commandBegin:
 		}
 		s.safeCmdMemento = cmdMemento
 
-		v = cmdLut[cmdCode]
+		v = core.CmdLut[cmdCode]
 		s.distanceCode = int(v.DistanceCode)
 		s.distanceContext = int(v.Context)
 		s.distCodesOffset = s.distCodesCache[s.distanceContext]
@@ -1775,7 +1777,7 @@ commandPostDecodeLiterals:
 				s.loopCounter = i
 				return decoderResultNeedsMoreInput
 			}
-			s.distContextMapSliceIdx = int(s.blockTypeRB[5]) << distanceContextBits
+			s.distContextMapSliceIdx = int(s.blockTypeRB[5]) << core.DistanceContextBits
 			s.updateDistCodesCache()
 			s.distCodesOffset = s.distCodesCache[s.distanceContext]
 		}
@@ -1855,30 +1857,30 @@ commandPostDecodeLiterals:
 				return decoderResultNeedsMoreOutput
 			}
 
-		case i >= dictMinWordLength && i <= dictMaxWordLength:
+		case i >= core.DictMinWordLength && i <= core.DictMaxWordLength:
 			// Static dictionary reference.
 			address := s.distanceCode - s.maxDistance - 1 - compoundSize
-			shift := uint(dictSizeBitsByLength[i])
+			shift := uint(core.DictSizeBitsByLength[i])
 			if shift == 0 {
 				s.err = decompressError("invalid static dictionary reference")
 				return decoderResultError
 			}
 			wordIdx := address & ((1 << shift) - 1)
 			transformIdx := address >> shift
-			if transformIdx >= numTransforms {
+			if transformIdx >= core.NumTransforms {
 				s.err = decompressError("invalid dictionary transform")
 				return decoderResultError
 			}
-			offset := int(dictOffsetsByLength[i]) + wordIdx*i
-			word := dictData[offset : offset+i]
+			offset := int(core.DictOffsetsByLength[i]) + wordIdx*i
+			word := core.DictData[offset : offset+i]
 
 			// Compensate double distance-ring-buffer roll.
 			s.distRBIdx += s.distanceContext
 
-			if transformIdx == int(transformCutOffs[0]) {
+			if transformIdx == int(core.TransformCutOffs[0]) {
 				copy(s.ringbuffer[pos:], word)
 			} else {
-				i = transformDictionaryWord(s.ringbuffer[pos:], word, transformIdx)
+				i = core.TransformDictionaryWord(s.ringbuffer[pos:], word, transformIdx)
 				if i == 0 {
 					s.err = decompressError("invalid dictionary transform")
 					return decoderResultError
@@ -2063,7 +2065,7 @@ func decompressError(msg string) error {
 
 // decodeSymbol decodes a Huffman symbol from the bit reader using a two-level table.
 // Requires at least 15 bits available.
-func decodeSymbol(bits uint64, table []huffmanCode, br *bitReader) uint {
+func decodeSymbol(bits uint64, table []core.HuffmanCode, br *bitReader) uint {
 	idx := bits & huffmanTableMask
 	entry := table[idx]
 	drop := uint(entry.Bits)
@@ -2079,20 +2081,20 @@ func decodeSymbol(bits uint64, table []huffmanCode, br *bitReader) uint {
 }
 
 // distanceSymbolEntryFast loads the first-level distance Huffman table entry.
-func distanceSymbolEntryFast(bits uint64, table []huffmanCode, offset int) uint32 {
+func distanceSymbolEntryFast(bits uint64, table []core.HuffmanCode, offset int) uint32 {
 	tableBase := unsafe.Add(
 		unsafe.Pointer(unsafe.SliceData(table)),
-		uintptr(offset)*unsafe.Sizeof(huffmanCode{}),
+		uintptr(offset)*unsafe.Sizeof(core.HuffmanCode{}),
 	)
 	idx := bits & huffmanTableMask
 	return *(*uint32)(unsafe.Add(tableBase, idx*4))
 }
 
 // decodeDistanceSymbolSecondLevel decodes a second-level distance Huffman entry.
-func decodeDistanceSymbolSecondLevel(bits uint64, table []huffmanCode, offset int, code, drop uint) (uint, uint) {
+func decodeDistanceSymbolSecondLevel(bits uint64, table []core.HuffmanCode, offset int, code, drop uint) (uint, uint) {
 	tableBase := unsafe.Add(
 		unsafe.Pointer(unsafe.SliceData(table)),
-		uintptr(offset)*unsafe.Sizeof(huffmanCode{}),
+		uintptr(offset)*unsafe.Sizeof(core.HuffmanCode{}),
 	)
 	nbits := drop - huffmanTableBits
 	idx := (bits & huffmanTableMask) + uint64(code) + ((bits >> huffmanTableBits) & bitMask(nbits))
@@ -2106,7 +2108,7 @@ func decodeDistanceSymbolSecondLevel(bits uint64, table []huffmanCode, offset in
 // The loop is 2x-unrolled: after one fill (bitPos goes from ≤32 to ≥33),
 // two Huffman decodes (each consuming ≤15 bits) are safe without a second fill
 // since 33−30 = 3 bits always remain, and the next pair will refill.
-func decodeLiteralsBatch(dst []byte, n int, table []huffmanCode, br *bitReader) {
+func decodeLiteralsBatch(dst []byte, n int, table []core.HuffmanCode, br *bitReader) {
 	val := br.val
 	bitPos := br.bitPos
 	brPos := br.pos
@@ -2245,7 +2247,7 @@ func decodeLiteralsContextBatch(
 }
 
 // safeDecodeSymbol is a fallback when fewer than 15 bits may be available.
-func safeDecodeSymbol(table []huffmanCode, br *bitReader) (uint, bool) {
+func safeDecodeSymbol(table []core.HuffmanCode, br *bitReader) (uint, bool) {
 	availBits := br.availBits()
 	if availBits == 0 {
 		if table[0].Bits == 0 {
@@ -2277,7 +2279,7 @@ func safeDecodeSymbol(table []huffmanCode, br *bitReader) (uint, bool) {
 }
 
 // safeReadSymbol tries the fast path (15 bits), falls back to safe decode.
-func safeReadSymbol(table []huffmanCode, br *bitReader) (uint, bool) {
+func safeReadSymbol(table []core.HuffmanCode, br *bitReader) (uint, bool) {
 	val, ok := br.safeGetBits(15)
 	if ok {
 		return decodeSymbol(val, table, br), true
@@ -2287,14 +2289,14 @@ func safeReadSymbol(table []huffmanCode, br *bitReader) (uint, bool) {
 
 // --- Block length reading ---
 
-func readBlockLength(table []huffmanCode, br *bitReader) uint {
+func readBlockLength(table []core.HuffmanCode, br *bitReader) uint {
 	br.fillBitWindow(16)
 	code := decodeSymbol(br.val, table, br)
-	nbits := blockLengthNBits[code]
-	return uint(blockLengthOffset[code]) + uint(br.readBits(uint(nbits)))
+	nbits := core.BlockLengthNBits[code]
+	return uint(core.BlockLengthOffset[code]) + uint(br.readBits(uint(nbits)))
 }
 
-func safeReadBlockLength(s *decodeState, table []huffmanCode) (uint, bool) {
+func safeReadBlockLength(s *decodeState, table []core.HuffmanCode) (uint, bool) {
 	br := &s.br
 	var index uint
 	if s.substateReadBlockLength == readBlockLengthNone {
@@ -2306,7 +2308,7 @@ func safeReadBlockLength(s *decodeState, table []huffmanCode) (uint, bool) {
 	} else {
 		index = s.blockLengthIndex
 	}
-	nbits := uint(blockLengthNBits[index])
+	nbits := uint(core.BlockLengthNBits[index])
 	bits, ok := br.safeReadBits(nbits)
 	if !ok {
 		s.blockLengthIndex = index
@@ -2314,5 +2316,5 @@ func safeReadBlockLength(s *decodeState, table []huffmanCode) (uint, bool) {
 		return 0, false
 	}
 	s.substateReadBlockLength = readBlockLengthNone
-	return uint(blockLengthOffset[index]) + uint(bits), true
+	return uint(core.BlockLengthOffset[index]) + uint(bits), true
 }

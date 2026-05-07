@@ -1,4 +1,4 @@
-// streaming_compressor.go — compressor implementation for q>=2 streaming
+// streaming_compressor.go — Compressor implementation for q>=2 streaming
 // encoders (encoderArena, encoderSplit). The shared Write/Flush/Close logic
 // previously lived in writer.go and is now owned by the encoder.
 
@@ -6,10 +6,10 @@ package encoder
 
 import "io"
 
-// Compile-time assertion that both q>=2 encoders satisfy compressor.
+// Compile-time assertion that both q>=2 encoders satisfy Compressor.
 var (
-	_ compressor = (*encoderArena)(nil)
-	_ compressor = (*encoderSplit)(nil)
+	_ Compressor = (*encoderArena)(nil)
+	_ Compressor = (*encoderSplit)(nil)
 )
 
 // streamWrite drives input through a streaming encoder, emitting output to dst
@@ -103,7 +103,7 @@ func (c *encoderCore) AttachDictionary(pd *PreparedDictionary) error {
 	return c.attachDictionary(pd)
 }
 
-// encoderArena compressor surface. Reset/Write/Flush/Close are defined here
+// encoderArena Compressor surface. Reset/Write/Flush/Close are defined here
 // (rather than on encoderCore) so method resolution dispatches to
 // encoderArena.reset and encoderArena.encodeData rather than the embedded
 // encodeState's reset.
@@ -133,7 +133,7 @@ func (e *encoderArena) Release() {
 	poolEncoderArena.Put(e)
 }
 
-// encoderSplit compressor surface.
+// encoderSplit Compressor surface.
 
 func (e *encoderSplit) Write(dst io.Writer, p []byte) (int, error) {
 	return streamWrite(e, dst, p)

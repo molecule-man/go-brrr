@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"strconv"
+
+	"github.com/molecule-man/go-brrr/internal/encoder"
 )
 
 // Writer compresses data into brotli format.
@@ -14,7 +16,7 @@ import (
 type Writer struct {
 	dst      io.Writer
 	err      error
-	c        compressor
+	c        encoder.Compressor
 	dicts    []*PreparedDictionary // from WriterOptions, preserved across Reset
 	quality  int                   // 0 = one-pass, 1 = two-pass, 2+ = streaming
 	lgwin    int
@@ -48,15 +50,15 @@ func NewWriterOptions(dst io.Writer, level int, opts WriterOptions) (*Writer, er
 			" (must be " + strconv.Itoa(minLGWin) + "–" + strconv.Itoa(maxLGWin) + ")")
 	}
 
-	if len(opts.Dictionaries) > maxCompoundDicts {
-		return nil, errTooManyDicts
+	if len(opts.Dictionaries) > encoder.MaxCompoundDicts {
+		return nil, encoder.ErrTooManyDicts
 	}
 	if len(opts.Dictionaries) > 0 && level < 2 {
-		return nil, errQualityTooLow
+		return nil, encoder.ErrQualityTooLow
 	}
 
 	w := &Writer{dst: dst, quality: level, lgwin: lgwin, sizeHint: opts.SizeHint, dicts: opts.Dictionaries}
-	w.c = newCompressor(w.quality, w.lgwin, w.sizeHint)
+	w.c = encoder.NewCompressor(w.quality, w.lgwin, w.sizeHint)
 	for _, pd := range w.dicts {
 		_ = w.c.AttachDictionary(pd)
 	}
@@ -124,7 +126,7 @@ func (w *Writer) Reset(dst io.Writer) {
 
 	if w.c == nil {
 		// Compressor was released on a previous Close; re-acquire.
-		w.c = newCompressor(w.quality, w.lgwin, w.sizeHint)
+		w.c = encoder.NewCompressor(w.quality, w.lgwin, w.sizeHint)
 	} else {
 		w.c.Reset()
 	}

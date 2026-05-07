@@ -2,6 +2,8 @@
 // and shared codec primitives consumed by the root brrr package's decoder.
 package encoder
 
+import "github.com/molecule-man/go-brrr/internal/core"
+
 // Pre-allocated scratch buffers for one-pass fast compression, avoiding
 // per-call heap allocations.
 
@@ -67,9 +69,9 @@ type onePassArena struct {
 	cmdCode        [512]byte
 	cmdCodeNumBits uint
 
-	tree      [2*alphabetSizeLiteral + 1]huffmanTreeNode
+	tree      [2*core.AlphabetSizeLiteral + 1]huffmanTreeNode
 	histogram [256]uint32
-	tmpDepth  [alphabetSizeInsertAndCopyLength]byte
+	tmpDepth  [core.AlphabetSizeInsertAndCopyLength]byte
 	tmpBits   [64]uint16
 }
 
@@ -85,8 +87,8 @@ type twoPassArena struct {
 	cmdDepth [128]byte
 	cmdBits  [128]uint16
 
-	tree     [2*alphabetSizeLiteral + 1]huffmanTreeNode
-	tmpDepth [alphabetSizeInsertAndCopyLength]byte
+	tree     [2*core.AlphabetSizeLiteral + 1]huffmanTreeNode
+	tmpDepth [core.AlphabetSizeInsertAndCopyLength]byte
 	tmpBits  [64]uint16
 }
 
@@ -96,18 +98,18 @@ type twoPassArena struct {
 //
 // Call resetHistograms before each metablock to zero the histogram arrays.
 type metablockArena struct {
-	litHisto  [alphabetSizeLiteral]uint32
-	cmdHisto  [alphabetSizeInsertAndCopyLength]uint32
+	litHisto  [core.AlphabetSizeLiteral]uint32
+	cmdHisto  [core.AlphabetSizeInsertAndCopyLength]uint32
 	distHisto [alphabetSizeDistance]uint32
 
-	litDepth  [alphabetSizeLiteral]byte
-	litBits   [alphabetSizeLiteral]uint16
-	cmdDepth  [alphabetSizeInsertAndCopyLength]byte
-	cmdBits   [alphabetSizeInsertAndCopyLength]uint16
+	litDepth  [core.AlphabetSizeLiteral]byte
+	litBits   [core.AlphabetSizeLiteral]uint16
+	cmdDepth  [core.AlphabetSizeInsertAndCopyLength]byte
+	cmdBits   [core.AlphabetSizeInsertAndCopyLength]uint16
 	distDepth [alphabetSizeDistance]byte
 	distBits  [alphabetSizeDistance]uint16
 
-	tree [2*alphabetSizeInsertAndCopyLength + 1]huffmanTreeNode
+	tree [2*core.AlphabetSizeInsertAndCopyLength + 1]huffmanTreeNode
 }
 
 // initCommandPrefixCodes initializes the command and distance prefix codes
@@ -181,7 +183,7 @@ func (s *onePassArena) buildAndWriteCommandPrefixCode(b *bitWriter) {
 	tmpDepth := &s.tmpDepth
 	tmpBits := &s.tmpBits
 
-	clear(tmpDepth[:alphabetSizeInsertAndCopyLength])
+	clear(tmpDepth[:core.AlphabetSizeInsertAndCopyLength])
 
 	createHuffmanTree(s.cmdHisto[:64], 15, s.tree[:], depth[:64])
 	createHuffmanTree(s.cmdHisto[64:128], 14, s.tree[:], depth[64:128])
@@ -218,7 +220,7 @@ func (s *onePassArena) buildAndWriteCommandPrefixCode(b *bitWriter) {
 		tmpDepth[256+8*i] = depth[48+i]
 		tmpDepth[448+8*i] = depth[56+i]
 	}
-	b.writeHuffmanTree(tmpDepth[:alphabetSizeInsertAndCopyLength], s.tree[:])
+	b.writeHuffmanTree(tmpDepth[:core.AlphabetSizeInsertAndCopyLength], s.tree[:])
 	b.writeHuffmanTree(depth[64:128], s.tree[:])
 }
 
@@ -291,13 +293,13 @@ func (s *twoPassArena) buildAndWriteCommandPrefixCode(b *bitWriter) {
 		s.tmpDepth[256+8*i] = s.cmdDepth[8+i]
 		s.tmpDepth[448+8*i] = s.cmdDepth[16+i]
 	}
-	b.writeHuffmanTree(s.tmpDepth[:alphabetSizeInsertAndCopyLength], s.tree[:])
+	b.writeHuffmanTree(s.tmpDepth[:core.AlphabetSizeInsertAndCopyLength], s.tree[:])
 	b.writeHuffmanTree(s.cmdDepth[64:128], s.tree[:])
 }
 
 // resetHistograms zeroes the histogram arrays before encoding a new metablock.
 func (a *metablockArena) resetHistograms() {
-	a.litHisto = [alphabetSizeLiteral]uint32{}
-	a.cmdHisto = [alphabetSizeInsertAndCopyLength]uint32{}
+	a.litHisto = [core.AlphabetSizeLiteral]uint32{}
+	a.cmdHisto = [core.AlphabetSizeInsertAndCopyLength]uint32{}
 	a.distHisto = [alphabetSizeDistance]uint32{}
 }

@@ -1,9 +1,9 @@
 // Command symbol lookup table for the decoder (RFC 7932 Section 5).
 
-package encoder
+package core
 
-// cmdLut maps each of the 704 command symbols to its decoding parameters.
-var cmdLut = [alphabetSizeInsertAndCopyLength]cmdLutElement{
+// CmdLut maps each of the 704 command symbols to its decoding parameters.
+var CmdLut = [AlphabetSizeInsertAndCopyLength]CmdLutElement{
 	{0x00, 0x00, 0, 0x00, 0x0000, 0x0002},
 	{0x00, 0x00, 0, 0x01, 0x0000, 0x0003},
 	{0x00, 0x00, 0, 0x02, 0x0000, 0x0004},
@@ -710,9 +710,9 @@ var cmdLut = [alphabetSizeInsertAndCopyLength]cmdLutElement{
 	{0x18, 0x18, -1, 0x03, 0x5842, 0x0846},
 }
 
-// cmdLutElement maps a command symbol to its insert/copy length parameters
+// CmdLutElement maps a command symbol to its insert/copy length parameters
 // and distance context.
-type cmdLutElement struct {
+type CmdLutElement struct {
 	InsertLenExtraBits uint8
 	CopyLenExtraBits   uint8
 	DistanceCode       int8

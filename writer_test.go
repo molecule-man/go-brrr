@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/molecule-man/go-brrr/internal/creftest"
+	"github.com/molecule-man/go-brrr/internal/encoder"
 )
 
 // writerLevels are the quality levels exercised by round-trip tests.
@@ -332,8 +333,8 @@ func TestWriterDictionaryLowQuality(t *testing.T) {
 			_, err := NewWriterOptions(io.Discard, quality, WriterOptions{
 				Dictionaries: []*PreparedDictionary{pd},
 			})
-			if !errors.Is(err, errQualityTooLow) {
-				t.Fatalf("expected errQualityTooLow for level %d, got %v", quality, err)
+			if !errors.Is(err, encoder.ErrQualityTooLow) {
+				t.Fatalf("expected encoder.ErrQualityTooLow for level %d, got %v", quality, err)
 			}
 		})
 	}
@@ -351,8 +352,8 @@ func TestWriterDictionaryTooMany(t *testing.T) {
 	_, err := NewWriterOptions(io.Discard, 4, WriterOptions{
 		Dictionaries: dicts,
 	})
-	if !errors.Is(err, errTooManyDicts) {
-		t.Fatalf("expected errTooManyDicts, got %v", err)
+	if !errors.Is(err, encoder.ErrTooManyDicts) {
+		t.Fatalf("expected encoder.ErrTooManyDicts, got %v", err)
 	}
 }
 

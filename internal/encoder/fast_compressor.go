@@ -21,7 +21,7 @@ var (
 	poolFastLiterals sync.Pool
 )
 
-// fastCompressor implements compressor for q0 and q1. Input is buffered
+// fastCompressor implements Compressor for q0 and q1. Input is buffered
 // in-memory; output is produced in fragments at Flush/Close time.
 type fastCompressor struct {
 	onePass *onePassArena // non-nil when quality == 0
@@ -38,7 +38,7 @@ type fastCompressor struct {
 	wroteHeader bool
 }
 
-// newFastCompressor returns a compressor for q0 or q1, acquiring its arena
+// newFastCompressor returns a Compressor for q0 or q1, acquiring its arena
 // from the appropriate pool.
 func newFastCompressor(quality, lgwin int) *fastCompressor {
 	c := &fastCompressor{quality: quality, lgwin: lgwin}
@@ -239,7 +239,7 @@ func fastHashTableSize(quality, blockSize int) int {
 	return htsize
 }
 
-// Pool helpers shared by fast paths. Pools live next to the compressor that
+// Pool helpers shared by fast paths. Pools live next to the Compressor that
 // uses them.
 
 func getFastByteBuffer(pool *sync.Pool, n int) []byte {

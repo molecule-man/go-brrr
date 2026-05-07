@@ -6,6 +6,8 @@
 
 package encoder
 
+import "github.com/molecule-man/go-brrr/internal/core"
+
 // h10HashTypeLength is the minimum number of bytes needed for H10 to hash
 // a position (4 bytes for the 32-bit hash function).
 const h10HashTypeLength = 4
@@ -18,7 +20,7 @@ const h10HashTypeLength = 4
 //
 // Returns the number of commands in the optimal path.
 func zopfliComputeShortestPath(numBytes, position uint, ringbuffer []byte, ringBufferMask uint, quality, lgwin int, gap uint, compound *compoundDictionary, distCache []int, hasher *h10, nodes []zopfliNode, bufs *q10Bufs) uint {
-	maxBackwardLimit := (uint(1) << lgwin) - windowGap
+	maxBackwardLimit := (uint(1) << lgwin) - core.WindowGap
 	maxZopfli := maxZopfliLen(quality)
 	var queue startPosQueue
 	hasCompound := compound != nil && compound.numChunks > 0
@@ -109,7 +111,7 @@ func zopfliComputeShortestPath(numBytes, position uint, ringbuffer []byte, ringB
 // It allocates the DP node array, runs the shortest path algorithm,
 // and extracts commands.
 func createZopfliBackwardReferences(numBytes, position uint, ringbuffer []byte, ringBufferMask uint, quality, lgwin int, gap uint, compound *compoundDictionary, distCache []int, hasher *h10, lastInsertLen *uint, commands *[]command, numLiterals *uint, bufs *q10Bufs) {
-	maxBackwardLimit := (uint(1) << lgwin) - windowGap
+	maxBackwardLimit := (uint(1) << lgwin) - core.WindowGap
 	needed := int(numBytes + 1)
 	if cap(bufs.zNodes) < needed {
 		bufs.zNodes = make([]zopfliNode, needed)

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/molecule-man/go-brrr/internal/core"
 	"github.com/molecule-man/go-brrr/internal/creftest"
 )
 
@@ -435,7 +436,7 @@ func TestExtendLastCommand(t *testing.T) {
 			name:             "full_extension",
 			ringContent:      "ABCDABCD", // positions 4..7 match 0..3 at distance 4
 			initCopyLen:      2,
-			distCode:         numDistanceShortCodes - 1 + 4,
+			distCode:         core.NumDistanceShortCodes - 1 + 4,
 			lastProcessedPos: 6,
 			distCache0:       4,
 			inputBytes:       2,
@@ -448,7 +449,7 @@ func TestExtendLastCommand(t *testing.T) {
 			name:             "partial_mismatch",
 			ringContent:      "ABCXABCY", // mismatch at position 7 ('Y' vs 'X')
 			initCopyLen:      3,
-			distCode:         numDistanceShortCodes - 1 + 4,
+			distCode:         core.NumDistanceShortCodes - 1 + 4,
 			lastProcessedPos: 7,
 			distCache0:       4,
 			inputBytes:       5,
@@ -502,7 +503,7 @@ func TestExtendLastCommand(t *testing.T) {
 		cmd := newCommand(commandConfig{
 			insertLen:    0,
 			copyLen:      2,
-			distanceCode: numDistanceShortCodes - 1 + 1100, // distance 1100 > 1008
+			distanceCode: core.NumDistanceShortCodes - 1 + 1100, // distance 1100 > 1008
 		})
 
 		e := encodeState{
@@ -579,7 +580,7 @@ func TestExtendLastCommand(t *testing.T) {
 		cmd := newCommand(commandConfig{
 			insertLen:    0,
 			copyLen:      2,
-			distanceCode: numDistanceShortCodes - 1 + 4,
+			distanceCode: core.NumDistanceShortCodes - 1 + 4,
 		})
 		originalPrefix := cmd.cmdPrefix
 

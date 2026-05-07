@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"testing/iotest"
+
+	"github.com/molecule-man/go-brrr/internal/encoder"
 )
 
 // compress is a test helper that brotli-compresses data at a given quality.
@@ -402,8 +404,8 @@ func TestReaderDictionaryValidation(t *testing.T) {
 		_, err := NewReaderOptions(bytes.NewReader(nil), ReaderOptions{
 			Dictionaries: [][]byte{[]byte("ok"), {}},
 		})
-		if !errors.Is(err, errEmptyDict) {
-			t.Fatalf("expected errEmptyDict, got %v", err)
+		if !errors.Is(err, encoder.ErrEmptyDict) {
+			t.Fatalf("expected encoder.ErrEmptyDict, got %v", err)
 		}
 	})
 
@@ -415,8 +417,8 @@ func TestReaderDictionaryValidation(t *testing.T) {
 		_, err := NewReaderOptions(bytes.NewReader(nil), ReaderOptions{
 			Dictionaries: dicts,
 		})
-		if !errors.Is(err, errTooManyDicts) {
-			t.Fatalf("expected errTooManyDicts, got %v", err)
+		if !errors.Is(err, encoder.ErrTooManyDicts) {
+			t.Fatalf("expected encoder.ErrTooManyDicts, got %v", err)
 		}
 	})
 }

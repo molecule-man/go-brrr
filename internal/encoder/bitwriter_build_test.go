@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/molecule-man/go-brrr/internal/core"
 )
 
 func TestBuildAndWriteHuffmanTreeFast(t *testing.T) {
@@ -79,7 +81,7 @@ func TestBuildAndWriteHuffmanTreeFast(t *testing.T) {
 			buf := make([]byte, 256)
 			depth := make([]byte, len(tt.histogram))
 			bits := make([]uint16, len(tt.histogram))
-			tree := make([]huffmanTreeNode, 2*alphabetSizeLiteral+1)
+			tree := make([]huffmanTreeNode, 2*core.AlphabetSizeLiteral+1)
 
 			b := bitWriter{buf: buf}
 			b.buildAndWriteHuffmanTreeFast(tree, tt.histogram, histogramTotal(tt.histogram), tt.maxBits, depth, bits)

@@ -1,5 +1,7 @@
 package encoder
 
+import "github.com/molecule-man/go-brrr/internal/core"
+
 // Frequency counting for Huffman code construction.
 
 // blockHistograms groups frequency counts for the three prefix code alphabets
@@ -43,7 +45,7 @@ func (h *blockHistograms) tally(input []byte, pos, mask uint, cmd command) (posD
 		// Use a fixed-size array pointer so the compiler knows the index is
 		// always in-bounds for any byte value, eliminating per-access bounds
 		// checks on h.lit.
-		lit := (*[alphabetSizeLiteral]uint32)(h.lit)
+		lit := (*[core.AlphabetSizeLiteral]uint32)(h.lit)
 		basePos := pos & mask
 		// Fast path: no ring-buffer wrap. Iterate over a subslice so the
 		// compiler can eliminate per-iteration bounds checks on input too.
@@ -85,14 +87,14 @@ func (it *blockSplitIterator) next() {
 //
 // When contextModes is non-nil, each literal is routed to:
 //
-//	litHistograms[(blockType << literalContextBits) + contextLookup(mode, p1, p2)]
+//	litHistograms[(blockType << core.LiteralContextBits) + core.ContextLookup(mode, p1, p2)]
 //
 // When contextModes is nil, literals use only the block type as their
 // histogram index (equivalent to the non-context path).
 //
 // Distance symbols are always routed to:
 //
-//	distHistograms[(blockType << distanceContextBits) + cmd.distanceContext()]
+//	distHistograms[(blockType << core.DistanceContextBits) + cmd.distanceContext()]
 func buildHistogramsWithContext(
 	commands []command,
 	mb *metaBlockSplit,
@@ -111,18 +113,18 @@ func buildHistogramsWithContext(
 		cmd := commands[i]
 
 		cmdIter.next()
-		cmdHistograms[uint(cmdIter.blockType)*alphabetSizeInsertAndCopyLength+uint(cmd.cmdPrefix)]++
+		cmdHistograms[uint(cmdIter.blockType)*core.AlphabetSizeInsertAndCopyLength+uint(cmd.cmdPrefix)]++
 
 		for j := cmd.insertLen; j != 0; j-- {
 			litIter.next()
 			context := uint(litIter.blockType)
 			if contextModes != nil {
 				mode := uint(contextModes[context])
-				context = (context << literalContextBits) +
-					uint(contextLookup(mode, prevByte, prevByte2))
+				context = (context << core.LiteralContextBits) +
+					uint(core.ContextLookup(mode, prevByte, prevByte2))
 			}
 			literal := ringbuffer[pos&mask]
-			litHistograms[context*alphabetSizeLiteral+uint(literal)]++
+			litHistograms[context*core.AlphabetSizeLiteral+uint(literal)]++
 			prevByte2 = prevByte
 			prevByte = literal
 			pos++
@@ -135,7 +137,7 @@ func buildHistogramsWithContext(
 			prevByte = ringbuffer[(pos-1)&mask]
 			if cmd.cmdPrefix >= 128 {
 				distIter.next()
-				context := (uint(distIter.blockType) << distanceContextBits) +
+				context := (uint(distIter.blockType) << core.DistanceContextBits) +
 					uint(cmd.distanceContext())
 				distHistograms[context*uint(distAlphabetSize)+uint(cmd.distPrefixCode())]++
 			}

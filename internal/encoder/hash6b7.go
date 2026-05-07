@@ -8,6 +8,8 @@
 
 package encoder
 
+import "github.com/molecule-man/go-brrr/internal/core"
+
 // h6b7 configuration constants for quality 8.
 const (
 	h6b7BucketBits = 15
@@ -437,7 +439,7 @@ func (h *h6b7) findLongestMatchSmallBuf(
 func (h *h6b7) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) {
 	data := s.data
 	mask := uint(s.mask)
-	maxBackwardLimit := (uint(1) << s.lgwin) - windowGap
+	maxBackwardLimit := (uint(1) << s.lgwin) - core.WindowGap
 	gap := s.compound.totalSize
 	hasCompound := s.compound.numChunks > 0
 

@@ -14,6 +14,8 @@
 
 package encoder
 
+import "github.com/molecule-man/go-brrr/internal/core"
+
 // H10 configuration constants.
 const (
 	h10BucketBits = 17
@@ -265,7 +267,7 @@ func (h *h10) findAllMatches(
 // Requires that at least h10MaxTreeCompLength bytes are available at ix.
 func (h *h10) store(data []byte, mask, ix uint) {
 	// Maximum distance is window size - 16 (RFC 7932 Section 9.1).
-	maxBackward := uint(h.windowMask) - windowGap + 1
+	maxBackward := uint(h.windowMask) - core.WindowGap + 1
 	h.storeAndFindMatches(data, ix, mask, h10MaxTreeCompLength, maxBackward, nil, nil)
 }
 
@@ -309,7 +311,7 @@ func (h *h10) stitchToPreviousBlock(numBytes, position uint, ringBuffer []byte, 
 		// Maximum distance is window size - 16 (RFC 7932 Section 9.1).
 		// Also ensure we don't look further back than the start of the
 		// current block to avoid reading overwritten ring buffer data.
-		maxBackward := uint(h.windowMask) - max(windowGap-1, position-i)
+		maxBackward := uint(h.windowMask) - max(core.WindowGap-1, position-i)
 		h.storeAndFindMatches(ringBuffer, i, ringBufferMask,
 			h10MaxTreeCompLength, maxBackward, nil, nil)
 	}

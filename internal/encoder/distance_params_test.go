@@ -1,6 +1,10 @@
 package encoder
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/molecule-man/go-brrr/internal/core"
+)
 
 func TestDistanceAlphabetSize(t *testing.T) {
 	tests := []struct {
@@ -73,7 +77,7 @@ func TestRecomputeDistancePrefixes(t *testing.T) {
 		cmds[i] = newCommand(commandConfig{
 			insertLen:      5,
 			copyLen:        4,
-			distanceCode:   dist + numDistanceShortCodes - 1,
+			distanceCode:   dist + core.NumDistanceShortCodes - 1,
 			numDirectCodes: 0,
 			postfixBits:    0,
 		})
@@ -84,7 +88,7 @@ func TestRecomputeDistancePrefixes(t *testing.T) {
 
 	// Verify: reconstruct distance codes and re-encode directly.
 	for i, dist := range []uint{20, 100, 1000} {
-		distCode := dist + numDistanceShortCodes - 1
+		distCode := dist + core.NumDistanceShortCodes - 1
 		wantPrefix, wantExtra := prefixEncodeCopyDistance(distCode, 0, 1)
 		if cmds[i].distPrefix != wantPrefix || cmds[i].distExtra != wantExtra {
 			t.Errorf("cmd[%d] after recompute: distPrefix=%d distExtra=%d, want %d %d",
@@ -100,7 +104,7 @@ func TestRecomputeDistancePrefixesSameParams(t *testing.T) {
 		newCommand(commandConfig{
 			insertLen:      5,
 			copyLen:        4,
-			distanceCode:   20 + numDistanceShortCodes - 1,
+			distanceCode:   20 + core.NumDistanceShortCodes - 1,
 			numDirectCodes: 0,
 			postfixBits:    0,
 		}),
@@ -119,7 +123,7 @@ func TestComputeDistanceCost(t *testing.T) {
 		newCommand(commandConfig{
 			insertLen:      5,
 			copyLen:        4,
-			distanceCode:   20 + numDistanceShortCodes - 1,
+			distanceCode:   20 + core.NumDistanceShortCodes - 1,
 			numDirectCodes: 0,
 			postfixBits:    0,
 		}),
@@ -143,7 +147,7 @@ func TestComputeDistanceCostExceedsMax(t *testing.T) {
 
 	// Pick a distance that fits origParams but exceeds newParams.maxDistance.
 	dist := uint(newParams.maxDistance + 1000)
-	distCode := dist + numDistanceShortCodes - 1
+	distCode := dist + core.NumDistanceShortCodes - 1
 	cmds := []command{
 		newCommand(commandConfig{
 			insertLen:      5,

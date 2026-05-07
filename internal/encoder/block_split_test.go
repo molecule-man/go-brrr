@@ -1,6 +1,10 @@
 package encoder
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/molecule-man/go-brrr/internal/core"
+)
 
 func TestContextBlockSplitterBasic(t *testing.T) {
 	// Create a simple context block splitter with 2 contexts and feed it
@@ -77,9 +81,9 @@ func TestBuildMetaBlockGreedyWithContext(t *testing.T) {
 	if mb.literalContextMap == nil {
 		t.Error("literalContextMap is nil, want non-nil for context modeling")
 	}
-	if len(mb.literalContextMap) != mb.litSplit.numTypes*(1<<literalContextBits) {
+	if len(mb.literalContextMap) != mb.litSplit.numTypes*(1<<core.LiteralContextBits) {
 		t.Errorf("literalContextMap length = %d, want %d",
-			len(mb.literalContextMap), mb.litSplit.numTypes*(1<<literalContextBits))
+			len(mb.literalContextMap), mb.litSplit.numTypes*(1<<core.LiteralContextBits))
 	}
 	// Verify context map entries are valid.
 	maxHisto := uint32(mb.litSplit.numTypes * 2) // 2 contexts
@@ -121,7 +125,7 @@ func TestMapStaticContexts(t *testing.T) {
 
 	mapStaticContexts(&mb, 2, staticContextMapSimpleUTF8[:])
 
-	wantLen := 2 * (1 << literalContextBits) // 2 * 64 = 128
+	wantLen := 2 * (1 << core.LiteralContextBits) // 2 * 64 = 128
 	if len(mb.literalContextMap) != wantLen {
 		t.Fatalf("literalContextMap length = %d, want %d", len(mb.literalContextMap), wantLen)
 	}

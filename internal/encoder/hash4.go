@@ -3,6 +3,8 @@
 
 package encoder
 
+import "github.com/molecule-man/go-brrr/internal/core"
+
 // H4-specific configuration constants.
 const (
 	h4BucketBits     = 17
@@ -79,7 +81,7 @@ func (h *h4) stitchToPreviousBlock(numBytes, position uint, ringBuffer []byte, r
 func (h *h4) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) {
 	data := s.data
 	mask := uint(s.mask)
-	maxBackwardLimit := (uint(1) << s.lgwin) - windowGap
+	maxBackwardLimit := (uint(1) << s.lgwin) - core.WindowGap
 	gap := s.compound.totalSize
 	hasCompound := s.compound.numChunks > 0
 

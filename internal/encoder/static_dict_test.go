@@ -2,7 +2,11 @@
 
 package encoder
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/molecule-man/go-brrr/internal/core"
+)
 
 // lookupTestEntry returns a test dictionary entry from the hash tables.
 // It finds the first non-zero entry and returns the hash14 key, word length,
@@ -12,8 +16,8 @@ func lookupTestEntry() (key uint32, wordLen, wordIndex uint, word string) {
 		if staticDictHashLengths[i] != 0 {
 			wl := uint(staticDictHashLengths[i])
 			wi := uint(staticDictHashWords[i])
-			offset := uint(dictOffsetsByLength[wl]) + wl*wi
-			return i, wl, wi, dictData[offset : offset+wl]
+			offset := uint(core.DictOffsetsByLength[wl]) + wl*wi
+			return i, wl, wi, core.DictData[offset : offset+wl]
 		}
 	}
 	panic("no non-zero hash table entry")

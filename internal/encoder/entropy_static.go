@@ -1,5 +1,7 @@
 package encoder
 
+import "github.com/molecule-man/go-brrr/internal/core"
+
 // Static entropy codes used for fast meta-block encoding.
 // These are precomputed lookup tables from the brotli reference implementation
 // (entropy_encode_static.h) used by buildAndWriteHuffmanTreeFast for the
@@ -26,7 +28,7 @@ var codeLengthBits = [18]uint32{
 // symbols), but we include 704 to match the reference and support the full
 // command alphabet if needed in the future.
 
-var zeroRepsBits = [alphabetSizeInsertAndCopyLength]uint64{
+var zeroRepsBits = [core.AlphabetSizeInsertAndCopyLength]uint64{
 	0x00000000, 0x00000000, 0x00000000, 0x00000007, 0x00000017, 0x00000027,
 	0x00000037, 0x00000047, 0x00000057, 0x00000067, 0x00000077, 0x00000770,
 	0x00000b87, 0x00001387, 0x00001b87, 0x00002387, 0x00002b87, 0x00003387,
@@ -147,7 +149,7 @@ var zeroRepsBits = [alphabetSizeInsertAndCopyLength]uint64{
 	0x06f9cb87, 0x08f9cb87,
 }
 
-var zeroRepsDepth = [alphabetSizeInsertAndCopyLength]uint32{
+var zeroRepsDepth = [core.AlphabetSizeInsertAndCopyLength]uint32{
 	0, 4, 8, 7, 7, 7, 7, 7, 7, 7, 7, 11, 14, 14, 14, 14,
 	14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14,
 	14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14,
@@ -194,7 +196,7 @@ var zeroRepsDepth = [alphabetSizeInsertAndCopyLength]uint32{
 	28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28,
 }
 
-var nonZeroRepsBits = [alphabetSizeInsertAndCopyLength]uint64{
+var nonZeroRepsBits = [core.AlphabetSizeInsertAndCopyLength]uint64{
 	0x0000000b, 0x0000001b, 0x0000002b, 0x0000003b, 0x000002cb, 0x000006cb,
 	0x00000acb, 0x00000ecb, 0x000002db, 0x000006db, 0x00000adb, 0x00000edb,
 	0x000002eb, 0x000006eb, 0x00000aeb, 0x00000eeb, 0x000002fb, 0x000006fb,
@@ -318,11 +320,11 @@ var nonZeroRepsBits = [alphabetSizeInsertAndCopyLength]uint64{
 // staticCommandCodeDepth contains the bit depths for the 704 insert-and-copy
 // symbols under the static command prefix code (9 for symbols 0–447, 11 for
 // symbols 448–703).
-var staticCommandCodeDepth = func() (d [alphabetSizeInsertAndCopyLength]byte) {
+var staticCommandCodeDepth = func() (d [core.AlphabetSizeInsertAndCopyLength]byte) {
 	for i := range d[:448] {
 		d[i] = 9
 	}
-	for i := 448; i < alphabetSizeInsertAndCopyLength; i++ {
+	for i := 448; i < core.AlphabetSizeInsertAndCopyLength; i++ {
 		d[i] = 11
 	}
 	return
@@ -330,7 +332,7 @@ var staticCommandCodeDepth = func() (d [alphabetSizeInsertAndCopyLength]byte) {
 
 // staticCommandCodeBits contains the precomputed Huffman codes for the 704
 // insert-and-copy symbols under the static command prefix code.
-var staticCommandCodeBits = [alphabetSizeInsertAndCopyLength]uint16{
+var staticCommandCodeBits = [core.AlphabetSizeInsertAndCopyLength]uint16{
 	0, 256, 128, 384, 64, 320, 192, 448,
 	32, 288, 160, 416, 96, 352, 224, 480,
 	16, 272, 144, 400, 80, 336, 208, 464,
@@ -439,7 +441,7 @@ var staticDistanceCodeBits = [64]uint16{
 	3, 35, 19, 51, 11, 43, 27, 59, 7, 39, 23, 55, 15, 47, 31, 63,
 }
 
-var nonZeroRepsDepth = [alphabetSizeInsertAndCopyLength]uint32{
+var nonZeroRepsDepth = [core.AlphabetSizeInsertAndCopyLength]uint32{
 	6, 6, 6, 6, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12,
 	12, 12, 12, 12, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
 	18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18,

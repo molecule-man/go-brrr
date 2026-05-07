@@ -24,25 +24,25 @@
 //
 // RFC 7932 Section 7.1.
 
-package encoder
+package core
 
 // Context mode constants. Each selects a 512-byte region of the lookup table.
 const (
-	contextLSB6   = 0
-	contextMSB6   = 1
-	contextUTF8   = 2
-	contextSigned = 3
+	ContextLSB6   = 0
+	ContextMSB6   = 1
+	ContextUTF8   = 2
+	ContextSigned = 3
 )
 
 // Context bit widths for the two symbol categories that use context modeling.
 const (
-	literalContextBits  = 6 // 64 literal contexts per block type
-	distanceContextBits = 2 // 4 distance contexts per block type
+	LiteralContextBits  = 6 // 64 literal contexts per block type
+	DistanceContextBits = 2 // 4 distance contexts per block type
 )
 
-// contextLookupTable maps (mode, p1, p2) triples to 6-bit context IDs.
+// ContextLookupTable maps (mode, p1, p2) triples to 6-bit context IDs.
 // Layout: 4 modes x 512 bytes (256 for p1, 256 for p2).
-var contextLookupTable = [2048]byte{
+var ContextLookupTable = [2048]byte{
 	// contextLSB6, p1: identity mapping of low 6 bits.
 	0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
 	16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
@@ -194,9 +194,9 @@ var contextLookupTable = [2048]byte{
 	6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 7,
 }
 
-// contextLookup computes a 6-bit context ID from the two preceding bytes
+// ContextLookup computes a 6-bit context ID from the two preceding bytes
 // p1 (last) and p2 (second-to-last) for the given context mode.
-func contextLookup(mode uint, p1, p2 byte) byte {
-	lut := contextLookupTable[mode<<9:]
+func ContextLookup(mode uint, p1, p2 byte) byte {
+	lut := ContextLookupTable[mode<<9:]
 	return lut[p1] | lut[256+int(p2)]
 }

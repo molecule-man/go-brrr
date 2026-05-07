@@ -4,7 +4,11 @@ package encoder
 // When a backward match is found, the corresponding command and literal codes
 // are immediately emitted to the bitstream.
 
-import "math/bits"
+import (
+	"math/bits"
+
+	"github.com/molecule-man/go-brrr/internal/core"
+)
 
 // maxDistance is the maximum backward reference distance for window size 18.
 // BROTLI_MAX_BACKWARD_LIMIT(18) = (1 << 18) - 16 = 262128.
@@ -16,7 +20,7 @@ const hashMul32 = 0x1E35A7BD
 const (
 	firstBlockSize   = 3 << 15
 	mergeBlockSize   = 1 << 16
-	inputMarginBytes = windowGap
+	inputMarginBytes = core.WindowGap
 	minMatchLen      = 5
 )
 

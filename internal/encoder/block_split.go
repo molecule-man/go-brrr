@@ -6,6 +6,8 @@
 
 package encoder
 
+import "github.com/molecule-man/go-brrr/internal/core"
+
 // blockSplit records how a symbol stream is partitioned into typed blocks.
 // Each block has a type (index into a histogram array) and a length.
 type blockSplit struct {
@@ -32,16 +34,16 @@ type splitBufs struct {
 // metaBlockSplit holds the complete partitioning of a metablock into
 // block types for literals, commands, and distances, plus their histograms.
 type metaBlockSplit struct {
-	litHistograms  []uint32 // flat: [numLitTypes*numContexts][alphabetSizeLiteral]
-	cmdHistograms  []uint32 // flat: [numCmdTypes][alphabetSizeInsertAndCopyLength]
+	litHistograms  []uint32 // flat: [numLitTypes*numContexts][core.AlphabetSizeLiteral]
+	cmdHistograms  []uint32 // flat: [numCmdTypes][core.AlphabetSizeInsertAndCopyLength]
 	distHistograms []uint32 // flat: [numDistTypes][distAlphabetSize]
 
-	// literalContextMap maps (blockType << literalContextBits | contextID)
+	// literalContextMap maps (blockType << core.LiteralContextBits | contextID)
 	// to a histogram index. Non-nil only when context modeling is active
 	// (quality >= 5 and decideOverLiteralContextModeling chose > 1 context).
 	literalContextMap []uint32
 
-	// distanceContextMap maps (blockType << distanceContextBits | distContext)
+	// distanceContextMap maps (blockType << core.DistanceContextBits | distContext)
 	// to a distance histogram index. Non-nil only in the slow path (Q10+),
 	// where histogram clustering produces a non-trivial mapping. The greedy
 	// path uses an identity mapping (each block type maps 1:1 to its histograms).
@@ -540,7 +542,7 @@ func buildMetaBlockGreedy(
 	// Initialize command and distance splitters (unchanged by context modeling).
 	var cmdSplitter, distSplitter blockSplitter
 	cmdSplitter, bufs.cmdHistograms, bufs.cmdTypes, bufs.cmdLengths =
-		newBlockSplitter(&mb.cmdSplit, alphabetSizeInsertAndCopyLength, 1024, 500.0,
+		newBlockSplitter(&mb.cmdSplit, core.AlphabetSizeInsertAndCopyLength, 1024, 500.0,
 			len(commands), bufs.cmdHistograms, bufs.cmdTypes, bufs.cmdLengths)
 	distSplitter, bufs.distHistograms, bufs.distTypes, bufs.distLengths =
 		newBlockSplitter(&mb.distSplit, 64, 512, 100.0,
@@ -554,7 +556,7 @@ func buildMetaBlockGreedy(
 		// Single-context path (quality < 5): one histogram per block type.
 		var litSplitter blockSplitter
 		litSplitter, bufs.litHistograms, bufs.litTypes, bufs.litLengths =
-			newBlockSplitter(&mb.litSplit, alphabetSizeLiteral, 512, 400.0,
+			newBlockSplitter(&mb.litSplit, core.AlphabetSizeLiteral, 512, 400.0,
 				numLiterals, bufs.litHistograms, bufs.litTypes, bufs.litLengths)
 
 		for i := range commands {
@@ -572,19 +574,19 @@ func buildMetaBlockGreedy(
 		}
 
 		litSplitter.finishBlock(true)
-		mb.litHistograms = litSplitter.histograms[:litSplitter.histogramsSize*alphabetSizeLiteral]
+		mb.litHistograms = litSplitter.histograms[:litSplitter.histogramsSize*core.AlphabetSizeLiteral]
 	} else {
 		// Multi-context path (quality >= 5): multiple histograms per block type.
 		ctxSplitter := newContextBlockSplitter(
-			&mb.litSplit, alphabetSizeLiteral, int(numContexts), 512, 400.0, numLiterals)
-		utf8LUT := uint(contextUTF8) << 9
+			&mb.litSplit, core.AlphabetSizeLiteral, int(numContexts), 512, 400.0, numLiterals)
+		utf8LUT := uint(core.ContextUTF8) << 9
 
 		for i := range commands {
 			cmd := commands[i]
 			cmdSplitter.addSymbol(int(cmd.cmdPrefix))
 			for j := cmd.insertLen; j != 0; j-- {
 				literal := ringbuffer[pos&mask]
-				context := staticContextMap[contextLookupTable[utf8LUT+uint(prevByte)]|contextLookupTable[utf8LUT+256+uint(prevByte2)]]
+				context := staticContextMap[core.ContextLookupTable[utf8LUT+uint(prevByte)]|core.ContextLookupTable[utf8LUT+256+uint(prevByte2)]]
 				ctxSplitter.addSymbol(int(literal), int(context))
 				prevByte2 = prevByte
 				prevByte = literal
@@ -602,7 +604,7 @@ func buildMetaBlockGreedy(
 		}
 
 		ctxSplitter.finishBlock(true)
-		mb.litHistograms = ctxSplitter.histograms[:ctxSplitter.histogramsSize*alphabetSizeLiteral]
+		mb.litHistograms = ctxSplitter.histograms[:ctxSplitter.histogramsSize*core.AlphabetSizeLiteral]
 
 		mapStaticContexts(mb, numContexts, staticContextMap)
 	}
@@ -610,7 +612,7 @@ func buildMetaBlockGreedy(
 	cmdSplitter.finishBlock(true)
 	distSplitter.finishBlock(true)
 
-	mb.cmdHistograms = cmdSplitter.histograms[:cmdSplitter.histogramsSize*alphabetSizeInsertAndCopyLength]
+	mb.cmdHistograms = cmdSplitter.histograms[:cmdSplitter.histogramsSize*core.AlphabetSizeInsertAndCopyLength]
 	mb.distHistograms = distSplitter.histograms[:distSplitter.histogramsSize*64]
 }
 
@@ -620,7 +622,7 @@ func buildMetaBlockGreedy(
 // histogram index offset by the block type's cluster base.
 func mapStaticContexts(mb *metaBlockSplit, numContexts uint, staticContextMap []uint32) {
 	numTypes := uint(mb.litSplit.numTypes)
-	mapSize := numTypes << literalContextBits
+	mapSize := numTypes << core.LiteralContextBits
 	if cap(mb.literalContextMap) < int(mapSize) {
 		mb.literalContextMap = make([]uint32, mapSize)
 	} else {
@@ -628,8 +630,8 @@ func mapStaticContexts(mb *metaBlockSplit, numContexts uint, staticContextMap []
 	}
 	for i := range numTypes {
 		offset := uint32(i * numContexts)
-		for j := range uint(1 << literalContextBits) {
-			mb.literalContextMap[(i<<literalContextBits)+j] = offset + staticContextMap[j]
+		for j := range uint(1 << core.LiteralContextBits) {
+			mb.literalContextMap[(i<<core.LiteralContextBits)+j] = offset + staticContextMap[j]
 		}
 	}
 }
@@ -641,15 +643,15 @@ func optimizeHistograms(mb *metaBlockSplit, distAlphabetSize int, goodForRLE *[]
 	// At Q4 and below (no context modeling) these are equal. At Q5+ with
 	// context modeling the literal histograms may contain numTypes * numContexts
 	// entries — more than numTypes alone.
-	numLitHistograms := len(mb.litHistograms) / alphabetSizeLiteral
+	numLitHistograms := len(mb.litHistograms) / core.AlphabetSizeLiteral
 	for i := range numLitHistograms {
-		start := i * alphabetSizeLiteral
-		optimizeHuffmanCountsForRLE(mb.litHistograms[start:start+alphabetSizeLiteral], goodForRLE)
+		start := i * core.AlphabetSizeLiteral
+		optimizeHuffmanCountsForRLE(mb.litHistograms[start:start+core.AlphabetSizeLiteral], goodForRLE)
 	}
-	numCmdHistograms := len(mb.cmdHistograms) / alphabetSizeInsertAndCopyLength
+	numCmdHistograms := len(mb.cmdHistograms) / core.AlphabetSizeInsertAndCopyLength
 	for i := range numCmdHistograms {
-		start := i * alphabetSizeInsertAndCopyLength
-		optimizeHuffmanCountsForRLE(mb.cmdHistograms[start:start+alphabetSizeInsertAndCopyLength], goodForRLE)
+		start := i * core.AlphabetSizeInsertAndCopyLength
+		optimizeHuffmanCountsForRLE(mb.cmdHistograms[start:start+core.AlphabetSizeInsertAndCopyLength], goodForRLE)
 	}
 	numDistHistograms := len(mb.distHistograms) / distAlphabetSize
 	for i := range numDistHistograms {

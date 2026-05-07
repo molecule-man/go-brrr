@@ -6,7 +6,11 @@
 
 package encoder
 
-import "unsafe"
+import (
+	"unsafe"
+
+	"github.com/molecule-man/go-brrr/internal/core"
+)
 
 // H41 configuration constants.
 const (
@@ -351,7 +355,7 @@ func (h *h41) findLongestMatchSmallBuf(
 func (h *h41) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) {
 	data := s.data
 	mask := uint(s.mask)
-	maxBackwardLimit := (uint(1) << s.lgwin) - windowGap
+	maxBackwardLimit := (uint(1) << s.lgwin) - core.WindowGap
 	gap := s.compound.totalSize
 	hasCompound := s.compound.numChunks > 0
 

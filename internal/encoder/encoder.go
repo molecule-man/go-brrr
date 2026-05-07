@@ -5,6 +5,8 @@ package encoder
 import (
 	"math/bits"
 	"sync"
+
+	"github.com/molecule-man/go-brrr/internal/core"
 )
 
 // poolEncoderArena and poolEncoderSplit recycle the streaming encoder shells
@@ -128,7 +130,7 @@ type encoderSplit struct {
 	mb         metaBlockSplit
 	encoderCore
 	q10  q10Bufs
-	tree [2*alphabetSizeInsertAndCopyLength + 1]huffmanTreeNode
+	tree [2*core.AlphabetSizeInsertAndCopyLength + 1]huffmanTreeNode
 }
 
 // releaseBuffers extends encoderCore.releaseBuffers to also return the stashed
@@ -521,7 +523,7 @@ func (e *encoderArena) writeMetaBlockFast(length int, isLast bool) {
 		if prebuilt {
 			numLiterals = s.numLiterals
 		} else {
-			*litHisto = [alphabetSizeLiteral]uint32{}
+			*litHisto = [core.AlphabetSizeLiteral]uint32{}
 			pos := startPos
 			for i := range commands {
 				cmd := &commands[i]
@@ -639,10 +641,10 @@ func (e *encoderArena) writeMetaBlockTrivial(length int, isLast bool) {
 	b.writeBits(13, 0)
 
 	b.buildAndWriteHuffmanTree(
-		arena.litHisto[:], alphabetSizeLiteral, arena.tree[:],
+		arena.litHisto[:], core.AlphabetSizeLiteral, arena.tree[:],
 		arena.litDepth[:], arena.litBits[:])
 	b.buildAndWriteHuffmanTree(
-		arena.cmdHisto[:], alphabetSizeInsertAndCopyLength, arena.tree[:],
+		arena.cmdHisto[:], core.AlphabetSizeInsertAndCopyLength, arena.tree[:],
 		arena.cmdDepth[:], arena.cmdBits[:])
 	b.buildAndWriteHuffmanTree(
 		arena.distHisto[:], s.distAlphabetSizeMax, arena.tree[:],
@@ -677,18 +679,18 @@ func (b *q10Bufs) preallocQ10(blockSizeArg int) {
 	blockSize := 2 * blockSizeArg
 	// Maximum histogram counts (from block_splitter constants).
 	const (
-		maxLitHist     = 100                             // maxLiteralHistograms
-		maxCmdHist     = 50                              // maxCommandHistograms
-		maxDistHist    = 50                              // maxCommandHistograms (distances use same limit)
-		maxAlpha       = alphabetSizeInsertAndCopyLength // 704, largest alphabet
-		litAlpha       = alphabetSizeLiteral             // 256
-		distAlpha      = numHistogramDistanceSymbols     // 544
-		hpb            = 64                              // histogramsPerBatch
-		cpb            = 16                              // clustersPerBatch
+		maxLitHist     = 100                                  // maxLiteralHistograms
+		maxCmdHist     = 50                                   // maxCommandHistograms
+		maxDistHist    = 50                                   // maxCommandHistograms (distances use same limit)
+		maxAlpha       = core.AlphabetSizeInsertAndCopyLength // 704, largest alphabet
+		litAlpha       = core.AlphabetSizeLiteral             // 256
+		distAlpha      = core.NumHistogramDistanceSymbols     // 544
+		hpb            = 64                                   // histogramsPerBatch
+		cpb            = 16                                   // clustersPerBatch
 		maxPairs       = hpb*hpb/2 + 1
 		maxBlockTypes  = maxNumberOfBlockTypes
-		litContextMul  = 64 // 1 << literalContextBits
-		distContextMul = 4  // 1 << distanceContextBits
+		litContextMul  = 64 // 1 << core.LiteralContextBits
+		distContextMul = 4  // 1 << core.DistanceContextBits
 	)
 
 	// Upper bound for numBlocks from splitByteVector. In practice much
@@ -809,12 +811,12 @@ func (e *encoderSplit) reset(quality, lgwin int, sizeHint uint) {
 		// Pre-allocate metaBlockSplit context maps.
 		const (
 			maxTypes       = 256
-			litContextMul  = 64 // 1 << literalContextBits
-			distContextMul = 4  // 1 << distanceContextBits
+			litContextMul  = 64 // 1 << core.LiteralContextBits
+			distContextMul = 4  // 1 << core.DistanceContextBits
 		)
 		e.mb.literalContextMap = preallocUint32(e.mb.literalContextMap, maxTypes*litContextMul)
 		e.mb.distanceContextMap = preallocUint32(e.mb.distanceContextMap, maxTypes*distContextMul)
-		e.mb.cmdHistograms = preallocUint32(e.mb.cmdHistograms, maxTypes*alphabetSizeInsertAndCopyLength)
+		e.mb.cmdHistograms = preallocUint32(e.mb.cmdHistograms, maxTypes*core.AlphabetSizeInsertAndCopyLength)
 
 		// Pre-allocate blockSplit types/lengths for each category.
 		e.mb.litSplit.types = preallocByte(e.mb.litSplit.types, maxTypes)
@@ -826,15 +828,15 @@ func (e *encoderSplit) reset(quality, lgwin int, sizeHint uint) {
 
 		// Pre-allocate encoderSplit Huffman code buffers.
 		// Sizes are numHistograms * alphabetSize; use maxTypes as a safe bound.
-		e.litDepths = preallocByte(e.litDepths, maxTypes*litContextMul*alphabetSizeLiteral)
-		e.litBits = preallocUint16(e.litBits, maxTypes*litContextMul*alphabetSizeLiteral)
-		e.cmdDepths = preallocByte(e.cmdDepths, maxTypes*alphabetSizeInsertAndCopyLength)
-		e.cmdBits = preallocUint16(e.cmdBits, maxTypes*alphabetSizeInsertAndCopyLength)
-		e.distDepths = preallocByte(e.distDepths, maxTypes*distContextMul*numHistogramDistanceSymbols)
-		e.distBits = preallocUint16(e.distBits, maxTypes*distContextMul*numHistogramDistanceSymbols)
+		e.litDepths = preallocByte(e.litDepths, maxTypes*litContextMul*core.AlphabetSizeLiteral)
+		e.litBits = preallocUint16(e.litBits, maxTypes*litContextMul*core.AlphabetSizeLiteral)
+		e.cmdDepths = preallocByte(e.cmdDepths, maxTypes*core.AlphabetSizeInsertAndCopyLength)
+		e.cmdBits = preallocUint16(e.cmdBits, maxTypes*core.AlphabetSizeInsertAndCopyLength)
+		e.distDepths = preallocByte(e.distDepths, maxTypes*distContextMul*core.NumHistogramDistanceSymbols)
+		e.distBits = preallocUint16(e.distBits, maxTypes*distContextMul*core.NumHistogramDistanceSymbols)
 		e.rleSymBuf = preallocUint32(e.rleSymBuf, maxTypes*litContextMul)
-		if cap(e.goodForRLE) < alphabetSizeInsertAndCopyLength {
-			e.goodForRLE = make([]bool, 0, alphabetSizeInsertAndCopyLength)
+		if cap(e.goodForRLE) < core.AlphabetSizeInsertAndCopyLength {
+			e.goodForRLE = make([]bool, 0, core.AlphabetSizeInsertAndCopyLength)
 		}
 	}
 }
@@ -1132,9 +1134,9 @@ func (e *encoderSplit) writeMetaBlock(length int, isLast bool, mb *metaBlockSpli
 
 	b.writeMetaBlockHeader(length, isLast, false)
 
-	litEnc := newBlockEncoder(alphabetSizeLiteral, mb.litSplit.numTypes,
+	litEnc := newBlockEncoder(core.AlphabetSizeLiteral, mb.litSplit.numTypes,
 		mb.litSplit.types, mb.litSplit.lengths)
-	cmdEnc := newBlockEncoder(alphabetSizeInsertAndCopyLength, mb.cmdSplit.numTypes,
+	cmdEnc := newBlockEncoder(core.AlphabetSizeInsertAndCopyLength, mb.cmdSplit.numTypes,
 		mb.cmdSplit.types, mb.cmdSplit.lengths)
 	distEnc := newBlockEncoder(int(numDistanceSymbols), mb.distSplit.numTypes,
 		mb.distSplit.types, mb.distSplit.lengths)
@@ -1153,7 +1155,7 @@ func (e *encoderSplit) writeMetaBlock(length int, isLast bool, mb *metaBlockSpli
 	// Literal context modes (2 bits per literal block type).
 	// For Q10+ the mode is determined by chooseContextMode; for Q4–Q9 it
 	// is always UTF-8.
-	var literalContextMode byte = contextUTF8
+	var literalContextMode byte = core.ContextUTF8
 	if s.quality >= 10 {
 		literalContextMode = chooseContextMode(s.quality, s.data, startPos, mask, uint(length))
 	}
@@ -1164,11 +1166,11 @@ func (e *encoderSplit) writeMetaBlock(length int, isLast bool, mb *metaBlockSpli
 	// Literal context map: full encoding when context modeling is active,
 	// trivial identity map otherwise.
 	useLitContextMap := len(mb.literalContextMap) > 0
-	numLitHistograms := len(mb.litHistograms) / alphabetSizeLiteral
+	numLitHistograms := len(mb.litHistograms) / core.AlphabetSizeLiteral
 	if useLitContextMap {
 		e.rleSymBuf = b.encodeContextMapBuf(mb.literalContextMap, uint(numLitHistograms), tree, e.rleSymBuf)
 	} else {
-		storeTrivialContextMap(uint(mb.litSplit.numTypes), literalContextBits, tree, b)
+		storeTrivialContextMap(uint(mb.litSplit.numTypes), core.LiteralContextBits, tree, b)
 	}
 
 	// Distance context map: full encoding when the slow path produced a
@@ -1179,16 +1181,16 @@ func (e *encoderSplit) writeMetaBlock(length int, isLast bool, mb *metaBlockSpli
 		numDistHistograms = len(mb.distHistograms) / int(numDistanceSymbols)
 		e.rleSymBuf = b.encodeContextMapBuf(mb.distanceContextMap, uint(numDistHistograms), tree, e.rleSymBuf)
 	} else {
-		storeTrivialContextMap(uint(mb.distSplit.numTypes), distanceContextBits, tree, b)
+		storeTrivialContextMap(uint(mb.distSplit.numTypes), core.DistanceContextBits, tree, b)
 	}
 	// Tiny metablocks measured better with the smaller storeSymbol path.
 	combineDistExtraBits := !useDistContextMap && length >= 4096
 
 	// Build and store entropy codes for each histogram.
 	e.litDepths, e.litBits = litEnc.buildAndStoreEntropyCodes(mb.litHistograms,
-		numLitHistograms, alphabetSizeLiteral, tree, b, e.litDepths, e.litBits)
+		numLitHistograms, core.AlphabetSizeLiteral, tree, b, e.litDepths, e.litBits)
 	e.cmdDepths, e.cmdBits = cmdEnc.buildAndStoreEntropyCodes(mb.cmdHistograms,
-		mb.cmdSplit.numTypes, alphabetSizeInsertAndCopyLength, tree, b, e.cmdDepths, e.cmdBits)
+		mb.cmdSplit.numTypes, core.AlphabetSizeInsertAndCopyLength, tree, b, e.cmdDepths, e.cmdBits)
 	e.distDepths, e.distBits = distEnc.buildAndStoreEntropyCodes(mb.distHistograms,
 		numDistHistograms, int(numDistanceSymbols), tree, b, e.distDepths, e.distBits)
 
@@ -1205,7 +1207,7 @@ func (e *encoderSplit) writeMetaBlock(length int, isLast bool, mb *metaBlockSpli
 		// Use the command prefix lookup table to avoid recomputing
 		// insert/copy length prefix classes for every command.
 		{
-			lut := cmdLut[cmdCode]
+			lut := core.CmdLut[cmdCode]
 			effCopyLen := uint(cmd.copyLenCode())
 			insNumExtra := lut.InsertLenExtraBits
 			b.writeBits(uint(insNumExtra+lut.CopyLenExtraBits),
@@ -1217,9 +1219,9 @@ func (e *encoderSplit) writeMetaBlock(length int, isLast bool, mb *metaBlockSpli
 		if useLitContextMap {
 			for j := cmd.insertLen; j != 0; j-- {
 				literal := input[pos&mask]
-				context := uint(contextLookup(uint(literalContextMode), prevByte, prevByte2))
+				context := uint(core.ContextLookup(uint(literalContextMode), prevByte, prevByte2))
 				litEnc.storeSymbolWithContext(uint(literal), context,
-					mb.literalContextMap, literalContextBits, b)
+					mb.literalContextMap, core.LiteralContextBits, b)
 				prevByte2 = prevByte
 				prevByte = literal
 				pos++
@@ -1286,7 +1288,7 @@ func (e *encoderSplit) writeMetaBlock(length int, isLast bool, mb *metaBlockSpli
 			case useDistContextMap:
 				distContext := uint(cmd.distanceContext())
 				distEnc.storeSymbolWithContext(uint(distCode), distContext,
-					mb.distanceContextMap, distanceContextBits, b)
+					mb.distanceContextMap, core.DistanceContextBits, b)
 				b.writeBits(uint(distNumExtra), uint64(cmd.distExtra))
 			case combineDistExtraBits:
 				if distEnc.blockLen == 0 {
@@ -1427,7 +1429,7 @@ func computeDistanceCode(distance, maxDistance uint, distCache *[4]uint) uint {
 			return 3
 		}
 	}
-	return distance + numDistanceShortCodes - 1
+	return distance + core.NumDistanceShortCodes - 1
 }
 
 func preallocUint32(s []uint32, n int) []uint32 {

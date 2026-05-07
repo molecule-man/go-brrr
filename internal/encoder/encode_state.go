@@ -2,6 +2,8 @@
 
 package encoder
 
+import "github.com/molecule-man/go-brrr/internal/core"
+
 // encodeState holds ring-buffer, bitstream, distance cache, and position
 // tracking shared across all quality-specific encoders (Q2, Q3, Q4).
 type encodeState struct {
@@ -158,7 +160,7 @@ func (s *encodeState) extendLastCommand(length, wrappedPos uint32) (remainingLen
 	cmd := &s.commands[s.numCommands-1]
 	data := s.data
 	mask := s.mask
-	maxBackwardDistance := (uint64(1) << s.lgwin) - windowGap
+	maxBackwardDistance := (uint64(1) << s.lgwin) - core.WindowGap
 	lastCopyLen := uint64(cmd.copyLen & 0x1FFFFFF)
 	lastProcessedPos := s.lastProcessedPos - lastCopyLen
 	maxDistance := min(lastProcessedPos, maxBackwardDistance)
@@ -166,8 +168,8 @@ func (s *encodeState) extendLastCommand(length, wrappedPos uint32) (remainingLen
 
 	distanceCode := cmd.distanceCode(uint(s.distParams.numDirectCodes), uint(s.distParams.postfixBits))
 
-	if distanceCode < numDistanceShortCodes ||
-		uint64(distanceCode-(numDistanceShortCodes-1)) == cmdDist {
+	if distanceCode < core.NumDistanceShortCodes ||
+		uint64(distanceCode-(core.NumDistanceShortCodes-1)) == cmdDist {
 		if cmdDist <= maxDistance {
 			for length != 0 && data[wrappedPos&mask] == data[(wrappedPos-uint32(cmdDist))&mask] {
 				cmd.copyLen++

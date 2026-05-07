@@ -5,7 +5,11 @@
 
 package encoder
 
-import "unsafe"
+import (
+	"unsafe"
+
+	"github.com/molecule-man/go-brrr/internal/core"
+)
 
 // h2u16 is the H2 hasher with uint16 bucket slots, dispatched only when the
 // encoder knows the input fits in 64 KiB (either via a user-supplied sizeHint
@@ -72,7 +76,7 @@ func (h *h2u16) stitchToPreviousBlock(numBytes, position uint, ringBuffer []byte
 func (h *h2u16) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) {
 	data := s.data
 	mask := uint(s.mask)
-	maxBackwardLimit := (uint(1) << s.lgwin) - windowGap
+	maxBackwardLimit := (uint(1) << s.lgwin) - core.WindowGap
 	gap := s.compound.totalSize
 
 	insertLength := s.lastInsertLen

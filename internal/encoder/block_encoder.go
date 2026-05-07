@@ -5,6 +5,8 @@
 
 package encoder
 
+import "github.com/molecule-man/go-brrr/internal/core"
+
 // blockTypeCodeCalc tracks the last two block types to compute the
 // type code for block switches.
 type blockTypeCodeCalc struct {
@@ -18,8 +20,8 @@ type blockSplitCode struct {
 	typeCalc     blockTypeCodeCalc
 	typeDepths   [maxBlockTypeSymbols]byte
 	typeBits     [maxBlockTypeSymbols]uint16
-	lengthDepths [alphabetSizeBlockCount]byte
-	lengthBits   [alphabetSizeBlockCount]uint16
+	lengthDepths [core.AlphabetSizeBlockCount]byte
+	lengthBits   [core.AlphabetSizeBlockCount]uint16
 }
 
 // blockEncoder manages the encoding of one block category (literal, command,
@@ -196,7 +198,7 @@ func (enc *blockEncoder) storeSymbolWithContext(symbol, context uint, contextMap
 // the bitstream, and stores the first block switch.
 func buildAndStoreBlockSplitCode(types []byte, lengths []uint32, numBlocks, numTypes int, tree []huffmanTreeNode, code *blockSplitCode, b *bitWriter) {
 	var typeHisto [maxBlockTypeSymbols]uint32
-	var lengthHisto [alphabetSizeBlockCount]uint32
+	var lengthHisto [core.AlphabetSizeBlockCount]uint32
 
 	calc := initBlockTypeCodeCalc()
 	for i := range numBlocks {
@@ -212,7 +214,7 @@ func buildAndStoreBlockSplitCode(types []byte, lengths []uint32, numBlocks, numT
 		alphabetSize := uint(numTypes + 2)
 		b.buildAndWriteHuffmanTree(typeHisto[:alphabetSize], alphabetSize, tree,
 			code.typeDepths[:], code.typeBits[:])
-		b.buildAndWriteHuffmanTree(lengthHisto[:], alphabetSizeBlockCount, tree,
+		b.buildAndWriteHuffmanTree(lengthHisto[:], core.AlphabetSizeBlockCount, tree,
 			code.lengthDepths[:], code.lengthBits[:])
 		code.typeCalc = initBlockTypeCodeCalc()
 		code.storeBlockSwitch(lengths[0], types[0], true, b)
@@ -236,7 +238,7 @@ func storeTrivialContextMap(numTypes, contextBits uint, tree []huffmanTreeNode, 
 		repeatBits := (uint64(1) << repeatCode) - 1
 		alphabetSize := numTypes + repeatCode
 
-		// Max alphabetSize = maxNumberOfBlockTypes + literalContextBits - 1 = 261.
+		// Max alphabetSize = maxNumberOfBlockTypes + core.LiteralContextBits - 1 = 261.
 		var histogramBuf [maxNumberOfBlockTypes + 5]uint32
 		var depthsBuf [maxNumberOfBlockTypes + 5]byte
 		var bitsBuf [maxNumberOfBlockTypes + 5]uint16

@@ -12,9 +12,11 @@
 
 package encoder
 
+import "github.com/molecule-man/go-brrr/internal/core"
+
 // createHqZopfliBackwardReferences is the Q11 top-level entry point.
 func createHqZopfliBackwardReferences(numBytes, position uint, ringbuffer []byte, ringBufferMask uint, quality, lgwin int, gap uint, compound *compoundDictionary, distCache []int, hasher *h10, lastInsertLen *uint, commands *[]command, numLiterals *uint, bufs *q10Bufs) {
-	maxBackwardLimit := (uint(1) << lgwin) - windowGap
+	maxBackwardLimit := (uint(1) << lgwin) - core.WindowGap
 	hasCompound := compound != nil && compound.numChunks > 0
 	shadowMatches := uint(0)
 	if hasCompound {

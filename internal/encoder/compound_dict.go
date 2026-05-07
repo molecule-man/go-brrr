@@ -6,15 +6,17 @@ import (
 	"errors"
 )
 
-const (
-	maxCompoundDicts = 15
-	dictHashBits     = 40
-)
+// MaxCompoundDicts is the upper bound on compound dictionary chunks per
+// Writer or Reader.
+const MaxCompoundDicts = 15
 
+const dictHashBits = 40
+
+// Errors returned when validating compound dictionary parameters.
 var (
-	errTooManyDicts  = errors.New("brrr: maximum compound dictionaries exceeded")
-	errEmptyDict     = errors.New("brrr: empty dictionary data")
-	errQualityTooLow = errors.New("brrr: compound dictionaries require quality >= 2")
+	ErrTooManyDicts  = errors.New("brrr: maximum compound dictionaries exceeded")
+	ErrEmptyDict     = errors.New("brrr: empty dictionary data")
+	ErrQualityTooLow = errors.New("brrr: compound dictionaries require quality >= 2")
 )
 
 // PreparedDictionary is an immutable hash table built from caller-provided
@@ -38,9 +40,9 @@ type PreparedDictionary struct {
 // compoundDictionary holds multiple prepared dictionary chunks that the encoder
 // can reference as backward distances beyond the ring buffer.
 type compoundDictionary struct {
-	chunks       [maxCompoundDicts]*PreparedDictionary
-	chunkSource  [maxCompoundDicts][]byte
-	chunkOffsets [maxCompoundDicts + 1]uint
+	chunks       [MaxCompoundDicts]*PreparedDictionary
+	chunkSource  [MaxCompoundDicts][]byte
+	chunkOffsets [MaxCompoundDicts + 1]uint
 	totalSize    uint
 	numChunks    int
 	// nextHead is a per-encoder write-only prefetch sink written during match
@@ -61,7 +63,7 @@ type compoundDictionary struct {
 // Returns an error if data is empty.
 func PrepareDictionary(data []byte) (*PreparedDictionary, error) {
 	if len(data) == 0 {
-		return nil, errEmptyDict
+		return nil, ErrEmptyDict
 	}
 	return newPreparedDictionary(data), nil
 }
@@ -188,8 +190,8 @@ func newPreparedDictionary(source []byte) *PreparedDictionary {
 
 // attach appends a prepared dictionary as a chunk.
 func (cd *compoundDictionary) attach(pd *PreparedDictionary) error {
-	if cd.numChunks == maxCompoundDicts {
-		return errTooManyDicts
+	if cd.numChunks == MaxCompoundDicts {
+		return ErrTooManyDicts
 	}
 	idx := cd.numChunks
 	cd.totalSize += uint(len(pd.source))

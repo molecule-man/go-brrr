@@ -7,6 +7,8 @@
 
 package encoder
 
+import "github.com/molecule-man/go-brrr/internal/core"
+
 // Zopfli quality parameters.
 const (
 	// maxZopfliLenQ10 is the maximum copy length for which Q10 evaluates
@@ -27,11 +29,11 @@ const (
 // (RFC 7932 Section 4). These map short code j to:
 //
 //	distance = distCache[distanceCacheIndex[j]] + distanceCacheOffset[j]
-var distanceCacheIndex = [numDistanceShortCodes]uint{
+var distanceCacheIndex = [core.NumDistanceShortCodes]uint{
 	0, 1, 2, 3, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1,
 }
 
-var distanceCacheOffset = [numDistanceShortCodes]int{
+var distanceCacheOffset = [core.NumDistanceShortCodes]int{
 	0, 0, 0, 0, -1, 1, -2, 2, -3, 3, -1, 1, -2, 2, -3, 3,
 }
 
@@ -225,7 +227,7 @@ func updateNodes(nodes []zopfliNode, ringbuffer []byte, startingDistCache []int,
 
 		// Phase 1: Distance cache matches.
 		bestLen := minLen - 1
-		for j := uint(0); j < numDistanceShortCodes && bestLen < maxLen; j++ {
+		for j := uint(0); j < core.NumDistanceShortCodes && bestLen < maxLen; j++ {
 			idx := distanceCacheIndex[j] & 3
 			backward := uint(pd.distanceCache[idx] + distanceCacheOffset[j])
 			if backward == 0 {
@@ -312,7 +314,7 @@ func updateNodes(nodes []zopfliNode, ringbuffer []byte, startingDistCache []int,
 			match := matches[j]
 			dist := uint(match.distance)
 			isDictionaryMatch := dist > maxDistance+gap
-			distCode := dist + numDistanceShortCodes - 1
+			distCode := dist + core.NumDistanceShortCodes - 1
 			distSymbol, distExtra := prefixEncodeSimpleDistance(distCode)
 			distNumExtra := distSymbol >> 10
 			distCost := baseCost + float32(distNumExtra) +
@@ -348,7 +350,7 @@ func updateNodes(nodes []zopfliNode, ringbuffer []byte, startingDistCache []int,
 
 // zopfliIterate runs the DP over pre-collected matches (Q11 path).
 func zopfliIterate(nodes []zopfliNode, ringbuffer []byte, distCache []int, model *zopfliCostModel, numMatches []uint32, matches []backwardMatch, numBytes, position, ringBufferMask, gap uint, compound *compoundDictionary, quality, lgwin int) uint {
-	maxBackwardLimit := (uint(1) << lgwin) - windowGap
+	maxBackwardLimit := (uint(1) << lgwin) - core.WindowGap
 	maxZopfli := maxZopfliLen(quality)
 	var queue startPosQueue
 	curMatchPos := uint(0)

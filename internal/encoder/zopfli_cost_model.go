@@ -14,9 +14,11 @@
 
 package encoder
 
+import "github.com/molecule-man/go-brrr/internal/core"
+
 // maxEffectiveDistAlphabetSize is the maximum distance alphabet size for
 // the Zopfli algorithm: calculateDistanceCodeLimit(maxAllowedDistance, 3, 120).
-const maxEffectiveDistAlphabetSize = numHistogramDistanceSymbols
+const maxEffectiveDistAlphabetSize = core.NumHistogramDistanceSymbols
 
 // infinity is the sentinel cost used to mark unreachable positions.
 const infinity = float32(1.7e38)
@@ -26,7 +28,7 @@ type zopfliCostModel struct {
 	// Pointer-containing fields grouped first (reduces GC scan area).
 	costDist              []float32
 	literalCosts          []float32 // cumulative; length = numBytes + 2
-	costCmd               [alphabetSizeInsertAndCopyLength]float32
+	costCmd               [core.AlphabetSizeInsertAndCopyLength]float32
 	literalHistograms     [3 * 256]uint // scratch for estimateBitCostsForLiterals
 	arena                 zopfliCostModelArena
 	distanceHistogramSize uint
@@ -37,10 +39,10 @@ type zopfliCostModel struct {
 // zopfliCostModelArena holds temporary histograms for setFromCommands,
 // avoiding allocation in the hot path.
 type zopfliCostModelArena struct {
-	histogramLiteral [alphabetSizeLiteral]uint32
-	histogramCmd     [alphabetSizeInsertAndCopyLength]uint32
+	histogramLiteral [core.AlphabetSizeLiteral]uint32
+	histogramCmd     [core.AlphabetSizeInsertAndCopyLength]uint32
 	histogramDist    [maxEffectiveDistAlphabetSize]uint32
-	costLiteral      [alphabetSizeLiteral]float32
+	costLiteral      [core.AlphabetSizeLiteral]float32
 }
 
 // init allocates the cost model's variable-length slices.
@@ -95,8 +97,8 @@ func (m *zopfliCostModel) setFromCommands(position uint, ringbuffer []byte, ring
 	arena := &m.arena
 
 	// Clear histograms.
-	arena.histogramLiteral = [alphabetSizeLiteral]uint32{}
-	arena.histogramCmd = [alphabetSizeInsertAndCopyLength]uint32{}
+	arena.histogramLiteral = [core.AlphabetSizeLiteral]uint32{}
+	arena.histogramCmd = [core.AlphabetSizeInsertAndCopyLength]uint32{}
 	for i := range arena.histogramDist[:m.distanceHistogramSize] {
 		arena.histogramDist[i] = 0
 	}
@@ -120,8 +122,8 @@ func (m *zopfliCostModel) setFromCommands(position uint, ringbuffer []byte, ring
 		pos += insLength + copyLength
 	}
 
-	setCost(arena.histogramLiteral[:], arena.costLiteral[:], alphabetSizeLiteral, true)
-	setCost(arena.histogramCmd[:], m.costCmd[:], alphabetSizeInsertAndCopyLength, false)
+	setCost(arena.histogramLiteral[:], arena.costLiteral[:], core.AlphabetSizeLiteral, true)
+	setCost(arena.histogramCmd[:], m.costCmd[:], core.AlphabetSizeInsertAndCopyLength, false)
 	setCost(arena.histogramDist[:m.distanceHistogramSize], m.costDist, m.distanceHistogramSize, false)
 
 	minCostCmd := infinity

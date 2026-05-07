@@ -1,5 +1,7 @@
 package encoder
 
+import "github.com/molecule-man/go-brrr/internal/core"
+
 // distanceParams holds the distance encoding configuration for a metablock.
 //
 // Brotli encodes distances using two tunable parameters (RFC 7932 Section 4):
@@ -23,8 +25,8 @@ type distanceParams struct {
 // The distance alphabet size and maximum encodable distance are derived from
 // the parameter combination. Large-window mode is not yet supported.
 func initDistanceParams(npostfix, ndirect uint32) distanceParams {
-	alphabetSizeMax := distanceAlphabetSize(npostfix, ndirect, maxDistanceBits)
-	maxDistance := ndirect + (1 << (maxDistanceBits + npostfix + 2)) -
+	alphabetSizeMax := distanceAlphabetSize(npostfix, ndirect, core.MaxDistanceBits)
+	maxDistance := ndirect + (1 << (core.MaxDistanceBits + npostfix + 2)) -
 		(1 << (npostfix + 2))
 	// TODO: add large-window support (BROTLI_LARGE_MAX_DISTANCE_BITS = 62).
 	return distanceParams{
@@ -115,5 +117,5 @@ func computeDistanceCost(
 //
 //	alphabetSize = NUM_DISTANCE_SHORT_CODES + NDIRECT + (MAXNBITS << (NPOSTFIX + 1))
 func distanceAlphabetSize(npostfix, ndirect, maxnbits uint32) uint32 {
-	return numDistanceShortCodes + ndirect + (maxnbits << (npostfix + 1))
+	return core.NumDistanceShortCodes + ndirect + (maxnbits << (npostfix + 1))
 }

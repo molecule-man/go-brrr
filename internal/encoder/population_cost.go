@@ -1,5 +1,7 @@
 package encoder
 
+import "github.com/molecule-man/go-brrr/internal/core"
+
 // populationCost estimates the bit cost of encoding a histogram using Huffman
 // coding, including tree overhead and zero-run-length coding.
 //
@@ -76,7 +78,7 @@ func populationCost(histogram []uint32, dataSize int) float64 {
 	// repeat code 16.
 	var bits float64
 	maxDepth := 1
-	var depthHisto [alphabetSizeCodeLengths]uint32
+	var depthHisto [core.AlphabetSizeCodeLengths]uint32
 	log2total := fastLog2(int(totalCount))
 
 	for i := 0; i < dataSize; {

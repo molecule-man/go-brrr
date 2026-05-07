@@ -5,11 +5,13 @@ package brrr
 import (
 	"bytes"
 	"testing"
+
+	"github.com/molecule-man/go-brrr/internal/core"
 )
 
 func TestProcessCommandsRejectsZeroLengthStaticDictionaryTransform(t *testing.T) {
 	const transformIdx = 54
-	if got := transformTriplets[transformIdx*3+1]; got != transformOmitFirst9 {
+	if got := core.TransformTriplets[transformIdx*3+1]; got != core.TransformOmitFirst9 {
 		t.Fatalf("transform %d = %d, want omitFirst9", transformIdx, got)
 	}
 
@@ -21,11 +23,11 @@ func TestProcessCommandsRejectsZeroLengthStaticDictionaryTransform(t *testing.T)
 	s.pos = 2
 	s.maxDistance = s.pos
 	s.maxBackwardDistance = s.pos
-	s.copyLength = dictMinWordLength
+	s.copyLength = core.DictMinWordLength
 	s.metaBlockRemainingLen = 7
 	s.distanceCode = 1
 	s.distRBIdx = 1
-	s.distRB[0] = s.maxDistance + 1 + (transformIdx << dictSizeBitsByLength[dictMinWordLength])
+	s.distRB[0] = s.maxDistance + 1 + (transformIdx << core.DictSizeBitsByLength[core.DictMinWordLength])
 
 	result := s.processCommands()
 	if result != decoderResultError {

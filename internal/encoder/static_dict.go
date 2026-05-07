@@ -2,6 +2,8 @@
 
 package encoder
 
+import "github.com/molecule-man/go-brrr/internal/core"
+
 // Packed transform IDs for omit-last-N transforms (N=0..9).
 // Bits [cut*6 +: 6] hold the 6-bit base for transform N.
 const (
@@ -43,16 +45,16 @@ func findMatchLenDict(data []byte, word string) int {
 // (wordLen, wordIndex) matches the input data with a score beating minScore.
 // The caller must ensure wordLen <= len(data).
 func matchStaticDictEntry(data []byte, wordLen, wordIndex, maxBackward, maxDistance, minScore uint) (hasherSearchResult, bool) {
-	offset := uint(dictOffsetsByLength[wordLen]) + wordLen*wordIndex
+	offset := uint(core.DictOffsetsByLength[wordLen]) + wordLen*wordIndex
 
-	ml := uint(findMatchLenDict(data[:wordLen], dictData[offset:offset+wordLen]))
+	ml := uint(findMatchLenDict(data[:wordLen], core.DictData[offset:offset+wordLen]))
 	if ml+cutoffTransformsCount <= wordLen || ml == 0 {
 		return hasherSearchResult{}, false
 	}
 
 	cut := wordLen - ml
 	transformID := (cut << 2) + uint((cutoffTransforms>>(cut*6))&0x3F)
-	backward := maxBackward + 1 + wordIndex + (transformID << dictSizeBitsByLength[wordLen])
+	backward := maxBackward + 1 + wordIndex + (transformID << core.DictSizeBitsByLength[wordLen])
 	if backward > maxDistance {
 		return hasherSearchResult{}, false
 	}
@@ -80,16 +82,16 @@ func findMatchLenDictAt(data []byte, pos uint, word string) int {
 }
 
 func matchStaticDictEntryAt(data []byte, pos, wordLen, wordIndex, maxBackward, minScore uint, out *hasherSearchResult) bool {
-	offset := uint(dictOffsetsByLength[wordLen]) + wordLen*wordIndex
+	offset := uint(core.DictOffsetsByLength[wordLen]) + wordLen*wordIndex
 
-	ml := uint(findMatchLenDictAt(data, pos, dictData[offset:offset+wordLen]))
+	ml := uint(findMatchLenDictAt(data, pos, core.DictData[offset:offset+wordLen]))
 	if ml+cutoffTransformsCount <= wordLen || ml == 0 {
 		return false
 	}
 
 	cut := wordLen - ml
 	transformID := (cut << 2) + uint((cutoffTransforms>>(cut*6))&0x3F)
-	backward := maxBackward + 1 + wordIndex + (transformID << dictSizeBitsByLength[wordLen])
+	backward := maxBackward + 1 + wordIndex + (transformID << core.DictSizeBitsByLength[wordLen])
 	if backward > maxBackwardDistance {
 		return false
 	}
@@ -176,16 +178,16 @@ func searchStaticDictionaryDeep(data []byte, maxLength, maxBackward, maxDistance
 		wordLen := uint(byte(e >> 8))
 		if firstByte == byte(e) && wordLen != 0 && wordLen <= maxLength {
 			wordIndex := uint(e >> 16)
-			offset := uint(dictOffsetsByLength[wordLen]) + wordLen*wordIndex
+			offset := uint(core.DictOffsetsByLength[wordLen]) + wordLen*wordIndex
 
-			ml := uint(findMatchLenDict(data[:wordLen], dictData[offset:offset+wordLen]))
+			ml := uint(findMatchLenDict(data[:wordLen], core.DictData[offset:offset+wordLen]))
 			if ml+cutoffTransformsCount <= wordLen || ml == 0 {
 				continue
 			}
 
 			cut := wordLen - ml
 			transformID := (cut << 2) + uint((cutoffTransforms>>(cut*6))&0x3F)
-			backward := maxBackward + 1 + wordIndex + (transformID << dictSizeBitsByLength[wordLen])
+			backward := maxBackward + 1 + wordIndex + (transformID << core.DictSizeBitsByLength[wordLen])
 			if backward > maxDistance {
 				continue
 			}

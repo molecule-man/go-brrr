@@ -2,6 +2,8 @@
 
 package encoder
 
+import "github.com/molecule-man/go-brrr/internal/core"
+
 // huffmanBlock holds input data, commands, and Huffman codes for the three
 // prefix code alphabets (literal, insert-and-copy, distance).
 type huffmanBlock struct {
@@ -32,7 +34,7 @@ func (block huffmanBlock) writeData(b *bitWriter) { //nolint:gocritic // stack c
 		// Use the command prefix lookup table to avoid recomputing the
 		// insert/copy length prefix classes for every command.
 		{
-			lut := cmdLut[cmdCode]
+			lut := core.CmdLut[cmdCode]
 			copyLenCode := cmd.copyLen
 			// Most copy commands have no encoded length delta; avoid the
 			// sign-extension path unless the high delta bits are present.

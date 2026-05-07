@@ -7,7 +7,11 @@
 
 package encoder
 
-import "math"
+import (
+	"math"
+
+	"github.com/molecule-man/go-brrr/internal/core"
+)
 
 // zopfliNode is a single element in the DP array. nodes[i] records the
 // cheapest known way to reach position i from some earlier position.
@@ -45,11 +49,11 @@ func (n *zopfliNode) copyDistance() uint32 {
 
 // distanceCode returns the distance code. If a distance short code was used
 // (stored as shortCode+1 in the high 5 bits), it returns shortCode-1.
-// Otherwise it returns distance + numDistanceShortCodes - 1.
+// Otherwise it returns distance + core.NumDistanceShortCodes - 1.
 func (n *zopfliNode) distanceCode() uint32 {
 	shortCode := n.dcodeInsertLength >> 27
 	if shortCode == 0 {
-		return n.copyDistance() + numDistanceShortCodes - 1
+		return n.copyDistance() + core.NumDistanceShortCodes - 1
 	}
 	return shortCode - 1
 }

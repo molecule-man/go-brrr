@@ -2,6 +2,8 @@ package encoder
 
 import (
 	"math/bits"
+
+	"github.com/molecule-man/go-brrr/internal/core"
 )
 
 // symbolBits is the number of bits used for the symbol value in the
@@ -40,14 +42,14 @@ func (b *bitWriter) writeHuffmanTree(depths []byte, tree []huffmanTreeNode) {
 	// RLE-encode the data alphabet code lengths into code length alphabet
 	// symbols (0–17). Symbols 0–15 are literal lengths; 16 repeats the
 	// previous non-zero length; 17 repeats zero.
-	treeArray := [alphabetSizeInsertAndCopyLength]byte{}
-	extraBitsArray := [alphabetSizeInsertAndCopyLength]byte{}
+	treeArray := [core.AlphabetSizeInsertAndCopyLength]byte{}
+	extraBitsArray := [core.AlphabetSizeInsertAndCopyLength]byte{}
 	treeSize := encodeHuffmanTree(depths, treeArray[:], extraBitsArray[:])
 
 	treeBuf := treeArray[:treeSize]
 
 	// Count frequency of each code length alphabet symbol (0–17).
-	histogram := [alphabetSizeCodeLengths]uint32{}
+	histogram := [core.AlphabetSizeCodeLengths]uint32{}
 	for _, v := range treeBuf {
 		histogram[v]++
 	}
@@ -69,8 +71,8 @@ func (b *bitWriter) writeHuffmanTree(depths []byte, tree []huffmanTreeNode) {
 	}
 
 	// Build the prefix code for the code length alphabet (max depth 5).
-	bitDepthArray := [alphabetSizeCodeLengths]byte{}
-	bitDepthSymbolsArray := [alphabetSizeCodeLengths]uint16{}
+	bitDepthArray := [core.AlphabetSizeCodeLengths]byte{}
+	bitDepthSymbolsArray := [core.AlphabetSizeCodeLengths]uint16{}
 	createHuffmanTree(histogram[:], 5, tree, bitDepthArray[:])
 	convertBitDepthsToSymbols(bitDepthArray[:], bitDepthSymbolsArray[:])
 
@@ -90,31 +92,31 @@ func (b *bitWriter) writeHuffmanTree(depths []byte, tree []huffmanTreeNode) {
 
 // writeHuffmanTreeOfHuffmanTreeToBitmask writes Layer 0 of the prefix code
 // encoding: the HSKIP field followed by each code length alphabet symbol's
-// depth, in codeLengthCodeOrder transmission order, encoded with the fixed
+// depth, in core.CodeLengthCodeOrder transmission order, encoded with the fixed
 // variable-length code from RFC 7932 Section 3.5. Trailing zero-depth entries
 // are omitted.
 func (b *bitWriter) writeHuffmanTreeOfHuffmanTreeToBitmask(numCodes int, bitDepth []byte) {
-	codesToStore := uint(alphabetSizeCodeLengths)
+	codesToStore := uint(core.AlphabetSizeCodeLengths)
 
 	// Trim trailing zeros in storage order.
 	if numCodes > 1 {
-		for codesToStore > 0 && bitDepth[codeLengthCodeOrder[codesToStore-1]] == 0 {
+		for codesToStore > 0 && bitDepth[core.CodeLengthCodeOrder[codesToStore-1]] == 0 {
 			codesToStore--
 		}
 	}
 
 	// Determine how many leading zero-depth entries to skip (2 or 3).
 	var skip uint
-	if bitDepth[codeLengthCodeOrder[0]] == 0 && bitDepth[codeLengthCodeOrder[1]] == 0 {
+	if bitDepth[core.CodeLengthCodeOrder[0]] == 0 && bitDepth[core.CodeLengthCodeOrder[1]] == 0 {
 		skip = 2
-		if bitDepth[codeLengthCodeOrder[2]] == 0 {
+		if bitDepth[core.CodeLengthCodeOrder[2]] == 0 {
 			skip = 3
 		}
 	}
 
 	b.writeBits(2, uint64(skip))
 	for i := skip; i < codesToStore; i++ {
-		depth := bitDepth[codeLengthCodeOrder[i]]
+		depth := bitDepth[core.CodeLengthCodeOrder[i]]
 		b.writeBits(
 			uint(codeLengthCodeBitLengths[depth]),
 			uint64(codeLengthCodeSymbols[depth]),
@@ -131,7 +133,7 @@ func (b *bitWriter) writeHuffmanTreeToBitmask(tree, extraBits, bitDepth []byte, 
 		b.writeBits(uint(bitDepth[code]), uint64(symbols[code]))
 
 		switch code {
-		case repeatPreviousCodeLength:
+		case core.RepeatPreviousCodeLength:
 			b.writeBits(2, uint64(extraBits[i]))
 		case alphabetSizeRepeatZeroCodeLength:
 			b.writeBits(3, uint64(extraBits[i]))
@@ -281,7 +283,7 @@ func (b *bitWriter) buildAndWriteHuffmanTree(
 // scan to stop early once all non-zero entries have been found, avoiding
 // iteration over trailing zeros.
 //
-// The tree slice must have space for at least 2*alphabetSizeLiteral+1 nodes.
+// The tree slice must have space for at least 2*core.AlphabetSizeLiteral+1 nodes.
 // maxBits is the bit width for encoding symbol values in simple codes (typically 8).
 func (b *bitWriter) buildAndWriteHuffmanTreeFast(tree []huffmanTreeNode,
 	histogram []uint32, histogramTotal, maxBits uint,
@@ -407,7 +409,7 @@ func (b *bitWriter) writeHuffmanCode(depth []byte, symbols [4]uint, count, lengt
 
 	b.writeStaticCodeLengthCode()
 
-	previousValue := byte(initialRepeatedCodeLength)
+	previousValue := byte(core.InitialRepeatedCodeLength)
 	for i := uint(0); i < length; {
 		value := depth[i]
 		reps := uint(1)

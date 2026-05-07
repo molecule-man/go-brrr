@@ -104,23 +104,23 @@ func TestCompoundDictionary_AttachMultiple(t *testing.T) {
 
 func TestCompoundDictionary_AttachOverflow(t *testing.T) {
 	var cd compoundDictionary
-	for i := range maxCompoundDicts {
+	for i := range MaxCompoundDicts {
 		data := []byte{byte(i), 1, 2, 3, 4, 5, 6, 7, 8}
 		if err := cd.attach(newPreparedDictionary(data)); err != nil {
 			t.Fatalf("attach %d: %v", i, err)
 		}
 	}
-	if err := cd.attach(newPreparedDictionary([]byte("overflow"))); !errors.Is(err, errTooManyDicts) {
-		t.Fatalf("expected errTooManyDicts, got %v", err)
+	if err := cd.attach(newPreparedDictionary([]byte("overflow"))); !errors.Is(err, ErrTooManyDicts) {
+		t.Fatalf("expected ErrTooManyDicts, got %v", err)
 	}
 }
 
 func TestPrepareDictionaryEmpty(t *testing.T) {
-	if _, err := PrepareDictionary(nil); !errors.Is(err, errEmptyDict) {
-		t.Fatalf("expected errEmptyDict for nil, got %v", err)
+	if _, err := PrepareDictionary(nil); !errors.Is(err, ErrEmptyDict) {
+		t.Fatalf("expected ErrEmptyDict for nil, got %v", err)
 	}
-	if _, err := PrepareDictionary([]byte{}); !errors.Is(err, errEmptyDict) {
-		t.Fatalf("expected errEmptyDict for empty, got %v", err)
+	if _, err := PrepareDictionary([]byte{}); !errors.Is(err, ErrEmptyDict) {
+		t.Fatalf("expected ErrEmptyDict for empty, got %v", err)
 	}
 }
 
@@ -128,10 +128,10 @@ func TestFindCompoundDictionaryMatch_HashChainHit(t *testing.T) {
 	// Place a known 8+ byte pattern in the dict, then the same pattern in the ring buffer.
 	pattern := []byte("ABCDEFGHIJKLMNOP")
 	// Dict: padding + pattern (enough bytes for hash table building).
-	dictData := make([]byte, 128)
-	copy(dictData[64:], pattern)
+	dictBytes := make([]byte, 128)
+	copy(dictBytes[64:], pattern)
 
-	pd := newPreparedDictionary(dictData)
+	pd := newPreparedDictionary(dictBytes)
 
 	// Ring buffer: same pattern.
 	ringSize := 1024
@@ -144,9 +144,9 @@ func TestFindCompoundDictionaryMatch_HashChainHit(t *testing.T) {
 	maxLength := uint(len(pattern))
 	// distanceOffset: for a single-chunk compound dict, this is
 	// maxRingBufferDistance + 1 + totalSize - 1 - chunkOffset[0].
-	// Simplify: we set distanceOffset = cur + len(dictData) to place the dict
+	// Simplify: we set distanceOffset = cur + len(dictBytes) to place the dict
 	// just beyond the ring buffer.
-	distanceOffset := cur + uint(len(dictData))
+	distanceOffset := cur + uint(len(dictBytes))
 
 	distCache := [4]uint{1, 2, 3, 4}
 	var sr hasherSearchResult
@@ -171,11 +171,11 @@ func TestFindCompoundDictionaryMatch_HashChainHit(t *testing.T) {
 
 func TestFindCompoundDictionaryMatch_CacheHit(t *testing.T) {
 	// Place a pattern in the dict and set up a distance cache entry that points to it.
-	dictData := make([]byte, 128)
+	dictBytes := make([]byte, 128)
 	pattern := []byte("XYZWXYZW12345678")
-	copy(dictData[32:], pattern)
+	copy(dictBytes[32:], pattern)
 
-	pd := newPreparedDictionary(dictData)
+	pd := newPreparedDictionary(dictBytes)
 
 	ringSize := 1024
 	ring := make([]byte, ringSize)
@@ -184,9 +184,9 @@ func TestFindCompoundDictionaryMatch_CacheHit(t *testing.T) {
 
 	cur := uint(256)
 	maxLength := uint(len(pattern))
-	distanceOffset := cur + uint(len(dictData))
+	distanceOffset := cur + uint(len(dictBytes))
 
-	// Set distance cache[0] to point exactly at dictData[32].
+	// Set distance cache[0] to point exactly at dictBytes[32].
 	cacheDistance := distanceOffset - 32
 	distCache := [4]uint{cacheDistance, 1, 2, 3}
 	var sr hasherSearchResult
@@ -208,11 +208,11 @@ func TestFindCompoundDictionaryMatch_CacheHit(t *testing.T) {
 }
 
 func TestFindCompoundDictionaryMatch_NoMatch(t *testing.T) {
-	dictData := make([]byte, 128)
-	for i := range dictData {
-		dictData[i] = byte(i)
+	dictBytes := make([]byte, 128)
+	for i := range dictBytes {
+		dictBytes[i] = byte(i)
 	}
-	pd := newPreparedDictionary(dictData)
+	pd := newPreparedDictionary(dictBytes)
 
 	ringSize := 1024
 	ring := make([]byte, ringSize)
@@ -226,7 +226,7 @@ func TestFindCompoundDictionaryMatch_NoMatch(t *testing.T) {
 
 	cur := uint(256)
 	maxLength := uint(64)
-	distanceOffset := cur + uint(len(dictData))
+	distanceOffset := cur + uint(len(dictBytes))
 
 	distCache := [4]uint{1, 2, 3, 4}
 	var sr hasherSearchResult
@@ -243,11 +243,11 @@ func TestFindCompoundDictionaryMatch_NoMatch(t *testing.T) {
 
 func TestLookupCompoundDictionaryMatch_SingleChunk(t *testing.T) {
 	pattern := []byte("REPEATEDPATTERN!")
-	dictData := make([]byte, 128)
-	copy(dictData[48:], pattern)
+	dictBytes := make([]byte, 128)
+	copy(dictBytes[48:], pattern)
 
 	var cd compoundDictionary
-	_ = cd.attach(newPreparedDictionary(dictData))
+	_ = cd.attach(newPreparedDictionary(dictBytes))
 
 	ringSize := 1024
 	ring := make([]byte, ringSize)

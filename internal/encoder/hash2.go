@@ -3,6 +3,8 @@
 
 package encoder
 
+import "github.com/molecule-man/go-brrr/internal/core"
+
 // h2 is the H2 hasher: a forgetful hash table of fixed size that maps
 // 5-byte sequences to positions. Each bucket stores a single uint32 position.
 type h2 struct {
@@ -59,7 +61,7 @@ func (h *h2) stitchToPreviousBlock(numBytes, position uint, ringBuffer []byte, r
 func (h *h2) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) {
 	data := s.data
 	mask := uint(s.mask)
-	maxBackwardLimit := (uint(1) << s.lgwin) - windowGap
+	maxBackwardLimit := (uint(1) << s.lgwin) - core.WindowGap
 	gap := s.compound.totalSize
 
 	insertLength := s.lastInsertLen

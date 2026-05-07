@@ -3,6 +3,8 @@ package encoder
 import (
 	"math/rand"
 	"testing"
+
+	"github.com/molecule-man/go-brrr/internal/core"
 )
 
 func TestCountLiterals(t *testing.T) {
@@ -253,7 +255,7 @@ func TestSplitBlockEndToEnd(t *testing.T) {
 		cmd := newCommand(commandConfig{
 			insertLen:      insertLen,
 			copyLen:        copyLen,
-			distanceCode:   numDistanceShortCodes + 1,
+			distanceCode:   core.NumDistanceShortCodes + 1,
 			numDirectCodes: 0,
 			postfixBits:    0,
 		})

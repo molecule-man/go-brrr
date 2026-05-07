@@ -1,6 +1,8 @@
-package encoder
+package core
 
-import "testing"
+import (
+	"testing"
+)
 
 // Verify prefix/suffix strings match the C reference (total content bytes and
 // spot checks against kPrefixSuffix + kPrefixSuffixMap).
@@ -46,14 +48,14 @@ func TestTransformPrefixSuffix(t *testing.T) {
 
 // Verify each cutoff index references an ["", omit-last-N, ""] transform.
 func TestTransformCutOffs(t *testing.T) {
-	for n, idx := range transformCutOffs {
+	for n, idx := range TransformCutOffs {
 		if idx < 0 {
 			continue
 		}
 		i := int(idx)
-		prefix := transformTriplets[i*3]
-		ttype := transformTriplets[i*3+1]
-		suffix := transformTriplets[i*3+2]
+		prefix := TransformTriplets[i*3]
+		ttype := TransformTriplets[i*3+1]
+		suffix := TransformTriplets[i*3+2]
 
 		// Prefix and suffix must be entry 49 (empty string).
 		if prefix != 49 || suffix != 49 {
@@ -64,9 +66,9 @@ func TestTransformCutOffs(t *testing.T) {
 		// Transform type: identity for n=0, omit-last-N for n>0.
 		var wantType byte
 		if n == 0 {
-			wantType = transformIdentity
+			wantType = TransformIdentity
 		} else {
-			wantType = byte(n) // transformOmitLast1..9 == 1..9
+			wantType = byte(n) // core.TransformOmitLast1..9 == 1..9
 		}
 		if ttype != wantType {
 			t.Errorf("cutoff[%d] = transform %d: type=%d, want %d", n, idx, ttype, wantType)
@@ -149,10 +151,10 @@ func TestTransformDictionaryWord(t *testing.T) {
 
 	var buf [256]byte
 	for _, tt := range tests {
-		n := transformDictionaryWord(buf[:], tt.word, tt.transformIdx)
+		n := TransformDictionaryWord(buf[:], tt.word, tt.transformIdx)
 		got := string(buf[:n])
 		if got != tt.want {
-			t.Errorf("transformDictionaryWord(%q, %d) = %q, want %q",
+			t.Errorf("TransformDictionaryWord(%q, %d) = %q, want %q",
 				tt.word, tt.transformIdx, got, tt.want)
 		}
 	}

@@ -1,5 +1,7 @@
 package encoder
 
+import "github.com/molecule-man/go-brrr/internal/core"
+
 // Iterative entropy-based block splitter for the Q10/Q11 slow path.
 //
 // The greedy block splitter (buildMetaBlockGreedy in block_split.go) processes
@@ -30,7 +32,7 @@ const (
 	distanceStrideLength        = 40
 	symbolsPerLiteralHistogram  = 544
 	symbolsPerCommandHistogram  = 530
-	symbolsPerDistanceHistogram = numHistogramDistanceSymbols
+	symbolsPerDistanceHistogram = core.NumHistogramDistanceSymbols
 )
 
 // Algorithm constants for the iterative block splitter.
@@ -627,7 +629,7 @@ func splitBlock(
 		samplingStride:      literalStrideLength,
 		blockSwitchCost:     literalBlockSwitchCost,
 		quality:             quality,
-		alphabetSize:        alphabetSizeLiteral,
+		alphabetSize:        core.AlphabetSizeLiteral,
 	})
 
 	// Extract and split command prefixes.
@@ -642,7 +644,7 @@ func splitBlock(
 		samplingStride:      commandStrideLength,
 		blockSwitchCost:     commandBlockSwitchCost,
 		quality:             quality,
-		alphabetSize:        alphabetSizeInsertAndCopyLength,
+		alphabetSize:        core.AlphabetSizeInsertAndCopyLength,
 	})
 
 	// Extract and split distance prefixes (only for commands that encode a distance).
@@ -662,7 +664,7 @@ func splitBlock(
 		samplingStride:      distanceStrideLength,
 		blockSwitchCost:     distanceBlockSwitchCost,
 		quality:             quality,
-		alphabetSize:        numHistogramDistanceSymbols,
+		alphabetSize:        core.NumHistogramDistanceSymbols,
 	})
 }
 

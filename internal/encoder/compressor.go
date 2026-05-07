@@ -1,17 +1,17 @@
 // Compressor interface used by Writer to drive a brotli stream regardless of
 // quality level. Each implementation owns its scratch buffers and pool
-// lifecycle: acquisition is via the newCompressor factory, return-to-pool is
+// lifecycle: acquisition is via the NewCompressor factory, return-to-pool is
 // via Release.
 
 package encoder
 
 import "io"
 
-// compressor is the unified backend interface for Writer. Quality, lgwin, and
+// Compressor is the unified backend interface for Writer. Quality, lgwin, and
 // sizeHint are immutable after construction; Reset clears per-stream state but
 // keeps those parameters. AttachDictionary may return an error for backends
 // that do not support compound dictionaries (q0/q1).
-type compressor interface {
+type Compressor interface {
 	// Write enqueues input. Implementations may emit compressed output to dst
 	// during this call (q>=2) or buffer until Flush/Close (q0/q1).
 	Write(dst io.Writer, p []byte) (int, error)
@@ -34,10 +34,10 @@ type compressor interface {
 	Release()
 }
 
-// newCompressor constructs a compressor for the given quality/lgwin/sizeHint,
+// NewCompressor constructs a Compressor for the given quality/lgwin/sizeHint,
 // dispatching to the appropriate backend (q0/q1 fast or q>=2 streaming) and
 // configuring it from its pool.
-func newCompressor(quality, lgwin int, sizeHint uint) compressor {
+func NewCompressor(quality, lgwin int, sizeHint uint) Compressor {
 	switch {
 	case quality >= 4:
 		e := poolEncoderSplit.Get().(*encoderSplit)

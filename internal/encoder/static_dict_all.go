@@ -6,6 +6,8 @@
 
 package encoder
 
+import "github.com/molecule-man/go-brrr/internal/core"
+
 // maxStaticDictMatchLen is the maximum match length for static dictionary
 // entries including transforms. Matches BROTLI_MAX_STATIC_DICTIONARY_MATCH_LEN.
 const maxStaticDictMatchLen = 37
@@ -30,10 +32,10 @@ func addMatch(distance, length, lenCode uint, matches []uint32) {
 // dictMatchLength returns the number of matching bytes between data and the
 // dictionary word at (id, wordLen), up to maxLen bytes.
 func dictMatchLength(data []byte, id, wordLen, maxLen uint) uint {
-	offset := uint(dictOffsetsByLength[wordLen]) + wordLen*id
+	offset := uint(core.DictOffsetsByLength[wordLen]) + wordLen*id
 	limit := min(wordLen, maxLen)
 	for i := range limit {
-		if data[i] != dictData[offset+i] {
+		if data[i] != core.DictData[offset+i] {
 			return i
 		}
 	}
@@ -48,20 +50,20 @@ func isDictWordMatch(w dictWord, data []byte, maxLength uint) bool {
 	if wordLen > maxLength {
 		return false
 	}
-	offset := uint(dictOffsetsByLength[wordLen]) + wordLen*uint(w.idx)
+	offset := uint(core.DictOffsetsByLength[wordLen]) + wordLen*uint(w.idx)
 
 	switch w.transform {
 	case 0:
 		// Identity transform: exact match.
 		for i := range wordLen {
-			if data[i] != dictData[offset+i] {
+			if data[i] != core.DictData[offset+i] {
 				return false
 			}
 		}
 		return true
 	case 10:
 		// Uppercase first: first byte must be uppercase version.
-		d := dictData[offset]
+		d := core.DictData[offset]
 		if d < 'a' || d > 'z' {
 			return false
 		}
@@ -69,7 +71,7 @@ func isDictWordMatch(w dictWord, data []byte, maxLength uint) bool {
 			return false
 		}
 		for i := uint(1); i < wordLen; i++ {
-			if data[i] != dictData[offset+i] {
+			if data[i] != core.DictData[offset+i] {
 				return false
 			}
 		}
@@ -77,7 +79,7 @@ func isDictWordMatch(w dictWord, data []byte, maxLength uint) bool {
 	default:
 		// Uppercase all: all lowercase ASCII letters are uppercased.
 		for i := range wordLen {
-			d := dictData[offset+i]
+			d := core.DictData[offset+i]
 			if d >= 'a' && d <= 'z' {
 				if (d ^ 32) != data[i] {
 					return false
@@ -107,7 +109,7 @@ func findAllStaticDictionaryMatches(data []byte, minLength, maxLength uint, matc
 		w := staticDictWords[offset]
 		offset++
 		l := uint(w.len & 0x1F)
-		n := uint(1) << dictSizeBitsByLength[l]
+		n := uint(1) << core.DictSizeBitsByLength[l]
 		id := uint(w.idx)
 		end := w.len&0x80 != 0
 		w.len = uint8(l)
@@ -445,7 +447,7 @@ func findAllStaticDictionaryMatches(data []byte, minLength, maxLength uint, matc
 			w := staticDictWords[offset]
 			offset++
 			l := uint(w.len & 0x1F)
-			n := uint(1) << dictSizeBitsByLength[l]
+			n := uint(1) << core.DictSizeBitsByLength[l]
 			id := uint(w.idx)
 			end := w.len&0x80 != 0
 			w.len = uint8(l)
@@ -595,7 +597,7 @@ func findAllStaticDictionaryMatches(data []byte, minLength, maxLength uint, matc
 				w := staticDictWords[offset]
 				offset++
 				l := uint(w.len & 0x1F)
-				n := uint(1) << dictSizeBitsByLength[l]
+				n := uint(1) << core.DictSizeBitsByLength[l]
 				id := uint(w.idx)
 				end := w.len&0x80 != 0
 				w.len = uint8(l)
@@ -637,7 +639,7 @@ func findAllStaticDictionaryMatches(data []byte, minLength, maxLength uint, matc
 				w := staticDictWords[offset]
 				offset++
 				l := uint(w.len & 0x1F)
-				n := uint(1) << dictSizeBitsByLength[l]
+				n := uint(1) << core.DictSizeBitsByLength[l]
 				id := uint(w.idx)
 				end := w.len&0x80 != 0
 				w.len = uint8(l)

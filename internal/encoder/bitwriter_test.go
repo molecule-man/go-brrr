@@ -1,6 +1,10 @@
 package encoder
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/molecule-man/go-brrr/internal/core"
+)
 
 func TestWriteBits(t *testing.T) {
 	type write struct {
@@ -129,7 +133,7 @@ func TestBitstreamWriteHuffmanTree(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			buf := make([]byte, 4096)
 			bs := bitWriter{buf: buf}
-			tree := make([]huffmanTreeNode, 2*alphabetSizeCodeLengths+1)
+			tree := make([]huffmanTreeNode, 2*core.AlphabetSizeCodeLengths+1)
 
 			bs.writeHuffmanTree(tt.depths, tree)
 

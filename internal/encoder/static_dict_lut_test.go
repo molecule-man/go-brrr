@@ -1,6 +1,10 @@
 package encoder
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/molecule-man/go-brrr/internal/core"
+)
 
 func TestStaticDictLUT(t *testing.T) {
 	t.Run("BucketsLength", func(t *testing.T) {
@@ -142,7 +146,7 @@ func TestStaticDictHash(t *testing.T) {
 			if l == 0 {
 				continue
 			}
-			maxIdx := uint16(1) << dictSizeBitsByLength[l]
+			maxIdx := uint16(1) << core.DictSizeBitsByLength[l]
 			if staticDictHashWords[i] >= maxIdx {
 				t.Errorf("bucket %d: word index %d >= max %d for length %d",
 					i, staticDictHashWords[i], maxIdx, l)
@@ -155,8 +159,8 @@ func TestStaticDictHash(t *testing.T) {
 			if l == 0 {
 				continue
 			}
-			offset := uint(dictOffsetsByLength[l]) + uint(l)*uint(staticDictHashWords[i])
-			want := dictData[offset]
+			offset := uint(core.DictOffsetsByLength[l]) + uint(l)*uint(staticDictHashWords[i])
+			want := core.DictData[offset]
 			if staticDictHashFirstBytes[i] != want {
 				t.Errorf("bucket %d: first byte %d, want %d (len=%d, word=%d)",
 					i, staticDictHashFirstBytes[i], want, l, staticDictHashWords[i])

@@ -1,6 +1,10 @@
 package encoder
 
-import "math/bits"
+import (
+	"math/bits"
+
+	"github.com/molecule-man/go-brrr/internal/core"
+)
 
 // combineLengthCodesBase holds the base offset for each (insCode>>3, copyCode>>3)
 // cell of the RFC 7932 Section 5 insert-and-copy length code grid. Both codes
@@ -31,7 +35,7 @@ type commandConfig struct {
 
 	// distanceCode is an intermediate code: one of the 16 short codes (ring
 	// buffer references) or the actual distance increased by
-	// numDistanceShortCodes - 1.
+	// core.NumDistanceShortCodes - 1.
 	distanceCode uint
 
 	// numDirectCodes and postfixBits are the distance encoding parameters for
@@ -141,7 +145,7 @@ func newInsertCommand(insertLen uint) command {
 	return command{
 		insertLen:  uint32(insertLen),
 		copyLen:    4 << 25,
-		distPrefix: numDistanceShortCodes,
+		distPrefix: core.NumDistanceShortCodes,
 		cmdPrefix:  cmdPrefix,
 	}
 }
@@ -190,17 +194,17 @@ func (c command) copyLenCode() uint32 {
 // and distExtra fields. Inverse of prefixEncodeCopyDistance.
 func (c command) distanceCode(numDirectCodes, postfixBits uint) uint32 {
 	dcode := uint32(c.distPrefix & 0x3FF)
-	if dcode < numDistanceShortCodes+uint32(numDirectCodes) {
+	if dcode < core.NumDistanceShortCodes+uint32(numDirectCodes) {
 		return dcode
 	}
 	nbits := uint32(c.distPrefix >> 10)
 	extra := c.distExtra
 	postfixMask := (uint32(1) << postfixBits) - 1
-	hcode := (dcode - uint32(numDirectCodes) - numDistanceShortCodes) >> postfixBits
-	lcode := (dcode - uint32(numDirectCodes) - numDistanceShortCodes) & postfixMask
+	hcode := (dcode - uint32(numDirectCodes) - core.NumDistanceShortCodes) >> postfixBits
+	lcode := (dcode - uint32(numDirectCodes) - core.NumDistanceShortCodes) & postfixMask
 	offset := ((2 + (hcode & 1)) << nbits) - 4
 	return ((offset+extra)<<postfixBits + lcode +
-		uint32(numDirectCodes) + numDistanceShortCodes)
+		uint32(numDirectCodes) + core.NumDistanceShortCodes)
 }
 
 // getInsertLenCode returns the insert length prefix code (0–23) for a given
@@ -289,17 +293,17 @@ func getCopyLenCodeSlow(copyLen uint) uint16 {
 // for numDirectCodes=0 and postfixBits=0 (the default distance parameters).
 // Small enough to be inlined at hot call sites.
 func prefixEncodeSimpleDistance(distanceCode uint) (code uint16, extraBits uint32) {
-	if distanceCode < numDistanceShortCodes {
+	if distanceCode < core.NumDistanceShortCodes {
 		return uint16(distanceCode), 0
 	}
 
-	dist := 4 + distanceCode - numDistanceShortCodes
+	dist := 4 + distanceCode - core.NumDistanceShortCodes
 	bucket := uint(bits.Len(dist)) - 2
 	prefix := (dist >> bucket) & 1
 	offset := (2 + prefix) << bucket
 
 	code = uint16((bucket << 10) |
-		(numDistanceShortCodes + 2*(bucket-1) + prefix))
+		(core.NumDistanceShortCodes + 2*(bucket-1) + prefix))
 	extraBits = uint32(dist - offset)
 	return code, extraBits
 }
@@ -313,12 +317,12 @@ func prefixEncodeSimpleDistance(distanceCode uint) (code uint16, extraBits uint3
 // The returned code packs the distance symbol in the low 10 bits and the number
 // of extra bits in the high 6 bits. This matches the distPrefix field layout.
 func prefixEncodeCopyDistance(distanceCode, numDirectCodes, postfixBits uint) (code uint16, extraBits uint32) {
-	if distanceCode < numDistanceShortCodes+numDirectCodes {
+	if distanceCode < core.NumDistanceShortCodes+numDirectCodes {
 		return uint16(distanceCode), 0
 	}
 
 	dist := (uint(1) << (postfixBits + 2)) +
-		(distanceCode - numDistanceShortCodes - numDirectCodes)
+		(distanceCode - core.NumDistanceShortCodes - numDirectCodes)
 	bucket := uint(bits.Len(dist)) - 2 // Log2FloorNonZero(dist) - 1
 	postfixMask := (uint(1) << postfixBits) - 1
 	postfix := dist & postfixMask
@@ -327,7 +331,7 @@ func prefixEncodeCopyDistance(distanceCode, numDirectCodes, postfixBits uint) (c
 	nbits := bucket - postfixBits
 
 	code = uint16((nbits << 10) |
-		(numDistanceShortCodes + numDirectCodes +
+		(core.NumDistanceShortCodes + numDirectCodes +
 			((2*(nbits-1) + prefix) << postfixBits) + postfix))
 	extraBits = uint32((dist - offset) >> postfixBits)
 	return code, extraBits

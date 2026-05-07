@@ -1,10 +1,10 @@
-package encoder
+package core
 
 import "testing"
 
 func TestContextLookupTableSize(t *testing.T) {
-	if len(contextLookupTable) != 2048 {
-		t.Errorf("contextLookupTable has %d bytes, want 2048", len(contextLookupTable))
+	if len(ContextLookupTable) != 2048 {
+		t.Errorf("ContextLookupTable has %d bytes, want 2048", len(ContextLookupTable))
 	}
 }
 
@@ -23,9 +23,9 @@ func TestContextLookupLSB6(t *testing.T) {
 		{42, 200, 42},
 	}
 	for _, tt := range tests {
-		got := contextLookup(contextLSB6, tt.p1, tt.p2)
+		got := ContextLookup(ContextLSB6, tt.p1, tt.p2)
 		if got != tt.want {
-			t.Errorf("contextLookup(LSB6, %d, %d) = %d, want %d", tt.p1, tt.p2, got, tt.want)
+			t.Errorf("ContextLookup(LSB6, %d, %d) = %d, want %d", tt.p1, tt.p2, got, tt.want)
 		}
 	}
 }
@@ -43,9 +43,9 @@ func TestContextLookupMSB6(t *testing.T) {
 		{100, 50, 25},
 	}
 	for _, tt := range tests {
-		got := contextLookup(contextMSB6, tt.p1, tt.p2)
+		got := ContextLookup(ContextMSB6, tt.p1, tt.p2)
 		if got != tt.want {
-			t.Errorf("contextLookup(MSB6, %d, %d) = %d, want %d", tt.p1, tt.p2, got, tt.want)
+			t.Errorf("ContextLookup(MSB6, %d, %d) = %d, want %d", tt.p1, tt.p2, got, tt.want)
 		}
 	}
 }
@@ -64,9 +64,9 @@ func TestContextLookupUTF8(t *testing.T) {
 		{"upper_A+punct", 'A', '!', 48 + 1},   // upper vowel=12*4=48, punct=1 → 49
 	}
 	for _, tt := range tests {
-		got := contextLookup(contextUTF8, tt.p1, tt.p2)
+		got := ContextLookup(ContextUTF8, tt.p1, tt.p2)
 		if got != tt.want {
-			t.Errorf("contextLookup(UTF8, %q, %q) [%s] = %d, want %d",
+			t.Errorf("ContextLookup(UTF8, %q, %q) [%s] = %d, want %d",
 				tt.p1, tt.p2, tt.name, got, tt.want)
 		}
 	}
@@ -88,9 +88,9 @@ func TestContextLookupSigned(t *testing.T) {
 		{255, 0, 56},  // bucket 7
 	}
 	for _, tt := range tests {
-		got := contextLookup(contextSigned, tt.p1, tt.p2)
+		got := ContextLookup(ContextSigned, tt.p1, tt.p2)
 		if got != tt.want {
-			t.Errorf("contextLookup(Signed, %d, %d) = %d, want %d", tt.p1, tt.p2, got, tt.want)
+			t.Errorf("ContextLookup(Signed, %d, %d) = %d, want %d", tt.p1, tt.p2, got, tt.want)
 		}
 	}
 }
@@ -100,9 +100,9 @@ func TestContextLookupRange(t *testing.T) {
 	for mode := range uint(4) {
 		for p1 := range 256 {
 			for p2 := range 256 {
-				c := contextLookup(mode, byte(p1), byte(p2))
+				c := ContextLookup(mode, byte(p1), byte(p2))
 				if c > 63 {
-					t.Fatalf("contextLookup(%d, %d, %d) = %d, exceeds 63", mode, p1, p2, c)
+					t.Fatalf("ContextLookup(%d, %d, %d) = %d, exceeds 63", mode, p1, p2, c)
 				}
 			}
 		}

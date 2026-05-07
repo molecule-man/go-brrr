@@ -1,6 +1,10 @@
 package encoder
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/molecule-man/go-brrr/internal/core"
+)
 
 func TestBlockHistogramsTally(t *testing.T) {
 	// input = "abracadabra\x00\x00\x00\x00\x00" (16 bytes, mask 0xF).
@@ -21,8 +25,8 @@ func TestBlockHistogramsTally(t *testing.T) {
 	//   cmd 1: insert input[4]='c', [5]='a'; pos=6; +copy 2 → pos=8
 	//   cmd 2: insert input[8]='b'; pos=9
 
-	var litHist [alphabetSizeLiteral]uint32
-	var cmdHist [alphabetSizeInsertAndCopyLength]uint32
+	var litHist [core.AlphabetSizeLiteral]uint32
+	var cmdHist [core.AlphabetSizeInsertAndCopyLength]uint32
 	var distHist [64]uint32
 	hist := blockHistograms{lit: litHist[:], cmd: cmdHist[:], dist: distHist[:]}
 
@@ -80,8 +84,8 @@ func TestBlockHistogramsTally(t *testing.T) {
 }
 
 func TestBlockHistogramsTallyEmpty(t *testing.T) {
-	var litHist [alphabetSizeLiteral]uint32
-	var cmdHist [alphabetSizeInsertAndCopyLength]uint32
+	var litHist [core.AlphabetSizeLiteral]uint32
+	var cmdHist [core.AlphabetSizeInsertAndCopyLength]uint32
 	var distHist [64]uint32
 	hist := blockHistograms{lit: litHist[:], cmd: cmdHist[:], dist: distHist[:]}
 
@@ -106,8 +110,8 @@ func TestBlockHistogramsTallyEmpty(t *testing.T) {
 func TestBlockHistogramsTallyZeroCopyNoDistance(t *testing.T) {
 	input := []byte("hello\x00\x00\x00")
 
-	var litHist [alphabetSizeLiteral]uint32
-	var cmdHist [alphabetSizeInsertAndCopyLength]uint32
+	var litHist [core.AlphabetSizeLiteral]uint32
+	var cmdHist [core.AlphabetSizeInsertAndCopyLength]uint32
 	var distHist [64]uint32
 	hist := blockHistograms{lit: litHist[:], cmd: cmdHist[:], dist: distHist[:]}
 

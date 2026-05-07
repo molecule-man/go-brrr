@@ -5,6 +5,8 @@ package brrr
 import (
 	"errors"
 	"io"
+
+	"github.com/molecule-man/go-brrr/internal/encoder"
 )
 
 var errReaderClosed = errors.New("brrr: reader is closed")
@@ -31,12 +33,12 @@ func NewReader(src io.Reader) *Reader {
 // with additional options. Compound dictionaries supplied via opts.Dictionaries
 // must match those used by the encoder.
 func NewReaderOptions(src io.Reader, opts ReaderOptions) (*Reader, error) {
-	if len(opts.Dictionaries) > maxCompoundDicts {
-		return nil, errTooManyDicts
+	if len(opts.Dictionaries) > encoder.MaxCompoundDicts {
+		return nil, encoder.ErrTooManyDicts
 	}
 	for _, d := range opts.Dictionaries {
 		if len(d) == 0 {
-			return nil, errEmptyDict
+			return nil, encoder.ErrEmptyDict
 		}
 	}
 	return &Reader{src: src, dicts: opts.Dictionaries}, nil

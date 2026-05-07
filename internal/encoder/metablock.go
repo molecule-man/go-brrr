@@ -14,6 +14,8 @@ package encoder
 
 import (
 	"math/bits"
+
+	"github.com/molecule-man/go-brrr/internal/core"
 )
 
 // maxHistograms is the maximum number of histogram clusters after merging.
@@ -158,7 +160,7 @@ func buildMetaBlock(
 	literalContextMultiplier := 1
 	var contextModes []byte
 	if !disableLiteralContextModeling {
-		literalContextMultiplier = 1 << literalContextBits
+		literalContextMultiplier = 1 << core.LiteralContextBits
 		bufs.bmContextModes = growByte(bufs.bmContextModes, mb.litSplit.numTypes)
 		contextModes = bufs.bmContextModes[:mb.litSplit.numTypes]
 		for i := range contextModes {
@@ -167,29 +169,29 @@ func buildMetaBlock(
 	}
 
 	litHistSize := mb.litSplit.numTypes * literalContextMultiplier
-	bufs.bmLitHist = growUint32Clear(bufs.bmLitHist, litHistSize*alphabetSizeLiteral)
-	litHistograms := bufs.bmLitHist[:litHistSize*alphabetSizeLiteral]
+	bufs.bmLitHist = growUint32Clear(bufs.bmLitHist, litHistSize*core.AlphabetSizeLiteral)
+	litHistograms := bufs.bmLitHist[:litHistSize*core.AlphabetSizeLiteral]
 
-	distHistSize := mb.distSplit.numTypes << distanceContextBits
+	distHistSize := mb.distSplit.numTypes << core.DistanceContextBits
 	bufs.bmDistHist = growUint32Clear(bufs.bmDistHist, distHistSize*distAlphabetSize)
 	distHistograms := bufs.bmDistHist[:distHistSize*distAlphabetSize]
 
-	mb.cmdHistograms = growUint32Clear(mb.cmdHistograms, mb.cmdSplit.numTypes*alphabetSizeInsertAndCopyLength)
+	mb.cmdHistograms = growUint32Clear(mb.cmdHistograms, mb.cmdSplit.numTypes*core.AlphabetSizeInsertAndCopyLength)
 
 	buildHistogramsWithContext(cmds, mb, ringbuffer, pos, mask,
 		prevByte, prevByte2, contextModes, distAlphabetSize,
 		litHistograms, mb.cmdHistograms, distHistograms)
 
 	// Phase 4: Cluster literal histograms.
-	litContextMapSize := mb.litSplit.numTypes << literalContextBits
+	litContextMapSize := mb.litSplit.numTypes << core.LiteralContextBits
 	mb.literalContextMap = growUint32(mb.literalContextMap, litContextMapSize)
 
-	bufs.bmLitOutHist = growUint32(bufs.bmLitOutHist, litContextMapSize*alphabetSizeLiteral)
-	litOutHistograms := bufs.bmLitOutHist[:litContextMapSize*alphabetSizeLiteral]
+	bufs.bmLitOutHist = growUint32(bufs.bmLitOutHist, litContextMapSize*core.AlphabetSizeLiteral)
+	litOutHistograms := bufs.bmLitOutHist[:litContextMapSize*core.AlphabetSizeLiteral]
 	litOutSize, litSymbols := clusterHistograms(
-		litHistograms, litHistSize, alphabetSizeLiteral,
+		litHistograms, litHistSize, core.AlphabetSizeLiteral,
 		maxHistograms, litOutHistograms, bufs)
-	mb.litHistograms = litOutHistograms[:litOutSize*alphabetSizeLiteral]
+	mb.litHistograms = litOutHistograms[:litOutSize*core.AlphabetSizeLiteral]
 
 	// Build the literal context map from cluster assignments.
 	copy(mb.literalContextMap, litSymbols)
@@ -201,14 +203,14 @@ func buildMetaBlock(
 	if disableLiteralContextModeling {
 		for i := mb.litSplit.numTypes; i > 0; {
 			i--
-			for j := range 1 << literalContextBits {
-				mb.literalContextMap[(i<<literalContextBits)+j] = mb.literalContextMap[i]
+			for j := range 1 << core.LiteralContextBits {
+				mb.literalContextMap[(i<<core.LiteralContextBits)+j] = mb.literalContextMap[i]
 			}
 		}
 	}
 
 	// Phase 5: Cluster distance histograms.
-	distContextMapSize := mb.distSplit.numTypes << distanceContextBits
+	distContextMapSize := mb.distSplit.numTypes << core.DistanceContextBits
 	mb.distanceContextMap = growUint32(mb.distanceContextMap, distContextMapSize)
 
 	bufs.bmDistOutHist = growUint32(bufs.bmDistOutHist, distContextMapSize*distAlphabetSize)
@@ -224,11 +226,11 @@ func buildMetaBlock(
 }
 
 // chooseContextMode selects the literal context mode for the slow-path
-// metablock builder. For Q10+ data that is mostly UTF-8, contextUTF8 is
-// used; otherwise contextSigned is selected.
+// metablock builder. For Q10+ data that is mostly UTF-8, core.ContextUTF8 is
+// used; otherwise core.ContextSigned is selected.
 func chooseContextMode(quality int, data []byte, pos, mask, length uint) byte {
 	if quality >= 10 && !isMostlyUTF8(data, pos, mask, length, minUTF8Ratio) {
-		return contextSigned
+		return core.ContextSigned
 	}
-	return contextUTF8
+	return core.ContextUTF8
 }

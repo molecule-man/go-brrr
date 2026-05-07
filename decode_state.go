@@ -2,7 +2,12 @@
 
 package brrr
 
-import "unsafe"
+import (
+	"unsafe"
+
+	"github.com/molecule-man/go-brrr/internal/core"
+	"github.com/molecule-man/go-brrr/internal/encoder"
+)
 
 // Decoder-specific constants.
 const (
@@ -143,8 +148,8 @@ type bitReader struct {
 // alphabet size. Used by the decoder to store literal, insert-copy, and
 // distance Huffman trees.
 type huffmanTreeGroup struct {
-	htrees            []int         // indices into codes for each tree's root
-	codes             []huffmanCode // flat backing array for all trees
+	htrees            []int              // indices into codes for each tree's root
+	codes             []core.HuffmanCode // flat backing array for all trees
 	alphabetSizeMax   uint16
 	alphabetSizeLimit uint16
 	numHTrees         uint16
@@ -171,11 +176,11 @@ type metablockHeaderArena struct {
 	space  uint
 
 	// Huffman table for code length histograms.
-	table            [32]huffmanCode
-	symbolListsArray [huffmanMaxCodeLength + 1 + alphabetSizeInsertAndCopyLength]uint16
+	table            [32]core.HuffmanCode
+	symbolListsArray [core.HuffmanMaxCodeLength + 1 + core.AlphabetSizeInsertAndCopyLength]uint16
 	// Tails of symbol chains.
 	nextSymbol            [32]int
-	codeLengthCodeLengths [alphabetSizeCodeLengths]byte
+	codeLengthCodeLengths [core.AlphabetSizeCodeLengths]byte
 	// Population counts for the code lengths.
 	codeLengthHisto [16]uint16
 
@@ -187,14 +192,14 @@ type metablockHeaderArena struct {
 	contextIndex       uint
 	maxRunLengthPrefix uint
 	code               uint
-	contextMapTable    [huffmanMaxSize272]huffmanCode
+	contextMapTable    [huffmanMaxSize272]core.HuffmanCode
 }
 
 // metablockBodyArena holds temporary state used during metablock body
 // decoding. Not used simultaneously with metablockHeaderArena.
 type metablockBodyArena struct {
-	distExtraBits [numHistogramDistanceSymbols]byte
-	distOffset    [numHistogramDistanceSymbols]uint
+	distExtraBits [core.NumHistogramDistanceSymbols]byte
+	distOffset    [core.NumHistogramDistanceSymbols]uint
 
 	// Cache key for calculateDistanceLut: skip recomputation when params match.
 	cachedPostfix         uint
@@ -230,14 +235,14 @@ type decodeState struct {
 	br               bitReader
 	err              error
 	ringbuffer       []byte
-	htreeCommand     []huffmanCode // slice into insertCopyHGroup.codes
+	htreeCommand     []core.HuffmanCode // slice into insertCopyHGroup.codes
 	contextLookup    []byte
 	distContextMap   []byte
-	literalHTree     []huffmanCode // slice into literalHGroup.codes
+	literalHTree     []core.HuffmanCode // slice into literalHGroup.codes
 	contextMap       []byte
 	contextModes     []byte
-	blockTypeTrees   []huffmanCode
-	blockLenTrees    []huffmanCode
+	blockTypeTrees   []core.HuffmanCode
+	blockLenTrees    []core.HuffmanCode
 	literalHGroup    huffmanTreeGroup
 	insertCopyHGroup huffmanTreeGroup
 	distanceHGroup   huffmanTreeGroup
@@ -360,10 +365,10 @@ func (g *huffmanTreeGroup) init(alphabetSizeMax, alphabetSizeLimit, ntrees uint1
 
 func (cd *decoderCompoundDictionary) attach(data []byte) error {
 	if len(data) == 0 {
-		return errEmptyDict
+		return encoder.ErrEmptyDict
 	}
 	if cd.numChunks == 15 {
-		return errTooManyDicts
+		return encoder.ErrTooManyDicts
 	}
 	cd.chunks[cd.numChunks] = data
 	cd.numChunks++
@@ -612,9 +617,9 @@ func reuseInts(buf []int, size int) []int {
 	return make([]int, size)
 }
 
-func reuseHuffmanCodes(buf []huffmanCode, size int) []huffmanCode {
+func reuseHuffmanCodes(buf []core.HuffmanCode, size int) []core.HuffmanCode {
 	if cap(buf) >= size {
 		return buf[:size]
 	}
-	return make([]huffmanCode, size)
+	return make([]core.HuffmanCode, size)
 }
