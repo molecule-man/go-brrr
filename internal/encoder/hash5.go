@@ -115,6 +115,12 @@ func (h *h5) findLongestMatch(
 	// runtime bounds checks so the compiler-proven fast path below stays
 	// panic-free.
 	if ringBufferMask >= uint(len(data)) {
+		if cur+maxLength+7 <= uint(len(data)) {
+			h.findLongestMatchSmallContiguous(data, distCache,
+				cur, maxLength, maxBackward, dictDistance,
+				dictNumLookups, dictNumMatches, out)
+			return
+		}
 		h.findLongestMatchSmallBuf(data, ringBufferMask, distCache,
 			cur, maxLength, maxBackward, dictDistance,
 			dictNumLookups, dictNumMatches, out)
@@ -281,6 +287,153 @@ func (h *h5) findLongestMatch(
 	// Phase 3: static dictionary fallback when no hash match was found.
 	if bestScore == minScore {
 		searchStaticDictionaryDeep(data[curMasked:], maxLength, dictDistance, maxBackwardDistance,
+			dictNumLookups, dictNumMatches, out)
+	}
+}
+
+// findLongestMatchSmallContiguous is used by one-shot small inputs that were
+// copied into a compact, non-wrapping ring buffer. Positions are already plain
+// slice indexes, so this keeps the small-input path free of ring-wrap guards.
+func (h *h5) findLongestMatchSmallContiguous(
+	data []byte,
+	distCache *[4]uint,
+	cur, maxLength, maxBackward, dictDistance uint,
+	dictNumLookups, dictNumMatches *uint,
+	out *hasherSearchResult,
+) {
+	bestScore := out.score
+	bestLen := out.len
+	key := h.hash(data, cur)
+	bucket := h.buckets[uint(key)<<h5BlockBits:]
+
+	nextKey := h.hash(data, cur+1)
+	h.nextBucket = h.buckets[uint(nextKey)<<h5BlockBits]
+
+	out.len = 0
+	out.lenCodeDelta = 0
+
+	backward := distCache[0]
+	if backward-1 < maxBackward {
+		prev := cur - backward
+		if loadByte(data, cur+bestLen) == loadByte(data, prev+bestLen) {
+			ml := uint(matchLenSIMD(data, prev, cur, int(maxLength)))
+			if ml >= 3 || ml == 2 {
+				score := backwardReferenceScoreUsingLastDistance(ml)
+				if bestScore < score {
+					bestScore = score
+					bestLen = ml
+					out.len = bestLen
+					out.distance = backward
+					out.score = bestScore
+				}
+			}
+		}
+	}
+
+	backward = distCache[1]
+	if backward-1 < maxBackward {
+		prev := cur - backward
+		if loadByte(data, cur+bestLen) == loadByte(data, prev+bestLen) {
+			ml := uint(matchLenSIMD(data, prev, cur, int(maxLength)))
+			if ml >= 3 || ml == 2 {
+				score := backwardReferenceScoreUsingLastDistance(ml)
+				if bestScore < score {
+					score -= backwardReferencePenaltyUsingLastDistance(1)
+					if bestScore < score {
+						bestScore = score
+						bestLen = ml
+						out.len = bestLen
+						out.distance = backward
+						out.score = bestScore
+					}
+				}
+			}
+		}
+	}
+
+	backward = distCache[2]
+	if backward-1 < maxBackward {
+		prev := cur - backward
+		if loadByte(data, cur+bestLen) == loadByte(data, prev+bestLen) {
+			ml := uint(matchLenSIMD(data, prev, cur, int(maxLength)))
+			if ml >= 3 {
+				score := backwardReferenceScoreUsingLastDistance(ml)
+				if bestScore < score {
+					score -= backwardReferencePenaltyUsingLastDistance(2)
+					if bestScore < score {
+						bestScore = score
+						bestLen = ml
+						out.len = bestLen
+						out.distance = backward
+						out.score = bestScore
+					}
+				}
+			}
+		}
+	}
+
+	backward = distCache[3]
+	if backward-1 < maxBackward {
+		prev := cur - backward
+		if loadByte(data, cur+bestLen) == loadByte(data, prev+bestLen) {
+			ml := uint(matchLenSIMD(data, prev, cur, int(maxLength)))
+			if ml >= 3 {
+				score := backwardReferenceScoreUsingLastDistance(ml)
+				if bestScore < score {
+					score -= backwardReferencePenaltyUsingLastDistance(3)
+					if bestScore < score {
+						bestScore = score
+						bestLen = ml
+						out.len = bestLen
+						out.distance = backward
+						out.score = bestScore
+					}
+				}
+			}
+		}
+	}
+
+	if bestLen < 3 {
+		bestLen = 3
+	}
+
+	n := h.num[key]
+	down := uint(0)
+	if uint(n) > h5BlockSize {
+		down = uint(n) - h5BlockSize
+	}
+	minPrev := cur - maxBackward
+	curProbe := loadU32LE(data, cur+bestLen-3)
+	for i := uint(n); i > down; {
+		i--
+		prevRaw := uint(bucket[i&h5BlockMask])
+		if prevRaw < minPrev {
+			break
+		}
+		if curProbe != loadU32LE(data, prevRaw+bestLen-3) {
+			continue
+		}
+
+		ml := uint(matchLenSIMD(data, prevRaw, cur, int(maxLength)))
+		if ml >= 4 {
+			backward := cur - prevRaw
+			score := backwardReferenceScore(ml, backward)
+			if bestScore < score {
+				bestScore = score
+				bestLen = ml
+				out.len = bestLen
+				out.distance = backward
+				out.score = bestScore
+				curProbe = loadU32LE(data, cur+bestLen-3)
+			}
+		}
+	}
+
+	h.buckets[uint(h.num[key]&h5BlockMask)+uint(key)<<h5BlockBits] = uint32(cur)
+	h.num[key]++
+
+	if bestScore == minScore {
+		searchStaticDictionaryDeep(data[cur:], maxLength, dictDistance, maxBackwardDistance,
 			dictNumLookups, dictNumMatches, out)
 	}
 }
