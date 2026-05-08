@@ -115,12 +115,6 @@ func (h *h5) findLongestMatch(
 	// runtime bounds checks so the compiler-proven fast path below stays
 	// panic-free.
 	if ringBufferMask >= uint(len(data)) {
-		if cur+maxLength+7 <= uint(len(data)) {
-			h.findLongestMatchSmallContiguous(data, distCache,
-				cur, maxLength, maxBackward, dictDistance,
-				dictNumLookups, dictNumMatches, out)
-			return
-		}
 		h.findLongestMatchSmallBuf(data, ringBufferMask, distCache,
 			cur, maxLength, maxBackward, dictDistance,
 			dictNumLookups, dictNumMatches, out)
@@ -449,6 +443,12 @@ func (h *h5) findLongestMatchSmallBuf(
 	dictNumLookups, dictNumMatches *uint,
 	out *hasherSearchResult,
 ) {
+	if cur+maxLength+7 <= uint(len(data)) {
+		h.findLongestMatchSmallContiguous(data, distCache,
+			cur, maxLength, maxBackward, dictDistance,
+			dictNumLookups, dictNumMatches, out)
+		return
+	}
 	curMasked := cur & ringBufferMask
 	bestScore := out.score
 	bestLen := out.len
