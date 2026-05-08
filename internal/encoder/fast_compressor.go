@@ -9,16 +9,19 @@ import (
 	"sync"
 )
 
+const maxPooledFastInputBuffer = 64 << 10
+
 var (
 	errFastCompoundDict = errors.New("brrr: compound dictionaries require quality >= 2")
 
 	poolOnePassArena = sync.Pool{New: func() any { return new(onePassArena) }}
 	poolTwoPassArena = sync.Pool{New: func() any { return new(twoPassArena) }}
 
-	poolFastOutBuf   sync.Pool
-	poolFastTable32  sync.Pool
-	poolFastCommands sync.Pool
-	poolFastLiterals sync.Pool
+	poolFastCompressor = sync.Pool{New: func() any { return new(fastCompressor) }}
+	poolFastOutBuf     sync.Pool
+	poolFastTable32    sync.Pool
+	poolFastCommands   sync.Pool
+	poolFastLiterals   sync.Pool
 )
 
 // fastCompressor implements Compressor for q0 and q1. Input is buffered
@@ -41,7 +44,9 @@ type fastCompressor struct {
 // newFastCompressor returns a Compressor for q0 or q1, acquiring its arena
 // from the appropriate pool.
 func newFastCompressor(quality, lgwin int) *fastCompressor {
-	c := &fastCompressor{quality: quality, lgwin: lgwin}
+	c := poolFastCompressor.Get().(*fastCompressor)
+	c.quality = quality
+	c.lgwin = lgwin
 	switch quality {
 	case 0:
 		c.onePass = poolOnePassArena.Get().(*onePassArena)
@@ -107,6 +112,15 @@ func (c *fastCompressor) Release() {
 	c.commandBuf = nil
 	putFastByteBuffer(&poolFastLiterals, c.literalBuf)
 	c.literalBuf = nil
+	if cap(c.buf) > maxPooledFastInputBuffer {
+		c.buf = nil
+	} else {
+		c.buf = c.buf[:0]
+	}
+	c.quality = 0
+	c.lgwin = 0
+	c.wroteHeader = false
+	poolFastCompressor.Put(c)
 }
 
 // compress runs the fast encoder on buffered data and writes compressed
