@@ -37,6 +37,11 @@ type h5 struct {
 	num        [h5BucketSize]uint16               // entry count per bucket
 	buckets    [h5BucketSize * h5BlockSize]uint32 // position ring buffers
 	nextBucket uint32                             // speculative load to warm cache
+	// everWrapped is sticky: false until any createBackwardReferences call
+	// has positions reaching or exceeding mask+1, after which the no-wrap
+	// fast path is disabled because stored bucket values may then encode
+	// positions outside the ring buffer's modular window.
+	everWrapped bool
 	hasherCommon
 }
 
@@ -61,6 +66,7 @@ func (h *h5) reset(oneShot bool, inputSize uint, data []byte) {
 	} else {
 		h.num = [h5BucketSize]uint16{}
 	}
+	h.everWrapped = false
 	h.ready = true
 }
 
@@ -551,9 +557,20 @@ func (h *h5) findLongestMatchSmallBuf(
 // createBackwardReferences finds backward reference matches using this hasher
 // and populates s.commands. The hot findLongestMatch/store/storeRange calls
 // are direct (non-virtual) since the receiver is concrete.
+//
+// When the call's [wrappedPos, wrappedPos+bytes) range fits entirely within
+// the ring buffer (no modular wrap) and no past call has wrapped, dispatch
+// to createBackwardReferencesNoWrap which omits the per-iteration & mask
+// ops and the runtime SmallContiguous gating (each redundant when stored
+// bucket values are < mask+1).
 func (h *h5) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) {
-	data := s.data
 	mask := uint(s.mask)
+	if !h.everWrapped && uint(wrappedPos)+uint(bytes) <= mask+1 {
+		h.createBackwardReferencesNoWrap(s, bytes, wrappedPos)
+		return
+	}
+	h.everWrapped = true
+	data := s.data
 	maxBackwardLimit := (uint(1) << s.lgwin) - core.WindowGap
 	gap := s.compound.totalSize
 	hasCompound := s.compound.numChunks > 0
@@ -656,6 +673,151 @@ func (h *h5) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 			nextMatchPos := position + sr.len
 			if nextMatchPos+h5HashTypeLength < posEnd {
 				wk := h.hash(data, nextMatchPos&mask)
+				h.nextBucket = h.buckets[uint(wk)<<h5BlockBits]
+			}
+
+			h.storeRange(data, mask, rangeStart, rangeEnd)
+
+			position += sr.len
+		} else {
+			insertLength++
+			position++
+
+			if position > applyRandomHeuristics {
+				if position > applyRandomHeuristics+4*randomHeuristicsWindowSize {
+					posJump := min(position+16, posEnd-max(h5HashTypeLength-1, 4))
+					for position < posJump {
+						h.store(data, mask, position)
+						insertLength += 4
+						position += 4
+					}
+				} else {
+					posJump := min(position+8, posEnd-(h5HashTypeLength-1))
+					for position < posJump {
+						h.store(data, mask, position)
+						insertLength += 2
+						position += 2
+					}
+				}
+			}
+		}
+	}
+
+	insertLength += posEnd - position
+	s.lastInsertLen = insertLength
+	s.numCommands += uint(len(s.commands)) - origCmdCount
+}
+
+// createBackwardReferencesNoWrap is the no-wrap fast path used by
+// createBackwardReferences when the call's position range fits entirely
+// within mask+1 and no past call has wrapped. Stored bucket values are
+// then guaranteed < mask+1, so per-iteration `prev &= mask` and
+// `position & mask` ops in findLongestMatch are redundant and elided
+// here via findLongestMatchSmallContiguous (which never masks). The two
+// runtime gates that findLongestMatch normally walks (the SmallBuf and
+// SmallContiguous dispatches) are also removed: in the no-wrap regime
+// the SmallContiguous body is always the right path. h.store and
+// h.storeRange still receive mask: their internal `& mask` is a no-op
+// for the same reason and is left in place to avoid duplicating those
+// helpers; the bulk of the cycles saved are in the inner findLongestMatch
+// chain.
+func (h *h5) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos uint32) {
+	data := s.data
+	mask := uint(s.mask)
+	maxBackwardLimit := (uint(1) << s.lgwin) - core.WindowGap
+	gap := s.compound.totalSize
+	hasCompound := s.compound.numChunks > 0
+
+	insertLength := s.lastInsertLen
+	position := uint(wrappedPos)
+	posEnd := position + uint(bytes)
+
+	storeEnd := position
+	if uint(bytes) >= h5HashTypeLength {
+		storeEnd = posEnd - h5HashTypeLength + 1
+	}
+
+	const randomHeuristicsWindowSize = 64
+	applyRandomHeuristics := position + randomHeuristicsWindowSize
+
+	origCmdCount := uint(len(s.commands))
+
+	distCache := &s.distCache
+
+	for position+h5HashTypeLength < posEnd {
+		maxLength := posEnd - position
+		maxDistance := min(position, maxBackwardLimit)
+
+		var sr hasherSearchResult
+		sr.score = minScore
+
+		h.findLongestMatchSmallContiguous(data, distCache,
+			position, maxLength, maxDistance, maxDistance+gap,
+			&s.dictNumLookups, &s.dictNumMatches, &sr)
+		if hasCompound {
+			s.compound.lookupMatch(data, mask,
+				&s.distCache, position, maxLength,
+				maxDistance, &sr)
+		}
+
+		if sr.score > minScore {
+			delayedBackwardReferencesInRow := 0
+			maxLength--
+			for {
+				const costDiffLazy = 175
+				var sr2 hasherSearchResult
+				sr2.score = minScore
+				maxDistance = min(position+1, maxBackwardLimit)
+
+				h.findLongestMatchSmallContiguous(data, distCache,
+					position+1, maxLength, maxDistance, maxDistance+gap,
+					&s.dictNumLookups, &s.dictNumMatches, &sr2)
+				if hasCompound {
+					s.compound.lookupMatch(data, mask,
+						&s.distCache, position+1, maxLength,
+						maxDistance, &sr2)
+				}
+
+				if sr2.score >= sr.score+costDiffLazy {
+					position++
+					insertLength++
+					sr = sr2
+					delayedBackwardReferencesInRow++
+					if delayedBackwardReferencesInRow < 4 &&
+						position+h5HashTypeLength < posEnd {
+						maxLength--
+						continue
+					}
+				}
+				break
+			}
+
+			applyRandomHeuristics = position + 2*sr.len + randomHeuristicsWindowSize
+
+			maxDistance = min(position, maxBackwardLimit)
+			distanceCode := computeDistanceCode(sr.distance, maxDistance+gap, &s.distCache)
+			if sr.distance <= maxDistance+gap && distanceCode > 0 {
+				s.distCache[3] = s.distCache[2]
+				s.distCache[2] = s.distCache[1]
+				s.distCache[1] = s.distCache[0]
+				s.distCache[0] = sr.distance
+			}
+
+			s.commands = append(s.commands, newCommandSimpleDist(
+				insertLength, sr.len, sr.lenCodeDelta, distanceCode,
+			))
+			s.numLiterals += insertLength
+			insertLength = 0
+
+			rangeStart := position + 2
+			rangeEnd := min(position+sr.len, storeEnd)
+			if sr.distance < sr.len>>2 {
+				rangeStart = min(rangeEnd, max(rangeStart, position+sr.len-(sr.distance<<2)))
+			}
+
+			nextMatchPos := position + sr.len
+			if nextMatchPos+h5HashTypeLength < posEnd {
+				wk := h.hash(data, nextMatchPos)
 				h.nextBucket = h.buckets[uint(wk)<<h5BlockBits]
 			}
 
