@@ -478,26 +478,32 @@ func (h *h6b8) findLongestMatch(
 	// Phase 2: scan hash bucket entries.
 	// Same tail guarantee: ring buffer end checks are omitted for the fast path.
 	// backward == 0 is impossible here: cur is stored after this scan.
+	//
+	// minPrev = cur - maxBackward is equivalent to the backward > maxBackward break
+	// condition but avoids computing backward = cur - prev on every iteration.
+	// maxBackward = min(cur, maxBackwardLimit) <= cur so the subtraction never
+	// wraps. backward is then computed lazily only when ml >= 4 (rare path).
 	n := h.num[key]
 	down := uint(0)
 	if uint(n) > h6b8BlockSize {
 		down = uint(n) - h6b8BlockSize
 	}
+	minPrev := cur - maxBackward
 	curProbe := loadU32LE(data, curMasked+bestLen-3)
 	for i := uint(n); i > down; {
 		i--
-		prev := uint(bucket[i&h6b8BlockMask])
-		backward := cur - prev
-		if backward > maxBackward {
+		prevRaw := uint(bucket[i&h6b8BlockMask])
+		if prevRaw < minPrev {
 			break
 		}
-		prev &= ringBufferMask
-		if curProbe != loadU32LE(data, prev+bestLen-3) {
+		prevMasked := prevRaw & ringBufferMask
+		if curProbe != loadU32LE(data, prevMasked+bestLen-3) {
 			continue
 		}
 
-		ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+		ml := uint(matchLenAtNoInline(data, prevMasked, curMasked, int(maxLength)))
 		if ml >= 4 {
+			backward := cur - prevRaw
 			score := backwardReferenceScore(ml, backward)
 			if bestScore < score {
 				bestScore = score
@@ -633,30 +639,34 @@ func (h *h6b8) findLongestMatchSmallBuf(
 
 	// Phase 2: scan hash bucket entries.
 	// backward == 0 is impossible here: cur is stored after this scan.
+	//
+	// minPrev = cur - maxBackward avoids the per-iteration backward = cur - prev
+	// subtraction; backward is only computed when ml >= 4 (rare path).
 	n := h.num[key]
 	down := uint(0)
 	if uint(n) > h6b8BlockSize {
 		down = uint(n) - h6b8BlockSize
 	}
+	minPrev := cur - maxBackward
 	curProbe := loadU32LE(data, curMasked+bestLen-3)
 	for i := uint(n); i > down; {
 		i--
-		prev := uint(bucket[i&h6b8BlockMask])
-		backward := cur - prev
-		if backward > maxBackward {
+		prevRaw := uint(bucket[i&h6b8BlockMask])
+		if prevRaw < minPrev {
 			break
 		}
-		prev &= ringBufferMask
+		prevMasked := prevRaw & ringBufferMask
 		if curMasked+bestLen > ringBufferMask {
 			break
 		}
-		if prev+bestLen > ringBufferMask ||
-			curProbe != loadU32LE(data, prev+bestLen-3) {
+		if prevMasked+bestLen > ringBufferMask ||
+			curProbe != loadU32LE(data, prevMasked+bestLen-3) {
 			continue
 		}
 
-		ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+		ml := uint(matchLenAtNoInline(data, prevMasked, curMasked, int(maxLength)))
 		if ml >= 4 {
+			backward := cur - prevRaw
 			score := backwardReferenceScore(ml, backward)
 			if bestScore < score {
 				bestScore = score
