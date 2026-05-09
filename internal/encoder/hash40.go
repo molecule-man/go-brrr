@@ -157,35 +157,104 @@ func (h *h40) findLongestMatch(
 	out.len = 0
 	out.lenCodeDelta = 0
 
-	// Phase 1: try cached distances.
-	for i := range uint(h40NumLastDistances) {
-		backward := uint(distCache[i])
+	// Phase 1: try cached distances. The first cache entry is hot and does
+	// not need the tinyHash rejection used by the other entries.
+	{
+		backward := uint(distCache[0])
 		prevIx := cur - backward
-		if i > 0 && h.tinyHash[uint16(prevIx)] != tinyHash {
-			continue
-		}
-		if prevIx >= cur || backward > maxBackward {
-			continue
-		}
-		prevIx &= ringBufferMask
-
-		if loadByte(data, prevIx) != loadByte(data, curMasked) ||
-			loadByte(data, prevIx+1) != loadByte(data, curMasked+1) {
-			continue
-		}
-		ml := uint(matchLenAtNoInline(data, prevIx, curMasked, int(maxLength)))
-		if ml >= 2 {
-			score := backwardReferenceScoreUsingLastDistance(ml)
-			if bestScore < score {
-				if i != 0 {
-					score -= backwardReferencePenaltyUsingLastDistance(i)
+		if prevIx < cur && backward <= maxBackward {
+			prevIx &= ringBufferMask
+			if loadByte(data, prevIx) == loadByte(data, curMasked) &&
+				loadByte(data, prevIx+1) == loadByte(data, curMasked+1) {
+				ml := uint(matchLenAtNoInline(data, prevIx, curMasked, int(maxLength)))
+				if ml >= 2 {
+					score := backwardReferenceScoreUsingLastDistance(ml)
+					if bestScore < score {
+						bestScore = score
+						bestLen = ml
+						out.len = bestLen
+						out.distance = backward
+						out.score = bestScore
+					}
 				}
-				if bestScore < score {
-					bestScore = score
-					bestLen = ml
-					out.len = bestLen
-					out.distance = backward
-					out.score = bestScore
+			}
+		}
+	}
+
+	{
+		backward := uint(distCache[1])
+		prevIx := cur - backward
+		if h.tinyHash[uint16(prevIx)] == tinyHash {
+			if prevIx < cur && backward <= maxBackward {
+				prevIx &= ringBufferMask
+				if loadByte(data, prevIx) == loadByte(data, curMasked) &&
+					loadByte(data, prevIx+1) == loadByte(data, curMasked+1) {
+					ml := uint(matchLenAtNoInline(data, prevIx, curMasked, int(maxLength)))
+					if ml >= 2 {
+						score := backwardReferenceScoreUsingLastDistance(ml)
+						if bestScore < score {
+							score -= backwardReferencePenaltyUsingLastDistance(1)
+							if bestScore < score {
+								bestScore = score
+								bestLen = ml
+								out.len = bestLen
+								out.distance = backward
+								out.score = bestScore
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	{
+		backward := uint(distCache[2])
+		prevIx := cur - backward
+		if h.tinyHash[uint16(prevIx)] == tinyHash {
+			if prevIx < cur && backward <= maxBackward {
+				prevIx &= ringBufferMask
+				if loadByte(data, prevIx) == loadByte(data, curMasked) &&
+					loadByte(data, prevIx+1) == loadByte(data, curMasked+1) {
+					ml := uint(matchLenAtNoInline(data, prevIx, curMasked, int(maxLength)))
+					if ml >= 2 {
+						score := backwardReferenceScoreUsingLastDistance(ml)
+						if bestScore < score {
+							score -= backwardReferencePenaltyUsingLastDistance(2)
+							if bestScore < score {
+								bestScore = score
+								bestLen = ml
+								out.len = bestLen
+								out.distance = backward
+								out.score = bestScore
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	{
+		backward := uint(distCache[3])
+		prevIx := cur - backward
+		if h.tinyHash[uint16(prevIx)] == tinyHash {
+			if prevIx < cur && backward <= maxBackward {
+				prevIx &= ringBufferMask
+				if loadByte(data, prevIx) == loadByte(data, curMasked) &&
+					loadByte(data, prevIx+1) == loadByte(data, curMasked+1) {
+					ml := uint(matchLenAtNoInline(data, prevIx, curMasked, int(maxLength)))
+					if ml >= 2 {
+						score := backwardReferenceScoreUsingLastDistance(ml)
+						if bestScore < score {
+							score -= backwardReferencePenaltyUsingLastDistance(3)
+							if bestScore < score {
+								bestScore = score
+								bestLen = ml
+								out.len = bestLen
+								out.distance = backward
+								out.score = bestScore
+							}
+						}
+					}
 				}
 			}
 		}
