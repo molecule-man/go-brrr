@@ -168,37 +168,55 @@ func searchStaticDictionaryDeep(data []byte, maxLength, maxBackward, maxDistance
 		return
 	}
 
-	key := hash14(data) << 1
-	firstByte := data[0]
+	v := loadU32LE(data, 0)
+	key := ((v * hashMul32) >> 18) << 1
+	firstByte := byte(v)
+	*dictNumLookups += 2
 
-	for i := range uint32(2) {
-		k := key + i
-		*dictNumLookups++
-		e := staticDictHashEntries[k]
-		wordLen := uint(byte(e >> 8))
-		if firstByte == byte(e) && wordLen != 0 && wordLen <= maxLength {
-			wordIndex := uint(e >> 16)
-			offset := uint(core.DictOffsetsByLength[wordLen]) + wordLen*wordIndex
+	e := staticDictHashEntries[key]
+	wordLen := uint(byte(e >> 8))
+	if firstByte == byte(e) && wordLen != 0 && wordLen <= maxLength {
+		wordIndex := uint(e >> 16)
+		offset := uint(core.DictOffsetsByLength[wordLen]) + wordLen*wordIndex
 
-			ml := uint(findMatchLenDict(data[:wordLen], core.DictData[offset:offset+wordLen]))
-			if ml+cutoffTransformsCount <= wordLen || ml == 0 {
-				continue
-			}
-
+		ml := uint(findMatchLenDict(data[:wordLen], core.DictData[offset:offset+wordLen]))
+		if ml+cutoffTransformsCount > wordLen && ml != 0 {
 			cut := wordLen - ml
 			transformID := (cut << 2) + uint((cutoffTransforms>>(cut*6))&0x3F)
 			backward := maxBackward + 1 + wordIndex + (transformID << core.DictSizeBitsByLength[wordLen])
-			if backward > maxDistance {
-				continue
+			if backward <= maxDistance {
+				score := backwardReferenceScore(ml, backward)
+				if score >= out.score {
+					out.len = ml
+					out.lenCodeDelta = int(wordLen) - int(ml)
+					out.distance = backward
+					out.score = score
+					*dictNumMatches++
+				}
 			}
+		}
+	}
 
-			score := backwardReferenceScore(ml, backward)
-			if score >= out.score {
-				out.len = ml
-				out.lenCodeDelta = int(wordLen) - int(ml)
-				out.distance = backward
-				out.score = score
-				*dictNumMatches++
+	e = staticDictHashEntries[key+1]
+	wordLen = uint(byte(e >> 8))
+	if firstByte == byte(e) && wordLen != 0 && wordLen <= maxLength {
+		wordIndex := uint(e >> 16)
+		offset := uint(core.DictOffsetsByLength[wordLen]) + wordLen*wordIndex
+
+		ml := uint(findMatchLenDict(data[:wordLen], core.DictData[offset:offset+wordLen]))
+		if ml+cutoffTransformsCount > wordLen && ml != 0 {
+			cut := wordLen - ml
+			transformID := (cut << 2) + uint((cutoffTransforms>>(cut*6))&0x3F)
+			backward := maxBackward + 1 + wordIndex + (transformID << core.DictSizeBitsByLength[wordLen])
+			if backward <= maxDistance {
+				score := backwardReferenceScore(ml, backward)
+				if score >= out.score {
+					out.len = ml
+					out.lenCodeDelta = int(wordLen) - int(ml)
+					out.distance = backward
+					out.score = score
+					*dictNumMatches++
+				}
 			}
 		}
 	}
