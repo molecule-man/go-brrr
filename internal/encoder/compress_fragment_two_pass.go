@@ -269,7 +269,8 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 		ipLimit := pos + lenLimit
 
 		ip++
-		nextHash = hashTwoPass6At(input, uint(ip), shift)
+		nextLoad := loadU64LE(input, uint(ip))
+		nextHash = uint32(((nextLoad << 16) * hashMul32) >> shift)
 
 		for {
 			// Step 1: Scan forward looking for a match. Skip bytes
@@ -280,6 +281,10 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 
 			for {
 				hash := nextHash
+				// nextLoad caches the loadU64LE(input, ip) computed by the
+				// previous iteration's hash; reuse it in the match check
+				// instead of issuing a second load at the same offset.
+				ipBytes := nextLoad
 				bytesBetweenHashLookups := skip >> 5
 				skip++
 				ip = nextIP
@@ -287,11 +292,12 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 				if nextIP > ipLimit {
 					goto encodeRemainder
 				}
-				nextHash = hashTwoPass6At(input, uint(nextIP), shift)
+				nextLoad = loadU64LE(input, uint(nextIP))
+				nextHash = uint32(((nextLoad << 16) * hashMul32) >> shift)
 
 				candidate = ip - lastDistance
 				if candidate >= 0 && candidate < ip &&
-					isMatchTwoPass6At(input, uint(ip), uint(candidate)) {
+					(loadU64LE(input, uint(candidate))^ipBytes)<<16 == 0 {
 					table[hash] = uint32(ip)
 					if ip-candidate <= maxDistance {
 						break
@@ -301,7 +307,7 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 
 				candidate = int(table[hash])
 				table[hash] = uint32(ip)
-				if isMatchTwoPass6At(input, uint(ip), uint(candidate)) {
+				if (loadU64LE(input, uint(candidate))^ipBytes)<<16 == 0 {
 					if ip-candidate <= maxDistance {
 						break
 					}
@@ -360,7 +366,8 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 			}
 
 			ip++
-			nextHash = hashTwoPass6At(input, uint(ip), shift)
+			nextLoad = loadU64LE(input, uint(ip))
+			nextHash = uint32(((nextLoad << 16) * hashMul32) >> shift)
 		}
 	} // close block scope for ipLimit, lenLimit
 
@@ -534,14 +541,6 @@ func compressFragmentTwoPass(
 // the sub-slice bounds check at the call site in the inner scan loop.
 func hashTwoPass4At(input []byte, i, shift uint) uint32 {
 	h := (loadU64LE(input, i) << 32) * hashMul32
-	return uint32(h >> shift)
-}
-
-// hashTwoPass6At computes a 6-byte hash of input[i:], shifted right by
-// shift bits (64 - tableBits). Taking the raw byte slice and index avoids
-// the sub-slice bounds check at the call site in the inner scan loop.
-func hashTwoPass6At(input []byte, i, shift uint) uint32 {
-	h := (loadU64LE(input, i) << 16) * hashMul32
 	return uint32(h >> shift)
 }
 
