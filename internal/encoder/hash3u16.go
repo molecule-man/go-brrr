@@ -1,7 +1,9 @@
 // H3 variant for inputs bounded to 64 KiB.
 // Stores uint16 positions in buckets, halving the table from 256 KB to 128 KB.
 // The dispatch contract guarantees position never exceeds 2^16, so
-// `uint16(pos)` is lossless — no aliasing, no stale-probe overhead.
+// `uint16(pos)` is lossless — no aliasing, no stale-probe overhead. If buffered
+// input crosses the 64 KiB boundary mid-stream (when sizeHint underestimated
+// the real total), encoderCore.maybePromoteHasher transparently swaps to h3.
 
 package encoder
 
@@ -12,9 +14,9 @@ import (
 )
 
 // h3u16 is the H3 hasher with uint16 bucket slots, dispatched only when the
-// encoder knows the input fits in 64 KiB (either via a user-supplied sizeHint
-// or via the one-shot isLast guarantee). Under that contract every stored
-// position is in [0, 65535], so `uint16(pos)` storage is lossless and
+// encoder expects the input to fit in 64 KiB (either via a user-supplied
+// sizeHint or via the one-shot isLast guarantee). Within that bound every
+// stored position is in [0, 65535], so `uint16(pos)` storage is lossless and
 // `position - prev` (uint subtraction) is directly the real backward distance
 // — no modular truncation needed. Semantics match h3 at half the memory; the
 // lookup arithmetic is the same shape.

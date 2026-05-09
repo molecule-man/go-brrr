@@ -175,6 +175,7 @@ func (c *encoderCore) releaseBuffers() {
 // wrap) and stitches to the previous block.
 func (c *encoderCore) stitchHasher(isLast bool) {
 	s := &c.encodeState
+	c.maybePromoteHasher()
 	if !c.hasher.common().ready {
 		oneShot := s.lastProcessedPos == 0 && isLast
 		inputSize := s.unprocessedInputSize()
@@ -184,6 +185,76 @@ func (c *encoderCore) stitchHasher(isLast bool) {
 	position := wrapPosition(s.lastProcessedPos)
 	inputSize := uint(s.unprocessedInputSize())
 	c.hasher.stitchToPreviousBlock(inputSize, position, s.data, uint(s.mask))
+}
+
+// maybePromoteHasher swaps a uint16-bucket hasher for its uint32 counterpart
+// when buffered input has crossed the 64 KiB boundary. SizeHint is advisory:
+// callers may set it lower than the eventual stream length, so the encoder
+// detects the lie at the latest possible point and migrates state in place.
+//
+// Round-trip correctness is preserved without this promotion (ringBufSize
+// is always > maxBackwardLimit, so matchLenAt always verifies bytes within
+// the unwrapped ring window — the decoder reproduces the verified bytes
+// even when the bucket value was truncated). The promotion exists for the
+// compression ratio: under truncation the encoder emits a backward distance
+// of (position - prev_truncated) rather than (position - actual_prev), which
+// costs many extra distance-code bits on inputs whose real backward matches
+// would be small but whose truncated equivalents are large.
+//
+// Below 65536 every stored bucket value already equals the absolute position
+// (uint16 storage is lossless under 64 KiB), so widening to uint32 is a
+// faithful 1:1 zero-extension. Pool-stale slots in the new hasher are either
+// fully overwritten by the copy (ready) or zeroed by the upcoming reset
+// (!ready).
+func (c *encoderCore) maybePromoteHasher() {
+	s := &c.encodeState
+	if s.inputPos <= 1<<16 {
+		return
+	}
+	switch h := c.hasher.(type) {
+	case *h2u16:
+		n := poolH2.Get().(*h2)
+		if h.ready {
+			for i := range &h.buckets {
+				n.buckets[i] = uint32(h.buckets[i])
+			}
+			n.nextBucket = uint32(h.nextBucket)
+			n.ready = true
+		} else {
+			n.ready = false
+		}
+		c.hasher = n
+		poolH2u16.Put(h)
+	case *h3u16:
+		n := poolH3.Get().(*h3)
+		if h.ready {
+			for i := range &h.buckets {
+				n.buckets[i] = uint32(h.buckets[i])
+			}
+			n.nextBucket = uint32(h.nextBucket)
+			n.ready = true
+		} else {
+			n.ready = false
+		}
+		c.hasher = n
+		poolH3u16.Put(h)
+	case *h4u16:
+		n := poolH4.Get().(*h4)
+		if h.ready {
+			for i := range &h.buckets {
+				n.buckets[i] = uint32(h.buckets[i])
+			}
+			n.everWrapped = false
+			n.ready = true
+		} else {
+			n.ready = false
+		}
+		c.hasher = n
+		poolH4u16.Put(h)
+	default:
+		return
+	}
+	c.hashers[0] = c.hasher.common()
 }
 
 // prepareMetaBlock runs backward-reference search and flush heuristics.

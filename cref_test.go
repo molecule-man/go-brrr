@@ -127,12 +127,6 @@ func testMatchesCRef(t *testing.T, quality, lgwin int, sizeHint uint) {
 
 	for _, tt := range crefTestCases(t) {
 		t.Run(tt.name, func(t *testing.T) {
-			// When the caller pins sizeHint <= 64 KiB they're contractually
-			// promising the input is at most that big (h3u16 stores uint16
-			// positions). Skip inputs that would violate the promise.
-			if sizeHint > 0 && sizeHint <= 1<<16 && uint(len(tt.input)) > sizeHint {
-				t.Skipf("input %d bytes exceeds sizeHint %d", len(tt.input), sizeHint)
-			}
 			goBuf.Reset()
 			w.Reset(&goBuf)
 			if _, err := w.Write(tt.input); err != nil {

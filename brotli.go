@@ -35,6 +35,12 @@ type WriterOptions struct {
 	// encoder uses it to make better decisions about context modeling and
 	// hasher selection for large inputs. 0 means unknown; the encoder will
 	// auto-estimate from the first Write call.
+	//
+	// SizeHint is advisory: a lower-than-actual value is safe in both
+	// correctness and compression ratio. The encoder transparently
+	// promotes its internal hasher to the unbounded variant if buffered
+	// input crosses the size-tuned threshold, preserving the bucket state
+	// that was learned under the small-hint dispatch.
 	SizeHint uint
 }
 
