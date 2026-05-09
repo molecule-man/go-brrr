@@ -251,6 +251,20 @@ func (c *encoderCore) maybePromoteHasher() {
 		}
 		c.hasher = n
 		poolH4u16.Put(h)
+	case *h5b6u16:
+		n := poolH5b6.Get().(*h5b6)
+		if h.ready {
+			n.num = h.num
+			for i := range &h.buckets {
+				n.buckets[i] = uint32(h.buckets[i])
+			}
+			n.everWrapped = false
+			n.ready = true
+		} else {
+			n.ready = false
+		}
+		c.hasher = n
+		poolH5b6u16.Put(h)
 	default:
 		return
 	}
@@ -1012,6 +1026,13 @@ func (e *encoderSplit) chooseHasher(isLast bool) {
 			} else {
 				releaseHasher(prev)
 				e.hasher = poolH6b6.Get().(*h6b6)
+			}
+		case useU16:
+			if h, ok := prev.(*h5b6u16); ok {
+				e.hasher = h
+			} else {
+				releaseHasher(prev)
+				e.hasher = poolH5b6u16.Get().(*h5b6u16)
 			}
 		default:
 			if h, ok := prev.(*h5b6); ok {

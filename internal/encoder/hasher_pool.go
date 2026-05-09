@@ -11,23 +11,24 @@ import "sync"
 // every oneshot compression. The hasher's reset() method only zeroes the small
 // num[] counter array, not the full bucket storage.
 var (
-	poolH2    = sync.Pool{New: func() any { return new(h2) }}
-	poolH2u16 = sync.Pool{New: func() any { return new(h2u16) }}
-	poolH3    = sync.Pool{New: func() any { return new(h3) }}
-	poolH3u16 = sync.Pool{New: func() any { return new(h3u16) }}
-	poolH4    = sync.Pool{New: func() any { return new(h4) }}
-	poolH4u16 = sync.Pool{New: func() any { return new(h4u16) }}
-	poolH5    = sync.Pool{New: func() any { return new(h5) }}
-	poolH54   = sync.Pool{New: func() any { return new(h54) }}
-	poolH5b5  = sync.Pool{New: func() any { return new(h5b5) }}
-	poolH5b6  = sync.Pool{New: func() any { return new(h5b6) }}
-	poolH5b7  = sync.Pool{New: func() any { return new(h5b7) }}
-	poolH5b8  = sync.Pool{New: func() any { return new(h5b8) }}
-	poolH6    = sync.Pool{New: func() any { return new(h6) }}
-	poolH6b5  = sync.Pool{New: func() any { return new(h6b5) }}
-	poolH6b6  = sync.Pool{New: func() any { return new(h6b6) }}
-	poolH6b7  = sync.Pool{New: func() any { return new(h6b7) }}
-	poolH6b8  = sync.Pool{New: func() any { return new(h6b8) }}
+	poolH2      = sync.Pool{New: func() any { return new(h2) }}
+	poolH2u16   = sync.Pool{New: func() any { return new(h2u16) }}
+	poolH3      = sync.Pool{New: func() any { return new(h3) }}
+	poolH3u16   = sync.Pool{New: func() any { return new(h3u16) }}
+	poolH4      = sync.Pool{New: func() any { return new(h4) }}
+	poolH4u16   = sync.Pool{New: func() any { return new(h4u16) }}
+	poolH5      = sync.Pool{New: func() any { return new(h5) }}
+	poolH54     = sync.Pool{New: func() any { return new(h54) }}
+	poolH5b5    = sync.Pool{New: func() any { return new(h5b5) }}
+	poolH5b6    = sync.Pool{New: func() any { return new(h5b6) }}
+	poolH5b6u16 = sync.Pool{New: func() any { return new(h5b6u16) }}
+	poolH5b7    = sync.Pool{New: func() any { return new(h5b7) }}
+	poolH5b8    = sync.Pool{New: func() any { return new(h5b8) }}
+	poolH6      = sync.Pool{New: func() any { return new(h6) }}
+	poolH6b5    = sync.Pool{New: func() any { return new(h6b5) }}
+	poolH6b6    = sync.Pool{New: func() any { return new(h6b6) }}
+	poolH6b7    = sync.Pool{New: func() any { return new(h6b7) }}
+	poolH6b8    = sync.Pool{New: func() any { return new(h6b8) }}
 )
 
 // releaseHasher returns a hasher to its type-specific pool. Hashers without a
@@ -55,6 +56,8 @@ func releaseHasher(h streamHasher) {
 		poolH5b5.Put(h)
 	case *h5b6:
 		poolH5b6.Put(h)
+	case *h5b6u16:
+		poolH5b6u16.Put(h)
 	case *h5b7:
 		poolH5b7.Put(h)
 	case *h5b8:
