@@ -146,7 +146,48 @@ func (h *h6b6) findLongestMatch(
 	// the per-iteration wrap-around bounds guards are not needed here.
 	// backward-1 >= maxBackward is a single check replacing both
 	// "prev >= cur" (backward==0) and "backward > maxBackward".
-	for i := range uint(h6b6NumLastDistances) {
+	//
+	// Cache entries 0 and 1 are unrolled: they accept ml >= 2 and use a fixed
+	// penalty (0 for entry 0, 39 for entry 1) instead of the lookup-table
+	// penalty used for entries 2..9.
+	backward := uint(distCache[0])
+	if backward-1 < maxBackward {
+		prev := (cur - backward) & ringBufferMask
+		if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+			if ml >= 2 {
+				score := backwardReferenceScoreUsingLastDistance(ml)
+				if bestScore < score {
+					bestScore = score
+					bestLen = ml
+					out.len = bestLen
+					out.distance = backward
+					out.score = bestScore
+				}
+			}
+		}
+	}
+	backward = uint(distCache[1])
+	if backward-1 < maxBackward {
+		prev := (cur - backward) & ringBufferMask
+		if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
+			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+			if ml >= 2 {
+				score := backwardReferenceScoreUsingLastDistance(ml)
+				if bestScore < score {
+					score -= 39
+					if bestScore < score {
+						bestScore = score
+						bestLen = ml
+						out.len = bestLen
+						out.distance = backward
+						out.score = bestScore
+					}
+				}
+			}
+		}
+	}
+	for i := uint(2); i < h6b6NumLastDistances; i++ {
 		backward := uint(distCache[i])
 		if backward-1 >= maxBackward {
 			continue
@@ -158,12 +199,10 @@ func (h *h6b6) findLongestMatch(
 		}
 
 		ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
-		if ml >= 3 || (ml == 2 && i < 2) {
+		if ml >= 3 {
 			score := backwardReferenceScoreUsingLastDistance(ml)
 			if bestScore < score {
-				if i != 0 {
-					score -= backwardReferencePenaltyUsingLastDistance(i)
-				}
+				score -= backwardReferencePenaltyUsingLastDistance(i)
 				if bestScore < score {
 					bestScore = score
 					bestLen = ml
@@ -183,26 +222,32 @@ func (h *h6b6) findLongestMatch(
 	// Phase 2: scan hash bucket entries.
 	// Same tail guarantee: ring buffer end checks are omitted for the fast path.
 	// backward == 0 is impossible here: cur is stored after this scan.
+	//
+	// minPrev = cur - maxBackward is equivalent to the backward > maxBackward break
+	// condition but avoids computing backward = cur - prev on every iteration.
+	// maxBackward = min(cur, maxBackwardLimit) <= cur so the subtraction never
+	// wraps. backward is then computed lazily only when ml >= 4 (rare path).
 	n := h.num[key]
 	down := uint(0)
 	if uint(n) > h6b6BlockSize {
 		down = uint(n) - h6b6BlockSize
 	}
+	minPrev := cur - maxBackward
 	curProbe := loadU32LE(data, curMasked+bestLen-3)
 	for i := uint(n); i > down; {
 		i--
-		prev := uint(bucket[i&h6b6BlockMask])
-		backward := cur - prev
-		if backward > maxBackward {
+		prevRaw := uint(bucket[i&h6b6BlockMask])
+		if prevRaw < minPrev {
 			break
 		}
-		prev &= ringBufferMask
-		if curProbe != loadU32LE(data, prev+bestLen-3) {
+		prevMasked := prevRaw & ringBufferMask
+		if curProbe != loadU32LE(data, prevMasked+bestLen-3) {
 			continue
 		}
 
-		ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+		ml := uint(matchLenAtNoInline(data, prevMasked, curMasked, int(maxLength)))
 		if ml >= 4 {
+			backward := cur - prevRaw
 			score := backwardReferenceScore(ml, backward)
 			if bestScore < score {
 				bestScore = score
@@ -257,7 +302,52 @@ func (h *h6b6) findLongestMatchSmallBuf(
 	// Phase 1: try cached distances.
 	// backward-1 >= maxBackward is a single check replacing both
 	// "prev >= cur" (backward==0) and "backward > maxBackward".
-	for i := range uint(h6b6NumLastDistances) {
+	//
+	// Cache entries 0 and 1 are unrolled: they accept ml >= 2 and use a fixed
+	// penalty (0 for entry 0, 39 for entry 1) instead of the lookup-table
+	// penalty used for entries 2..9.
+	backward := uint(distCache[0])
+	if backward-1 < maxBackward {
+		prev := (cur - backward) & ringBufferMask
+		if curMasked+bestLen <= ringBufferMask &&
+			prev+bestLen <= ringBufferMask &&
+			data[curMasked+bestLen] == data[prev+bestLen] {
+			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+			if ml >= 2 {
+				score := backwardReferenceScoreUsingLastDistance(ml)
+				if bestScore < score {
+					bestScore = score
+					bestLen = ml
+					out.len = bestLen
+					out.distance = backward
+					out.score = bestScore
+				}
+			}
+		}
+	}
+	backward = uint(distCache[1])
+	if backward-1 < maxBackward {
+		prev := (cur - backward) & ringBufferMask
+		if curMasked+bestLen <= ringBufferMask &&
+			prev+bestLen <= ringBufferMask &&
+			data[curMasked+bestLen] == data[prev+bestLen] {
+			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+			if ml >= 2 {
+				score := backwardReferenceScoreUsingLastDistance(ml)
+				if bestScore < score {
+					score -= 39
+					if bestScore < score {
+						bestScore = score
+						bestLen = ml
+						out.len = bestLen
+						out.distance = backward
+						out.score = bestScore
+					}
+				}
+			}
+		}
+	}
+	for i := uint(2); i < h6b6NumLastDistances; i++ {
 		backward := uint(distCache[i])
 		if backward-1 >= maxBackward {
 			continue
@@ -273,12 +363,10 @@ func (h *h6b6) findLongestMatchSmallBuf(
 		}
 
 		ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
-		if ml >= 3 || (ml == 2 && i < 2) {
+		if ml >= 3 {
 			score := backwardReferenceScoreUsingLastDistance(ml)
 			if bestScore < score {
-				if i != 0 {
-					score -= backwardReferencePenaltyUsingLastDistance(i)
-				}
+				score -= backwardReferencePenaltyUsingLastDistance(i)
 				if bestScore < score {
 					bestScore = score
 					bestLen = ml
@@ -297,30 +385,34 @@ func (h *h6b6) findLongestMatchSmallBuf(
 
 	// Phase 2: scan hash bucket entries.
 	// backward == 0 is impossible here: cur is stored after this scan.
+	//
+	// minPrev = cur - maxBackward avoids the per-iteration backward = cur - prev
+	// subtraction; backward is only computed when ml >= 4 (rare path).
 	n := h.num[key]
 	down := uint(0)
 	if uint(n) > h6b6BlockSize {
 		down = uint(n) - h6b6BlockSize
 	}
+	minPrev := cur - maxBackward
 	curProbe := loadU32LE(data, curMasked+bestLen-3)
 	for i := uint(n); i > down; {
 		i--
-		prev := uint(bucket[i&h6b6BlockMask])
-		backward := cur - prev
-		if backward > maxBackward {
+		prevRaw := uint(bucket[i&h6b6BlockMask])
+		if prevRaw < minPrev {
 			break
 		}
-		prev &= ringBufferMask
+		prevMasked := prevRaw & ringBufferMask
 		if curMasked+bestLen > ringBufferMask {
 			break
 		}
-		if prev+bestLen > ringBufferMask ||
-			curProbe != loadU32LE(data, prev+bestLen-3) {
+		if prevMasked+bestLen > ringBufferMask ||
+			curProbe != loadU32LE(data, prevMasked+bestLen-3) {
 			continue
 		}
 
-		ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+		ml := uint(matchLenAtNoInline(data, prevMasked, curMasked, int(maxLength)))
 		if ml >= 4 {
+			backward := cur - prevRaw
 			score := backwardReferenceScore(ml, backward)
 			if bestScore < score {
 				bestScore = score
@@ -373,7 +465,7 @@ func (h *h6b6) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32
 	for i, d := range s.distCache {
 		distCache[i] = int(d)
 	}
-	prepareDistanceCache(distCache[:])
+	prepareDistanceCache10(&distCache)
 
 	for position+h6b6HashTypeLength < posEnd {
 		maxLength := posEnd - position
@@ -453,7 +545,7 @@ func (h *h6b6) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32
 			for i, d := range s.distCache {
 				distCache[i] = int(d)
 			}
-			prepareDistanceCache(distCache[:])
+			prepareDistanceCache10(&distCache)
 		} else {
 			insertLength++
 			position++
