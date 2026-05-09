@@ -142,33 +142,84 @@ func (h *h6b5) findLongestMatch(
 	out.len = 0
 	out.lenCodeDelta = 0
 
-	// Phase 1: try cached distances.
-	// backward-1 >= maxBackward is a single check replacing both
-	// "prev >= cur" (backward==0) and "backward > maxBackward".
-	for i := range uint(h6b5NumLastDistances) {
-		backward := distCache[i]
-		if backward-1 >= maxBackward {
-			continue
-		}
+	// Phase 1: try cached distances. Unrolled so the per-entry conditions
+	// (penalty index, ml >= 2 acceptance) are compile-time constants.
+	backward := distCache[0]
+	if backward-1 < maxBackward {
 		prev := (cur - backward) & ringBufferMask
-
-		if data[curMasked+bestLen] != data[prev+bestLen] {
-			continue
-		}
-
-		ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
-		if ml >= 3 || (ml == 2 && i < 2) {
-			score := backwardReferenceScoreUsingLastDistance(ml)
-			if bestScore < score {
-				if i != 0 {
-					score -= backwardReferencePenaltyUsingLastDistance(i)
-				}
+		if data[curMasked+bestLen] == data[prev+bestLen] {
+			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+			if ml >= 3 || ml == 2 {
+				score := backwardReferenceScoreUsingLastDistance(ml)
 				if bestScore < score {
 					bestScore = score
 					bestLen = ml
 					out.len = bestLen
 					out.distance = backward
 					out.score = bestScore
+				}
+			}
+		}
+	}
+
+	backward = distCache[1]
+	if backward-1 < maxBackward {
+		prev := (cur - backward) & ringBufferMask
+		if data[curMasked+bestLen] == data[prev+bestLen] {
+			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+			if ml >= 3 || ml == 2 {
+				score := backwardReferenceScoreUsingLastDistance(ml)
+				if bestScore < score {
+					score -= backwardReferencePenaltyUsingLastDistance(1)
+					if bestScore < score {
+						bestScore = score
+						bestLen = ml
+						out.len = bestLen
+						out.distance = backward
+						out.score = bestScore
+					}
+				}
+			}
+		}
+	}
+
+	backward = distCache[2]
+	if backward-1 < maxBackward {
+		prev := (cur - backward) & ringBufferMask
+		if data[curMasked+bestLen] == data[prev+bestLen] {
+			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+			if ml >= 3 {
+				score := backwardReferenceScoreUsingLastDistance(ml)
+				if bestScore < score {
+					score -= backwardReferencePenaltyUsingLastDistance(2)
+					if bestScore < score {
+						bestScore = score
+						bestLen = ml
+						out.len = bestLen
+						out.distance = backward
+						out.score = bestScore
+					}
+				}
+			}
+		}
+	}
+
+	backward = distCache[3]
+	if backward-1 < maxBackward {
+		prev := (cur - backward) & ringBufferMask
+		if data[curMasked+bestLen] == data[prev+bestLen] {
+			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+			if ml >= 3 {
+				score := backwardReferenceScoreUsingLastDistance(ml)
+				if bestScore < score {
+					score -= backwardReferencePenaltyUsingLastDistance(3)
+					if bestScore < score {
+						bestScore = score
+						bestLen = ml
+						out.len = bestLen
+						out.distance = backward
+						out.score = bestScore
+					}
 				}
 			}
 		}
