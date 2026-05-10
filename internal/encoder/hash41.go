@@ -6,11 +6,7 @@
 
 package encoder
 
-import (
-	"unsafe"
-
-	"github.com/molecule-man/go-brrr/internal/core"
-)
+import "github.com/molecule-man/go-brrr/internal/core"
 
 // H41 configuration constants.
 const (
@@ -38,8 +34,8 @@ type h41 struct {
 	addr        [h41BucketSize]uint32 // position at bucket head
 	head        [h41BucketSize]uint16 // index of head slot in bank
 	tinyHash    [65536]uint8          // quick rejection for distance cache
-	slots       [h41BankSize]h40Slot  // 1 bank × 64K slots (reuses h40Slot type)
-	freeSlotIdx uint16                // monotonically increasing, wraps
+	slots       [h41BankSize]h40PackedSlot
+	freeSlotIdx uint16 // monotonically increasing, wraps
 	hasherCommon
 }
 
@@ -76,17 +72,14 @@ func (h *h41) reset(oneShot bool, inputSize uint, data []byte) {
 // so the cleared/zero-init state decodes as a sentinel — see reset.
 func (h *h41) store(data []byte, mask, ix uint) {
 	key := h.hash(data, ix&mask)
-	bank := key & (h41NumBanks - 1) // always 0 for NUM_BANKS=1
-	idx := h.freeSlotIdx & (h41BankSize - 1)
+	idx := h.freeSlotIdx
 	h.freeSlotIdx++
 	delta := ix - uint(^h.addr[key])
 	h.tinyHash[uint16(ix)] = uint8(key)
 	if delta > 0xFFFF {
 		delta = 0xFFFF
 	}
-	slotBase := uint(bank) * h41BankSize
-	h.slots[slotBase+uint(idx)].delta = uint16(delta)
-	h.slots[slotBase+uint(idx)].next = h.head[key]
+	h.slots[idx] = h40PackedSlot(uint32(delta) | uint32(h.head[key])<<16)
 	h.addr[key] = ^uint32(ix)
 	h.head[key] = idx
 }
@@ -94,8 +87,7 @@ func (h *h41) store(data []byte, mask, ix uint) {
 // storeRange records positions [start, end) in the hash table.
 // h41NumBanks == 1 and h41BankSize == 1<<16 == cap(h.slots), so the bank/
 // slotBase indirection and the idx mask in store() are dead here; dropping
-// them, plus a single packed 32-bit slot write (matching the unsafe read
-// pattern in findLongestMatch's chain walk), keeps the loop call-free.
+// them, plus a single packed 32-bit slot write, keeps the loop call-free.
 func (h *h41) storeRange(data []byte, mask, start, end uint) {
 	for i := start; i < end; i++ {
 		key := h.hash(data, i&mask)
@@ -106,7 +98,7 @@ func (h *h41) storeRange(data []byte, mask, start, end uint) {
 		if delta > 0xFFFF {
 			delta = 0xFFFF
 		}
-		*(*uint32)(unsafe.Pointer(&h.slots[idx])) = uint32(delta) | uint32(h.head[key])<<16
+		h.slots[idx] = h40PackedSlot(uint32(delta) | uint32(h.head[key])<<16)
 		h.addr[key] = ^uint32(i)
 		h.head[key] = idx
 	}
@@ -199,14 +191,28 @@ func (h *h41) findLongestMatch(
 	// Phase 2: walk the chain.
 	//
 	// h41NumBanks == 1, so bank is always 0 and slotBase is always 0.
-	// A single 32-bit unsafe load reads both delta (bits 0–15) and next
-	// (bits 16–31) in one instruction, replacing the two MOVWLZX that the
-	// compiler emits for the individual h40Slot fields.
+	// Capture the old chain head/addr, then store cur before the walk so
+	// the store's writes pipeline against the serial slot loads. The walk
+	// still traverses the old chain because it uses oldHead below.
 	{
+		oldAddr := uint(^h.addr[key])
+		oldHead := h.head[key]
+
+		newIdx := h.freeSlotIdx
+		h.freeSlotIdx++
+		storeDelta := cur - oldAddr
+		h.tinyHash[uint16(cur)] = uint8(key)
+		if storeDelta > 0xFFFF {
+			storeDelta = 0xFFFF
+		}
+		h.slots[newIdx] = h40PackedSlot(uint32(storeDelta) | uint32(oldHead)<<16)
+		h.addr[key] = ^uint32(cur)
+		h.head[key] = newIdx
+
 		backward := uint(0)
 		hops := h.maxHops
-		delta := cur - uint(^h.addr[key])
-		slot := h.head[key]
+		delta := cur - oldAddr
+		slot := oldHead
 		for hops > 0 {
 			hops--
 			backward += delta
@@ -214,11 +220,9 @@ func (h *h41) findLongestMatch(
 				break
 			}
 			prevIx := (cur - backward) & ringBufferMask
-			slotEntry := *(*uint32)(unsafe.Pointer(&h.slots[slot]))
-			nextDelta := uint(uint16(slotEntry))
-			nextSlot := uint16(slotEntry >> 16)
-			slot = nextSlot
-			delta = nextDelta
+			slotEntry := uint32(h.slots[slot])
+			slot = uint16(slotEntry >> 16)
+			delta = uint(uint16(slotEntry))
 			if curMasked+bestLen > ringBufferMask ||
 				prevIx+bestLen > ringBufferMask ||
 				loadU32LE(data, curMasked+bestLen-3) != loadU32LE(data, prevIx+bestLen-3) {
@@ -237,7 +241,6 @@ func (h *h41) findLongestMatch(
 				}
 			}
 		}
-		h.store(data, ringBufferMask, cur)
 	}
 
 	// Phase 3: static dictionary fallback when no match was found.
@@ -304,12 +307,24 @@ func (h *h41) findLongestMatchSmallBuf(
 
 	// Phase 2: walk the chain.
 	{
-		bank := key & (h41NumBanks - 1)
+		oldAddr := uint(^h.addr[key])
+		oldHead := h.head[key]
+
+		newIdx := h.freeSlotIdx
+		h.freeSlotIdx++
+		storeDelta := cur - oldAddr
+		h.tinyHash[uint16(cur)] = uint8(key)
+		if storeDelta > 0xFFFF {
+			storeDelta = 0xFFFF
+		}
+		h.slots[newIdx] = h40PackedSlot(uint32(storeDelta) | uint32(oldHead)<<16)
+		h.addr[key] = ^uint32(cur)
+		h.head[key] = newIdx
+
 		backward := uint(0)
 		hops := h.maxHops
-		delta := cur - uint(^h.addr[key])
-		slot := h.head[key]
-		slotBase := uint(bank) * h41BankSize
+		delta := cur - oldAddr
+		slot := oldHead
 		for hops > 0 {
 			hops--
 			backward += delta
@@ -317,10 +332,9 @@ func (h *h41) findLongestMatchSmallBuf(
 				break
 			}
 			prevIx := (cur - backward) & ringBufferMask
-			nextSlot := h.slots[slotBase+uint(slot)].next
-			nextDelta := uint(h.slots[slotBase+uint(slot)].delta)
-			slot = nextSlot
-			delta = nextDelta
+			slotEntry := uint32(h.slots[slot])
+			slot = uint16(slotEntry >> 16)
+			delta = uint(uint16(slotEntry))
 			if curMasked+bestLen > ringBufferMask ||
 				prevIx+bestLen > ringBufferMask ||
 				loadU32LE(data, curMasked+bestLen-3) != loadU32LE(data, prevIx+bestLen-3) {
@@ -339,7 +353,6 @@ func (h *h41) findLongestMatchSmallBuf(
 				}
 			}
 		}
-		h.store(data, ringBufferMask, cur)
 	}
 
 	// Phase 3: static dictionary fallback when no match was found.
