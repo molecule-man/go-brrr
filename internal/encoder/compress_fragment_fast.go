@@ -322,19 +322,23 @@ func (c *fragmentCompressor) writeInsertLen(insertLen uint) {
 		nbits := uint(bits.Len(tail)) - 2
 		prefix := tail >> nbits
 		inscode := (nbits << 1) + prefix + 42
-		c.b.writeBits(uint(depth[inscode]), uint64(cmdBits[inscode]))
-		c.b.writeBits(nbits, uint64(tail-(prefix<<nbits)))
+		d := uint(depth[inscode])
+		// Pack Huffman code and extra bits into one writeBits.
+		// Max total = 15 + 5 = 20 bits.
+		c.b.writeBits(d+nbits, uint64(cmdBits[inscode])|uint64(tail-(prefix<<nbits))<<d)
 		histo[inscode]++
 	case insertLen < 2114:
 		tail := insertLen - 66
 		nbits := uint(bits.Len(tail)) - 1
 		code := nbits + 50
-		c.b.writeBits(uint(depth[code]), uint64(cmdBits[code]))
-		c.b.writeBits(nbits, uint64(tail-(1<<nbits)))
+		d := uint(depth[code])
+		// Max total = 15 + 11 = 26 bits.
+		c.b.writeBits(d+nbits, uint64(cmdBits[code])|uint64(tail-(1<<nbits))<<d)
 		histo[code]++
 	default:
-		c.b.writeBits(uint(depth[61]), uint64(cmdBits[61]))
-		c.b.writeBits(12, uint64(insertLen-2114))
+		d := uint(depth[61])
+		// Max total = 15 + 12 = 27 bits.
+		c.b.writeBits(d+12, uint64(cmdBits[61])|uint64(insertLen-2114)<<d)
 		histo[61]++
 	}
 }
@@ -345,12 +349,14 @@ func (c *fragmentCompressor) writeLongInsertLen(insertLen uint) {
 	cmdBits := c.arena.cmdBits[:]
 	histo := c.arena.cmdHisto[:]
 	if insertLen < 22594 {
-		c.b.writeBits(uint(depth[62]), uint64(cmdBits[62]))
-		c.b.writeBits(14, uint64(insertLen-6210))
+		d := uint(depth[62])
+		// Max total = 15 + 14 = 29 bits.
+		c.b.writeBits(d+14, uint64(cmdBits[62])|uint64(insertLen-6210)<<d)
 		histo[62]++
 	} else {
-		c.b.writeBits(uint(depth[63]), uint64(cmdBits[63]))
-		c.b.writeBits(24, uint64(insertLen-22594))
+		d := uint(depth[63])
+		// Max total = 15 + 24 = 39 bits.
+		c.b.writeBits(d+24, uint64(cmdBits[63])|uint64(insertLen-22594)<<d)
 		histo[63]++
 	}
 }
@@ -369,19 +375,23 @@ func (c *fragmentCompressor) writeCopyLen(copyLen uint) {
 		nbits := uint(bits.Len(tail)) - 2
 		prefix := tail >> nbits
 		code := (nbits << 1) + prefix + 20
-		c.b.writeBits(uint(depth[code]), uint64(cmdBits[code]))
-		c.b.writeBits(nbits, uint64(tail-(prefix<<nbits)))
+		d := uint(depth[code])
+		// Pack Huffman code and extra bits into one writeBits.
+		// Max total = 15 + 5 = 20 bits.
+		c.b.writeBits(d+nbits, uint64(cmdBits[code])|uint64(tail-(prefix<<nbits))<<d)
 		histo[code]++
 	case copyLen < 2118:
 		tail := copyLen - 70
 		nbits := uint(bits.Len(tail)) - 1
 		code := nbits + 28
-		c.b.writeBits(uint(depth[code]), uint64(cmdBits[code]))
-		c.b.writeBits(nbits, uint64(tail-(1<<nbits)))
+		d := uint(depth[code])
+		// Max total = 15 + 11 = 26 bits.
+		c.b.writeBits(d+nbits, uint64(cmdBits[code])|uint64(tail-(1<<nbits))<<d)
 		histo[code]++
 	default:
-		c.b.writeBits(uint(depth[39]), uint64(cmdBits[39]))
-		c.b.writeBits(24, uint64(copyLen-2118))
+		d := uint(depth[39])
+		// Max total = 15 + 24 = 39 bits.
+		c.b.writeBits(d+24, uint64(cmdBits[39])|uint64(copyLen-2118)<<d)
 		histo[39]++
 	}
 }
@@ -400,30 +410,39 @@ func (c *fragmentCompressor) writeCopyLenLastDistance(copyLen uint) {
 		nbits := uint(bits.Len(tail)) - 2
 		prefix := tail >> nbits
 		code := (nbits << 1) + prefix + 4
-		c.b.writeBits(uint(depth[code]), uint64(cmdBits[code]))
-		c.b.writeBits(nbits, uint64(tail-(prefix<<nbits)))
+		d := uint(depth[code])
+		// Pack Huffman code and extra bits into one writeBits.
+		// Max total = 15 + 5 = 20 bits.
+		c.b.writeBits(d+nbits, uint64(cmdBits[code])|uint64(tail-(prefix<<nbits))<<d)
 		histo[code]++
 	case copyLen < 136:
 		tail := copyLen - 8
 		code := (tail >> 5) + 30
-		c.b.writeBits(uint(depth[code]), uint64(cmdBits[code]))
-		c.b.writeBits(5, uint64(tail&31))
-		c.b.writeBits(uint(depth[64]), uint64(cmdBits[64]))
+		d := uint(depth[code])
+		d64 := uint(depth[64])
+		// Pack copy code, 5 extra bits, and last-distance code into one
+		// writeBits. Max total = 15 + 5 + 15 = 35 bits.
+		c.b.writeBits(d+5+d64,
+			uint64(cmdBits[code])|uint64(tail&31)<<d|uint64(cmdBits[64])<<(d+5))
 		histo[code]++
 		histo[64]++
 	case copyLen < 2120:
 		tail := copyLen - 72
 		nbits := uint(bits.Len(tail)) - 1
 		code := nbits + 28
-		c.b.writeBits(uint(depth[code]), uint64(cmdBits[code]))
-		c.b.writeBits(nbits, uint64(tail-(1<<nbits)))
-		c.b.writeBits(uint(depth[64]), uint64(cmdBits[64]))
+		d := uint(depth[code])
+		d64 := uint(depth[64])
+		// Max total = 15 + 11 + 15 = 41 bits.
+		c.b.writeBits(d+nbits+d64,
+			uint64(cmdBits[code])|uint64(tail-(1<<nbits))<<d|uint64(cmdBits[64])<<(d+nbits))
 		histo[code]++
 		histo[64]++
 	default:
-		c.b.writeBits(uint(depth[39]), uint64(cmdBits[39]))
-		c.b.writeBits(24, uint64(copyLen-2120))
-		c.b.writeBits(uint(depth[64]), uint64(cmdBits[64]))
+		d := uint(depth[39])
+		d64 := uint(depth[64])
+		// Max total = 15 + 24 + 15 = 54 bits, just under the 56-bit limit.
+		c.b.writeBits(d+24+d64,
+			uint64(cmdBits[39])|uint64(copyLen-2120)<<d|uint64(cmdBits[64])<<(d+24))
 		histo[39]++
 		histo[64]++
 	}
