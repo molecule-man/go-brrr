@@ -100,14 +100,16 @@ func (h *h4) stitchToPreviousBlock(numBytes, position uint, ringBuffer []byte, r
 // H4 uses BUCKET_SWEEP=4 and USE_DICTIONARY=1, so static dictionary
 // lookups are performed when no hash-table match is found.
 //
-// When the call's [wrappedPos, wrappedPos+bytes) range fits entirely within
-// the ring buffer (no modular wrap) and no past call has wrapped, dispatch
-// to createBackwardReferencesNoWrap which omits the per-iteration & mask
-// ops (each redundant when stored bucket values are < mask+1).
+// When no compound dictionary is configured and the call's
+// [wrappedPos, wrappedPos+bytes) range fits entirely within the ring buffer
+// (no modular wrap) and no past call has wrapped, dispatch to
+// createBackwardReferencesNoCompoundNoWrap which drops both the per-iteration
+// compound branch and the `& mask` ops on stored bucket values.
 func (h *h4) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) {
 	mask := uint(s.mask)
-	if !h.everWrapped && uint(wrappedPos)+uint(bytes) <= mask+1 {
-		h.createBackwardReferencesNoWrap(s, bytes, wrappedPos)
+	if !h.everWrapped && s.compound.numChunks == 0 &&
+		uint(wrappedPos)+uint(bytes) <= mask+1 {
+		h.createBackwardReferencesNoCompoundNoWrap(s, bytes, wrappedPos)
 		return
 	}
 	h.everWrapped = true
@@ -513,19 +515,16 @@ func (h *h4) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 	s.numCommands += uint(len(s.commands)) - origCmdCount
 }
 
-// createBackwardReferencesNoWrap is the no-wrap fast path used by
-// createBackwardReferences when the call's position range fits entirely
-// within mask+1 and no past call has wrapped. Stored bucket values are
-// then guaranteed < mask+1, so per-iteration `prev &= mask` and
-// `position & mask` ops are redundant and elided here. The paired
-// no-wrap store helpers also skip redundant position masking while
-// preserving the same bucket update.
-func (h *h4) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos uint32) {
+// createBackwardReferencesNoCompoundNoWrap is the H4 fast path used by
+// createBackwardReferences when no compound dictionary is configured, the
+// call's position range fits entirely within mask+1, and no past call has
+// wrapped. It drops both the per-iteration compound lookup branch and the
+// `& mask` ops on stored bucket values (each redundant when stored values
+// are < mask+1). The paired no-wrap store helpers also skip redundant
+// position masking while preserving the same bucket update.
+func (h *h4) createBackwardReferencesNoCompoundNoWrap(s *encodeState, bytes, wrappedPos uint32) {
 	data := s.data
-	mask := uint(s.mask)
 	maxBackwardLimit := (uint(1) << s.lgwin) - core.WindowGap
-	gap := s.compound.totalSize
-	hasCompound := s.compound.numChunks > 0
 
 	insertLength := s.lastInsertLen
 	position := uint(wrappedPos)
@@ -675,16 +674,10 @@ func (h *h4) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos ui
 		if sr.score == minScore {
 			posM := position
 			if wl, wi, ok := searchStaticDictAt(data, posM, maxLength, &s.dictNumLookups, &s.dictNumMatches); ok {
-				if matchStaticDictEntryAt(data, posM, wl, wi, maxDistance+gap, sr.score, &sr) {
+				if matchStaticDictEntryAt(data, posM, wl, wi, maxDistance, sr.score, &sr) {
 					s.dictNumMatches++
 				}
 			}
-		}
-
-		if hasCompound {
-			s.compound.lookupMatch(data, mask,
-				&s.distCache, position, maxLength,
-				maxDistance, &sr)
 		}
 
 		if sr.score > minScore {
@@ -822,16 +815,10 @@ func (h *h4) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos ui
 				if sr2.score == minScore {
 					posM2 := position + 1
 					if wl2, wi2, ok2 := searchStaticDictAt(data, posM2, maxLength, &s.dictNumLookups, &s.dictNumMatches); ok2 {
-						if matchStaticDictEntryAt(data, posM2, wl2, wi2, maxDistance+gap, sr2.score, &sr2) {
+						if matchStaticDictEntryAt(data, posM2, wl2, wi2, maxDistance, sr2.score, &sr2) {
 							s.dictNumMatches++
 						}
 					}
-				}
-
-				if hasCompound {
-					s.compound.lookupMatch(data, mask,
-						&s.distCache, position+1, maxLength,
-						maxDistance, &sr2)
 				}
 
 				if sr2.score >= sr.score+costDiffLazy {
@@ -853,8 +840,8 @@ func (h *h4) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos ui
 			// Recompute maxDistance after the lazy loop because position may
 			// have advanced. This matches the C reference's dictionary_start.
 			maxDistance = min(position, maxBackwardLimit)
-			distanceCode := computeDistanceCode(sr.distance, maxDistance+gap, &s.distCache)
-			if sr.distance <= maxDistance+gap && distanceCode > 0 {
+			distanceCode := computeDistanceCode(sr.distance, maxDistance, &s.distCache)
+			if sr.distance <= maxDistance && distanceCode > 0 {
 				s.distCache[3] = s.distCache[2]
 				s.distCache[2] = s.distCache[1]
 				s.distCache[1] = s.distCache[0]
