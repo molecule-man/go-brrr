@@ -20,7 +20,7 @@ Brotli compression library for Go (RFC 7932), with encoder and decoder support.
 
 ## Status
 
-v0.1.0. The encoder and decoder are covered by compatibility tests and fuzzing, but the public API may still evolve before v1.0.0.
+The encoder and decoder are covered by compatibility tests and fuzzing, but the public API may still evolve before v1.0.0.
 
 ## Compatibility
 
