@@ -68,6 +68,17 @@ func (h *h2u16) storeRange(data []byte, mask, start, end uint) {
 	}
 }
 
+func (h *h2u16) storeNoWrap(data []byte, pos uint) {
+	key := hashBytes(data, pos)
+	h.buckets[key] = uint16(pos)
+}
+
+func (h *h2u16) storeRangeNoWrap(data []byte, start, end uint) {
+	for i := start; i < end; i++ {
+		h.storeNoWrap(data, i)
+	}
+}
+
 // stitchToPreviousBlock seeds the hash table with the last 3 positions of
 // the previous block so that cross-block matches can be found.
 func (h *h2u16) stitchToPreviousBlock(numBytes, position uint, ringBuffer []byte, ringBufferMask uint) {
@@ -354,13 +365,11 @@ func (h *h2u16) createBackwardReferences(s *encodeState, bytes, wrappedPos uint3
 // createBackwardReferences when the call's position range fits entirely
 // within mask+1 and no past call has wrapped. Stored bucket values are
 // then guaranteed < mask+1, so per-iteration `prev &= mask` and
-// `position & mask` ops are redundant and elided here. h.store and
-// h.storeRange still receive mask: their internal `& mask` is a no-op
-// for the same reason and is left in place to avoid duplicating those
-// helpers.
+// `position & mask` ops are redundant and elided here. The paired
+// no-wrap store helpers also skip redundant position masking while
+// preserving the same bucket update.
 func (h *h2u16) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos uint32) {
 	data := s.data
-	mask := uint(s.mask)
 	maxBackwardLimit := (uint(1) << s.lgwin) - core.WindowGap
 	gap := s.compound.totalSize
 
@@ -570,10 +579,7 @@ func (h *h2u16) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos
 			if sr.distance < sr.len>>2 {
 				rangeStart = min(rangeEnd, max(rangeStart, position+sr.len-(sr.distance<<2)))
 			}
-			for i := rangeStart; i < rangeEnd; i++ {
-				key := hashBytes(data, i)
-				buckets[key] = uint16(i)
-			}
+			h.storeRangeNoWrap(data, rangeStart, rangeEnd)
 
 			position += sr.len
 		} else {
@@ -584,14 +590,14 @@ func (h *h2u16) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos
 				if position > applyRandomHeuristics+4*randomHeuristicsWindowSize {
 					posJump := min(position+16, posEnd-(hashTypeLength-1))
 					for position < posJump {
-						h.store(data, mask, position)
+						h.storeNoWrap(data, position)
 						insertLength += 4
 						position += 4
 					}
 				} else {
 					posJump := min(position+8, posEnd-(hashTypeLength-1))
 					for position < posJump {
-						h.store(data, mask, position)
+						h.storeNoWrap(data, position)
 						insertLength += 2
 						position += 2
 					}

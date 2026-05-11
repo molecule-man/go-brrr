@@ -68,6 +68,21 @@ func (h *h4) storeRange(data []byte, mask, start, end uint) {
 	}
 }
 
+func (h *h4) storeNoWrap(data []byte, pos uint) {
+	key := h.hash(data, pos)
+	off := uint32(pos) & h4BucketSweepMsk
+	h.buckets[(key+off)&h4BucketMask] = uint32(pos)
+}
+
+func (h *h4) storeRangeNoWrap(data []byte, start, end uint) {
+	buckets := &h.buckets
+	for i := start; i < end; i++ {
+		key := h.hash(data, i)
+		off := uint32(i) & h4BucketSweepMsk
+		buckets[(key+off)&h4BucketMask] = uint32(i)
+	}
+}
+
 // stitchToPreviousBlock seeds the hash table with the last 3 positions of
 // the previous block so that cross-block matches can be found.
 func (h *h4) stitchToPreviousBlock(numBytes, position uint, ringBuffer []byte, ringBufferMask uint) {
@@ -502,11 +517,9 @@ func (h *h4) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 // createBackwardReferences when the call's position range fits entirely
 // within mask+1 and no past call has wrapped. Stored bucket values are
 // then guaranteed < mask+1, so per-iteration `prev &= mask` and
-// `position & mask` ops are redundant and elided here. h.store and
-// h.storeRange still receive mask: their internal `& mask` is a no-op
-// for the same reason and is left in place to avoid duplicating those
-// helpers; the bulk of the cycles saved are in the inner findLongestMatch
-// chain on the cache-miss critical path of `prev := buckets[hkey]`.
+// `position & mask` ops are redundant and elided here. The paired
+// no-wrap store helpers also skip redundant position masking while
+// preserving the same bucket update.
 func (h *h4) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos uint32) {
 	data := s.data
 	mask := uint(s.mask)
@@ -869,7 +882,7 @@ func (h *h4) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos ui
 			if sr.distance < sr.len>>2 {
 				rangeStart = min(rangeEnd, max(rangeStart, position+sr.len-(sr.distance<<2)))
 			}
-			h.storeRange(data, mask, rangeStart, rangeEnd)
+			h.storeRangeNoWrap(data, rangeStart, rangeEnd)
 
 			position += sr.len
 		} else {
@@ -880,14 +893,14 @@ func (h *h4) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos ui
 				if position > applyRandomHeuristics+4*randomHeuristicsWindowSize {
 					posJump := min(position+16, posEnd-(hashTypeLength-1))
 					for position < posJump {
-						h.store(data, mask, position)
+						h.storeNoWrap(data, position)
 						insertLength += 4
 						position += 4
 					}
 				} else {
 					posJump := min(position+8, posEnd-(hashTypeLength-1))
 					for position < posJump {
-						h.store(data, mask, position)
+						h.storeNoWrap(data, position)
 						insertLength += 2
 						position += 2
 					}
