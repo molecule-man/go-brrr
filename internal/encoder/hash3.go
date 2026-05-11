@@ -17,6 +17,11 @@ const (
 type h3 struct {
 	buckets    [bucketSize]uint32
 	nextBucket uint32 // speculative load to warm cache for the next match lookup
+	// everWrapped is sticky: false until any createBackwardReferences call
+	// has positions reaching or exceeding mask+1, after which the no-wrap
+	// fast path is disabled because stored bucket values may then encode
+	// positions outside the ring buffer's modular window.
+	everWrapped bool
 	hasherCommon
 }
 
@@ -34,6 +39,7 @@ func (h *h3) reset(oneShot bool, inputSize uint, data []byte) {
 	} else {
 		h.buckets = [bucketSize]uint32{}
 	}
+	h.everWrapped = false
 	h.ready = true
 }
 
@@ -41,6 +47,12 @@ func (h *h3) reset(oneShot bool, inputSize uint, data []byte) {
 // data[pos & mask]. Uses the sweep offset to distribute entries.
 func (h *h3) store(data []byte, mask, pos uint) {
 	key := hashBytes(data, pos&mask)
+	off := uint32(pos) & h3BucketSweepMsk
+	h.buckets[(key+off)&bucketMask] = uint32(pos)
+}
+
+func (h *h3) storeNoWrap(data []byte, pos uint) {
+	key := hashBytes(data, pos)
 	off := uint32(pos) & h3BucketSweepMsk
 	h.buckets[(key+off)&bucketMask] = uint32(pos)
 }
@@ -61,14 +73,22 @@ func (h *h3) stitchToPreviousBlock(numBytes, position uint, ringBuffer []byte, r
 //
 // H3 uses BUCKET_SWEEP=2 and USE_DICTIONARY=0, so no static dictionary
 // lookups are performed.
+//
+// When no compound dictionary is configured and the call's
+// [wrappedPos, wrappedPos+bytes) range fits entirely within the ring buffer
+// (no modular wrap) and no past call has wrapped, dispatch to
+// createBackwardReferencesNoCompoundNoWrap which drops both the per-iteration
+// compound branch and the `& mask` ops on stored bucket values.
 func (h *h3) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) {
-	if s.compound.numChunks == 0 {
-		h.createBackwardReferencesNoCompound(s, bytes, wrappedPos)
+	mask := uint(s.mask)
+	if !h.everWrapped && s.compound.numChunks == 0 &&
+		uint(wrappedPos)+uint(bytes) <= mask+1 {
+		h.createBackwardReferencesNoCompoundNoWrap(s, bytes, wrappedPos)
 		return
 	}
+	h.everWrapped = true
 
 	data := s.data
-	mask := uint(s.mask)
 	maxBackwardLimit := (uint(1) << s.lgwin) - core.WindowGap
 	gap := s.compound.totalSize
 	hasCompound := s.compound.numChunks > 0
@@ -414,13 +434,15 @@ func (h *h3) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 	s.numCommands += uint(len(s.commands)) - origCmdCount
 }
 
-// createBackwardReferencesNoCompound is the H3 path for ordinary compression
-// without compound dictionaries. It keeps the hot match loop free of
-// dictionary lookup branches while preserving the generic path for dictionary
-// callers.
-func (h *h3) createBackwardReferencesNoCompound(s *encodeState, bytes, wrappedPos uint32) {
+// createBackwardReferencesNoCompoundNoWrap is the H3 fast path used by
+// createBackwardReferences when no compound dictionary is configured, the
+// call's position range fits entirely within mask+1, and no past call has
+// wrapped. It drops both the per-iteration compound lookup branch and the
+// `& mask` ops on stored bucket values (each redundant when stored values
+// are < mask+1). The paired no-wrap store helpers also skip redundant
+// position masking while preserving the same bucket update.
+func (h *h3) createBackwardReferencesNoCompoundNoWrap(s *encodeState, bytes, wrappedPos uint32) {
 	data := s.data
-	mask := uint(s.mask)
 	maxBackwardLimit := (uint(1) << s.lgwin) - core.WindowGap
 
 	insertLength := s.lastInsertLen
@@ -454,7 +476,7 @@ func (h *h3) createBackwardReferencesNoCompound(s *encodeState, bytes, wrappedPo
 		// (cost 671 > budget 80), so we do it here to eliminate call overhead.
 		{
 			lastDistance := s.distCache[0]
-			curMasked := position & mask
+			curMasked := position
 			// Fuse the guard byte and hash load — both read from data[curMasked].
 			// Doing one 8-byte load and deriving both keeps loadByte off the
 			// dependency chain and hands the compiler a single fused access.
@@ -477,7 +499,6 @@ func (h *h3) createBackwardReferencesNoCompound(s *encodeState, bytes, wrappedPo
 			{
 				prev := position - lastDistance
 				if prev < position && lastDistance <= maxDistance {
-					prev &= mask
 					if guardByte == loadByte(data, prev+bestLen) {
 						length := matchLenAt(data, prev, curMasked, int(maxLength))
 						if length >= 4 {
@@ -497,7 +518,6 @@ func (h *h3) createBackwardReferencesNoCompound(s *encodeState, bytes, wrappedPo
 
 			{
 				backward := position - prev0
-				prev0 &= mask
 				if guardByte == loadByte(data, prev0+bestLen) && backward != 0 && backward <= maxDistance {
 					length := matchLenAt(data, prev0, curMasked, int(maxLength))
 					if length >= 4 {
@@ -516,7 +536,6 @@ func (h *h3) createBackwardReferencesNoCompound(s *encodeState, bytes, wrappedPo
 
 			{
 				backward := position - prev1
-				prev1 &= mask
 				if guardByte == loadByte(data, prev1+bestLen) && backward != 0 && backward <= maxDistance {
 					length := matchLenAt(data, prev1, curMasked, int(maxLength))
 					if length >= 4 {
@@ -552,7 +571,7 @@ func (h *h3) createBackwardReferencesNoCompound(s *encodeState, bytes, wrappedPo
 				{
 					cur2 := position + 1
 					lastDistance := s.distCache[0]
-					curMasked := cur2 & mask
+					curMasked := cur2
 					bestLen2 := sr2.len
 					guardByte := loadByte(data, curMasked+bestLen2)
 					key := hashBytes(data, curMasked)
@@ -571,7 +590,6 @@ func (h *h3) createBackwardReferencesNoCompound(s *encodeState, bytes, wrappedPo
 					{
 						prev := cur2 - lastDistance
 						if prev < cur2 && lastDistance <= maxDistance {
-							prev &= mask
 							if guardByte == loadByte(data, prev+bestLen2) {
 								length := matchLenAt(data, prev, curMasked, int(maxLength))
 								if length >= 4 {
@@ -591,7 +609,6 @@ func (h *h3) createBackwardReferencesNoCompound(s *encodeState, bytes, wrappedPo
 
 					{
 						backward := cur2 - prev0
-						prev0 &= mask
 						if guardByte == loadByte(data, prev0+bestLen2) && backward != 0 && backward <= maxDistance {
 							length := matchLenAt(data, prev0, curMasked, int(maxLength))
 							if length >= 4 {
@@ -610,7 +627,6 @@ func (h *h3) createBackwardReferencesNoCompound(s *encodeState, bytes, wrappedPo
 
 					{
 						backward := cur2 - prev1
-						prev1 &= mask
 						if guardByte == loadByte(data, prev1+bestLen2) && backward != 0 && backward <= maxDistance {
 							length := matchLenAt(data, prev1, curMasked, int(maxLength))
 							if length >= 4 {
@@ -688,7 +704,7 @@ func (h *h3) createBackwardReferencesNoCompound(s *encodeState, bytes, wrappedPo
 					}
 					basePos := position - insertLength
 					for j := uint(0); j < insertLength; j++ {
-						s.litHisto[data[(basePos+j)&mask]]++
+						s.litHisto[data[basePos+j]]++
 					}
 				}
 			}
@@ -701,7 +717,7 @@ func (h *h3) createBackwardReferencesNoCompound(s *encodeState, bytes, wrappedPo
 			// store loop below hide the cache-miss latency.
 			nextMatchPos := position + sr.len
 			if nextMatchPos+hashTypeLength < posEnd {
-				h.nextBucket = buckets[hashBytes(data, nextMatchPos&mask)]
+				h.nextBucket = buckets[hashBytes(data, nextMatchPos)]
 			}
 
 			// Store hash entries for the matched range, avoiding RLE poisoning.
@@ -713,7 +729,7 @@ func (h *h3) createBackwardReferencesNoCompound(s *encodeState, bytes, wrappedPo
 				rangeStart = min(rangeEnd, max(rangeStart, position+sr.len-(sr.distance<<2)))
 			}
 			for i := rangeStart; i < rangeEnd; i++ {
-				key := hashBytes(data, i&mask)
+				key := hashBytes(data, i)
 				off := uint32(i) & h3BucketSweepMsk
 				buckets[(key+off)&bucketMask] = uint32(i)
 			}
@@ -730,7 +746,7 @@ func (h *h3) createBackwardReferencesNoCompound(s *encodeState, bytes, wrappedPo
 					// Very long run without matches: stride by 4, store every 4th.
 					posJump := min(position+16, posEnd-(hashTypeLength-1))
 					for position < posJump {
-						h.store(data, mask, position)
+						h.storeNoWrap(data, position)
 						insertLength += 4
 						position += 4
 					}
@@ -738,7 +754,7 @@ func (h *h3) createBackwardReferencesNoCompound(s *encodeState, bytes, wrappedPo
 					// Moderate run without matches: stride by 2, store every 2nd.
 					posJump := min(position+8, posEnd-(hashTypeLength-1))
 					for position < posJump {
-						h.store(data, mask, position)
+						h.storeNoWrap(data, position)
 						insertLength += 2
 						position += 2
 					}

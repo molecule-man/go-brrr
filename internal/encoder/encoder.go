@@ -232,6 +232,7 @@ func (c *encoderCore) maybePromoteHasher() {
 				n.buckets[i] = uint32(h.buckets[i])
 			}
 			n.nextBucket = uint32(h.nextBucket)
+			n.everWrapped = false
 			n.ready = true
 		} else {
 			n.ready = false
