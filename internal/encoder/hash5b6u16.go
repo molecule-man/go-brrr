@@ -63,10 +63,17 @@ func (h *h5b6u16) store(data []byte, mask, pos uint) {
 	h.buckets[offset] = uint16(pos)
 }
 
-// storeRange records positions [start, end) in the hash table.
-func (h *h5b6u16) storeRange(data []byte, mask, start, end uint) {
+func (h *h5b6u16) storeNoWrap(data []byte, pos uint) {
+	key := h.hash(data, pos)
+	minorIx := h.num[key] & h5b6BlockMask
+	offset := uint(minorIx) + uint(key)<<h5b6BlockBits
+	h.num[key]++
+	h.buckets[offset] = uint16(pos)
+}
+
+func (h *h5b6u16) storeRangeNoWrap(data []byte, start, end uint) {
 	for i := start; i < end; i++ {
-		h.store(data, mask, i)
+		h.storeNoWrap(data, i)
 	}
 }
 
@@ -212,7 +219,7 @@ func (h *h5b6u16) createBackwardReferences(s *encodeState, bytes, wrappedPos uin
 			if sr.distance < sr.len>>2 {
 				rangeStart = min(rangeEnd, max(rangeStart, position+sr.len-(sr.distance<<2)))
 			}
-			h.storeRange(data, mask, rangeStart, rangeEnd)
+			h.storeRangeNoWrap(data, rangeStart, rangeEnd)
 
 			position += sr.len
 		} else {
@@ -223,14 +230,14 @@ func (h *h5b6u16) createBackwardReferences(s *encodeState, bytes, wrappedPos uin
 				if position > applyRandomHeuristics+4*randomHeuristicsWindowSize {
 					posJump := min(position+16, posEnd-max(h5b6HashTypeLength-1, 4))
 					for position < posJump {
-						h.store(data, mask, position)
+						h.storeNoWrap(data, position)
 						insertLength += 4
 						position += 4
 					}
 				} else {
 					posJump := min(position+8, posEnd-(h5b6HashTypeLength-1))
 					for position < posJump {
-						h.store(data, mask, position)
+						h.storeNoWrap(data, position)
 						insertLength += 2
 						position += 2
 					}
