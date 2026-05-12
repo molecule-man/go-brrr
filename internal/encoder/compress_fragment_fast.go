@@ -201,11 +201,11 @@ func (c *fragmentCompressor) writeCommands() {
 			if distance == lastDistance {
 				c.b.writeBits(uint(c.arena.cmdDepth[64]), uint64(c.arena.cmdBits[64]))
 				c.arena.cmdHisto[64]++
+				c.writeCopyLenLastDistance(uint(matched))
 			} else {
-				c.writeDistance(uint(distance))
+				c.writeDistanceAndCopyLenLastDistance(uint(distance), uint(matched))
 				lastDistance = distance
 			}
-			c.writeCopyLenLastDistance(uint(matched))
 
 			c.nextEmit = ip
 			if ip >= ipLimit {
@@ -450,6 +450,61 @@ func (c *fragmentCompressor) writeCopyLenLastDistance(copyLen uint) {
 		histo[39]++
 		histo[64]++
 	}
+}
+
+// writeDistanceAndCopyLenLastDistance emits a fresh distance code immediately
+// followed by a copy length code that uses the implicit last-distance reuse
+// alphabet. For copyLen < 72 (the common first-match case on real corpora)
+// both Huffman codes and their extra bits fit in a single 56-bit writeBits
+// call. Folding the two writes into one cuts the bitstream load-modify-store
+// dependency chain in half for the q0 first-match path, mirroring the
+// writeCopyAndDistance fold on the inner-repeat-match loop.
+func (c *fragmentCompressor) writeDistanceAndCopyLenLastDistance(distance, copyLen uint) {
+	if copyLen >= 72 {
+		c.writeDistance(distance)
+		c.writeCopyLenLastDistance(copyLen)
+		return
+	}
+
+	depth := c.arena.cmdDepth[:]
+	cmdBits := c.arena.cmdBits[:]
+	histo := c.arena.cmdHisto[:]
+
+	// Distance: 2*(nbits-1)+prefix+80 ∈ [80,111]; total bits ≤ 15+16 = 31.
+	// Masking shift amounts with 63 lets the compiler elide the variable-shift
+	// safety mask (dNbits ≤ 62, dDepth ≤ 15 in practice).
+	dd := distance + 3
+	dNbits := (uint(bits.Len(dd)) - 2) & 63
+	dPrefix := (dd >> dNbits) & 1
+	dOffset := (2 + dPrefix) << dNbits
+	distcode := 2*(dNbits-1) + dPrefix + 80
+	dDepth := uint(depth[distcode]) & 63
+	dBits := uint64(cmdBits[distcode]) | uint64(dd-dOffset)<<dDepth
+	dLen := dDepth + dNbits
+
+	// Copy length with last-distance reuse: either depth-only (copyLen < 12)
+	// or depth+nbits (≤ 20 bits).
+	var cBits uint64
+	var cLen uint
+	var ccode uint
+	if copyLen < 12 {
+		ccode = copyLen - 4
+		cBits = uint64(cmdBits[ccode])
+		cLen = uint(depth[ccode])
+	} else {
+		tail := copyLen - 8
+		nbits := (uint(bits.Len(tail)) - 2) & 63
+		prefix := tail >> nbits
+		ccode = (nbits << 1) + prefix + 4
+		d := uint(depth[ccode]) & 63
+		cBits = uint64(cmdBits[ccode]) | uint64(tail-(prefix<<nbits))<<d
+		cLen = d + nbits
+	}
+
+	// Combined ≤ 31 + 20 = 51 bits, safely under the 56-bit writeBits limit.
+	c.b.writeBits(dLen+cLen, dBits|cBits<<(dLen&63))
+	histo[ccode]++
+	histo[distcode]++
 }
 
 // writeCopyAndDistance emits the copy length code immediately followed by a
