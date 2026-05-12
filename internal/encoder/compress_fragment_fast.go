@@ -469,12 +469,14 @@ func (c *fragmentCompressor) writeCopyAndDistance(copyLen, distance uint) {
 	histo := c.arena.cmdHisto[:]
 
 	// Distance: 2*(nbits-1)+prefix+80 ∈ [80,111]; total bits ≤ 15+16 = 31.
+	// Masking shift amounts with 63 lets the compiler elide the variable-shift
+	// safety mask (dNbits ≤ 62, dDepth ≤ 15 in practice).
 	dd := distance + 3
-	dNbits := uint(bits.Len(dd)) - 2
+	dNbits := (uint(bits.Len(dd)) - 2) & 63
 	dPrefix := (dd >> dNbits) & 1
 	dOffset := (2 + dPrefix) << dNbits
 	distcode := 2*(dNbits-1) + dPrefix + 80
-	dDepth := uint(depth[distcode])
+	dDepth := uint(depth[distcode]) & 63
 	dBits := uint64(cmdBits[distcode]) | uint64(dd-dOffset)<<dDepth
 	dLen := dDepth + dNbits
 
@@ -488,16 +490,16 @@ func (c *fragmentCompressor) writeCopyAndDistance(copyLen, distance uint) {
 		cLen = uint(depth[ccode])
 	} else {
 		tail := copyLen - 6
-		nbits := uint(bits.Len(tail)) - 2
+		nbits := (uint(bits.Len(tail)) - 2) & 63
 		prefix := tail >> nbits
 		ccode = (nbits << 1) + prefix + 20
-		d := uint(depth[ccode])
+		d := uint(depth[ccode]) & 63
 		cBits = uint64(cmdBits[ccode]) | uint64(tail-(prefix<<nbits))<<d
 		cLen = d + nbits
 	}
 
 	// Combined ≤ 20 + 31 = 51 bits, safely under the 56-bit writeBits limit.
-	c.b.writeBits(cLen+dLen, cBits|dBits<<cLen)
+	c.b.writeBits(cLen+dLen, cBits|dBits<<(cLen&63))
 	histo[ccode]++
 	histo[distcode]++
 }
@@ -588,16 +590,18 @@ func compressFragmentFast(
 // hashFragment computes a hash of the 5 bytes at input[i:i+5], shifted right
 // by shift bits (64 - tableBits). Taking the raw byte slice and index avoids
 // the sub-slice bounds check at the call site in the inner scan loop.
+// `shift & 63` is a no-op (shift ∈ [49, 55]) that lets the compiler elide the
+// variable-shift safety mask.
 func hashFragment(input []byte, i, shift uint) uint32 {
 	h := (loadU64LE(input, i) << 24) * hashMul32
-	return uint32(h >> shift)
+	return uint32(h >> (shift & 63))
 }
 
 // hashBytesAtOffset computes a hash of 5 bytes within a 64-bit value,
 // starting at the given byte offset (0..3).
 func hashBytesAtOffset(v uint64, offset, shift uint) uint32 {
 	h := ((v >> (8 * offset)) << 24) * hashMul32
-	return uint32(h >> shift)
+	return uint32(h >> (shift & 63))
 }
 
 // isMatch returns true if the 5 bytes of input at positions a and b are equal.
