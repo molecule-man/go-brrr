@@ -225,8 +225,7 @@ func (c *fragmentCompressor) writeCommands() {
 			}
 			ip += matched
 			lastDistance = base - candidate
-			c.writeCopyLen(uint(matched))
-			c.writeDistance(uint(lastDistance))
+			c.writeCopyAndDistance(uint(matched), uint(lastDistance))
 
 			c.nextEmit = ip
 			if ip >= ipLimit {
@@ -450,6 +449,56 @@ func (c *fragmentCompressor) writeCopyLenLastDistance(copyLen uint) {
 		histo[39]++
 		histo[64]++
 	}
+}
+
+// writeCopyAndDistance emits the copy length code immediately followed by a
+// distance code. For copyLen < 134 (the common inner-repeat-match case on
+// real corpora) both Huffman codes and their extra bits fit in a single
+// 56-bit writeBits call. Folding the two writes into one cuts the bitstream
+// load-modify-store dependency chain in half for this hot loop iteration.
+func (c *fragmentCompressor) writeCopyAndDistance(copyLen, distance uint) {
+	if copyLen >= 134 {
+		c.writeCopyLen(copyLen)
+		c.writeDistance(distance)
+		return
+	}
+
+	depth := c.arena.cmdDepth[:]
+	cmdBits := c.arena.cmdBits[:]
+	histo := c.arena.cmdHisto[:]
+
+	// Distance: 2*(nbits-1)+prefix+80 ∈ [80,111]; total bits ≤ 15+16 = 31.
+	dd := distance + 3
+	dNbits := uint(bits.Len(dd)) - 2
+	dPrefix := (dd >> dNbits) & 1
+	dOffset := (2 + dPrefix) << dNbits
+	distcode := 2*(dNbits-1) + dPrefix + 80
+	dDepth := uint(depth[distcode])
+	dBits := uint64(cmdBits[distcode]) | uint64(dd-dOffset)<<dDepth
+	dLen := dDepth + dNbits
+
+	// Copy length: either depth-only (copyLen < 10) or depth+nbits (≤ 20 bits).
+	var cBits uint64
+	var cLen uint
+	var ccode uint
+	if copyLen < 10 {
+		ccode = copyLen + 14
+		cBits = uint64(cmdBits[ccode])
+		cLen = uint(depth[ccode])
+	} else {
+		tail := copyLen - 6
+		nbits := uint(bits.Len(tail)) - 2
+		prefix := tail >> nbits
+		ccode = (nbits << 1) + prefix + 20
+		d := uint(depth[ccode])
+		cBits = uint64(cmdBits[ccode]) | uint64(tail-(prefix<<nbits))<<d
+		cLen = d + nbits
+	}
+
+	// Combined ≤ 20 + 31 = 51 bits, safely under the 56-bit writeBits limit.
+	c.b.writeBits(cLen+dLen, cBits|dBits<<cLen)
+	histo[ccode]++
+	histo[distcode]++
 }
 
 // writeDistance writes a distance code to the bitstream.
