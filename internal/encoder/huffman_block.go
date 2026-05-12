@@ -28,9 +28,18 @@ type huffmanBlock struct {
 //  3. The distance symbol + extra bits (if the command has a backward reference)
 func (block huffmanBlock) writeData(b *bitWriter) { //nolint:gocritic // stack copy avoids heap escape; called once per metablock
 	pos := block.startPos
+	// Hoist b.bitOffset and b.buf to locals across the whole loop. Each
+	// writeBits call reads and writes b.bitOffset and re-derives the buffer
+	// base pointer; the compiler can't keep them in registers across calls
+	// because the writes into b.buf could in theory alias the bitWriter
+	// fields. Holding them locally collapses 4–5 redundant load/stores per
+	// command into a single load at entry and store at exit.
+	buf := b.buf
+	bitOffset := b.bitOffset
 	for _, cmd := range block.commands {
 		cmdCode := cmd.cmdPrefix
-		b.writeBits(uint(block.cmdDepth[cmdCode]), uint64(block.cmdBits[cmdCode]))
+		bitOffset = writeBitsAt(buf, bitOffset,
+			uint(block.cmdDepth[cmdCode]), uint64(block.cmdBits[cmdCode]))
 		// Use the command prefix lookup table to avoid recomputing the
 		// insert/copy length prefix classes for every command.
 		{
@@ -43,7 +52,8 @@ func (block huffmanBlock) writeData(b *bitWriter) { //nolint:gocritic // stack c
 			}
 			effCopyLen := uint(copyLenCode)
 			insNumExtra := lut.InsertLenExtraBits
-			b.writeBits(uint(insNumExtra+lut.CopyLenExtraBits),
+			bitOffset = writeBitsAt(buf, bitOffset,
+				uint(insNumExtra+lut.CopyLenExtraBits),
 				((uint64(effCopyLen)-uint64(lut.CopyLenOffset))<<insNumExtra)|
 					(uint64(cmd.insertLen)-uint64(lut.InsertLenOffset)))
 		}
@@ -59,7 +69,7 @@ func (block huffmanBlock) writeData(b *bitWriter) { //nolint:gocritic // stack c
 			pos++
 			j--
 			if j == 0 {
-				b.writeBits(n0, v0)
+				bitOffset = writeBitsAt(buf, bitOffset, n0, v0)
 				break
 			}
 			lit1 := block.input[pos&block.mask]
@@ -68,14 +78,15 @@ func (block huffmanBlock) writeData(b *bitWriter) { //nolint:gocritic // stack c
 			pos++
 			j--
 			if j == 0 {
-				b.writeBits(n0+n1, v0|v1<<n0)
+				bitOffset = writeBitsAt(buf, bitOffset, n0+n1, v0|v1<<n0)
 				break
 			}
 			lit2 := block.input[pos&block.mask]
 			n2 := uint(block.litDepth[lit2])
 			pos++
 			j--
-			b.writeBits(n0+n1+n2, v0|v1<<n0|uint64(block.litBits[lit2])<<(n0+n1))
+			bitOffset = writeBitsAt(buf, bitOffset, n0+n1+n2,
+				v0|v1<<n0|uint64(block.litBits[lit2])<<(n0+n1))
 		}
 		copyLen := cmd.copyLength()
 		pos += uint(copyLen)
@@ -85,8 +96,9 @@ func (block huffmanBlock) writeData(b *bitWriter) { //nolint:gocritic // stack c
 			distNumExtra := uint(cmd.distExtraBitsLen())
 			// Merge the distance Huffman code and its extra bits into one
 			// writeBits call. distBitsLen ≤ 15, distNumExtra ≤ ~24, total ≤ 39 bits.
-			b.writeBits(distBitsLen+distNumExtra,
+			bitOffset = writeBitsAt(buf, bitOffset, distBitsLen+distNumExtra,
 				uint64(block.distBits[distCode])|(uint64(cmd.distExtra)<<distBitsLen))
 		}
 	}
+	b.bitOffset = bitOffset
 }

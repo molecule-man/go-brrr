@@ -32,6 +32,22 @@ func (b *bitWriter) writeBits(nbits uint, value uint64) {
 	b.bitOffset += nbits
 }
 
+// writeBitsAt is the variant of writeBits used by hot loops (huffmanBlock.
+// writeData) that keep both the output buffer and the bit position in
+// locals across many calls. It takes the buffer and current bitOffset and
+// returns the updated bitOffset, so the caller can hold the slice header and
+// the offset in registers instead of round-tripping them through the
+// bitWriter on every writeBits.
+//
+//go:nosplit
+func writeBitsAt(buf []byte, bitOffset, nbits uint, value uint64) uint {
+	bytePos := bitOffset >> 3
+	bitOff := bitOffset & 7
+	p := (*uint64)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(buf)), bytePos))
+	*p = uint64(*(*byte)(unsafe.Pointer(p))) | value<<bitOff
+	return bitOffset + nbits
+}
+
 func (b *bitWriter) writeLiteralBits(input []byte, depths *[256]byte, bits *[256]uint16) {
 	bufBase := unsafe.Pointer(unsafe.SliceData(b.buf))
 	bitOffset := b.bitOffset
