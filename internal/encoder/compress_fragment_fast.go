@@ -150,7 +150,11 @@ func (c *fragmentCompressor) writeCommands() {
 			nextHash = hashFragment(input, uint(nextIP), shift)
 
 			candidate = ip - lastDistance
-			if candidate >= 0 && candidate < ip && isMatch(input, uint(ip), uint(candidate)) {
+			// uint(candidate) < uint(ip) folds the two-step `candidate >= 0 &&
+			// candidate < ip` validity check into a single unsigned compare:
+			// when candidate is negative (initial state) its unsigned form is
+			// larger than uint(ip), so the compare fails.
+			if uint(candidate) < uint(ip) && isMatch(input, uint(ip), uint(candidate)) {
 				table[hash] = uint32(ip - baseIP)
 				if ip-candidate <= maxDistance {
 					break
