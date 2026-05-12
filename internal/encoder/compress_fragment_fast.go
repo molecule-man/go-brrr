@@ -6,6 +6,7 @@ package encoder
 
 import (
 	"math/bits"
+	"unsafe"
 
 	"github.com/molecule-man/go-brrr/internal/core"
 )
@@ -526,18 +527,24 @@ func (c *fragmentCompressor) writeUncompressedMetaBlock(data []byte, startBitOff
 	c.b.writeUncompressedMetaBlock(data)
 }
 
-// updateHashTable updates the hash table with positions from the last copy and returns the next candidate.
+// updateHashTable updates the hash table with positions from the last copy
+// and returns the next candidate. The hash values returned by hashBytesAtOffset
+// are < 2^tableBits ≤ len(table) for q0 (whose table size is always a power
+// of two), so unsafe pointer indexing is safe and skips the five per-access
+// bounds checks on this hot path.
 func updateHashTable(input []byte, table []uint32, ip, baseIP int, shift uint) int {
+	tbl := unsafe.Pointer(unsafe.SliceData(table))
 	inputBytes := loadU64LE(input, uint(ip-3))
 	prevHash := hashBytesAtOffset(inputBytes, 0, shift)
 	curHash := hashBytesAtOffset(inputBytes, 3, shift)
-	table[prevHash] = uint32(ip - baseIP - 3)
+	*(*uint32)(unsafe.Add(tbl, uintptr(prevHash)*4)) = uint32(ip - baseIP - 3)
 	prevHash = hashBytesAtOffset(inputBytes, 1, shift)
-	table[prevHash] = uint32(ip - baseIP - 2)
+	*(*uint32)(unsafe.Add(tbl, uintptr(prevHash)*4)) = uint32(ip - baseIP - 2)
 	prevHash = hashBytesAtOffset(inputBytes, 2, shift)
-	table[prevHash] = uint32(ip - baseIP - 1)
-	candidate := baseIP + int(table[curHash])
-	table[curHash] = uint32(ip - baseIP)
+	*(*uint32)(unsafe.Add(tbl, uintptr(prevHash)*4)) = uint32(ip - baseIP - 1)
+	curPtr := (*uint32)(unsafe.Add(tbl, uintptr(curHash)*4))
+	candidate := baseIP + int(*curPtr)
+	*curPtr = uint32(ip - baseIP)
 	return candidate
 }
 
