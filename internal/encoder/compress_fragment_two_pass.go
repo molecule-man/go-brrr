@@ -32,6 +32,14 @@ var insertOffset = [24]uint{
 	34, 50, 66, 98, 130, 194, 322, 578, 1090, 2114, 6210, 22594,
 }
 
+var copyLenCodeSmall = func() [134]uint32 {
+	var codes [134]uint32
+	for copyLen := range codes {
+		codes[copyLen] = encodeCopyLenCode(uint(copyLen))
+	}
+	return codes
+}()
+
 type twoPassCompressor struct {
 	arena      *twoPassArena
 	b          *bitWriter
@@ -211,7 +219,8 @@ func (c *twoPassCompressor) createCommands(
 					input[candidate+minMatch:], input[ip+minMatch:], ipEnd-ip-minMatch)
 				ip += matched
 				lastDistance = base - candidate
-				cmdPos += encodeCopyLen(commands[cmdPos:], uint(matched))
+				encodeCopyLen(commands[cmdPos:], uint(matched))
+				cmdPos++
 				cmdPos += encodeDistance(commands[cmdPos:], uint(lastDistance))
 
 				nextEmit = ip
@@ -354,7 +363,8 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 					input, uint(candidate+minMatch), uint(ip+minMatch), ipEnd-ip-minMatch)
 				ip += matched
 				lastDistance = base - candidate
-				cmdPos += encodeCopyLen(commands[cmdPos:], uint(matched))
+				encodeCopyLen(commands[cmdPos:], uint(matched))
+				cmdPos++
 				cmdPos += encodeDistance(commands[cmdPos:], uint(lastDistance))
 
 				nextEmit = ip
@@ -602,30 +612,36 @@ func encodeInsertLen(commands []uint32, insertLen uint) int {
 	return 1
 }
 
-// encodeCopyLen encodes a copy length command into commands and returns
-// the number of command slots used (always 1).
-func encodeCopyLen(commands []uint32, copyLen uint) int {
+// encodeCopyLen encodes a copy length command into commands.
+func encodeCopyLen(commands []uint32, copyLen uint) {
+	if copyLen < uint(len(copyLenCodeSmall)) {
+		commands[0] = copyLenCodeSmall[copyLen]
+		return
+	}
+	commands[0] = encodeCopyLenCode(copyLen)
+}
+
+func encodeCopyLenCode(copyLen uint) uint32 {
 	switch {
 	case copyLen < 10:
-		commands[0] = uint32(copyLen + 38)
+		return uint32(copyLen + 38)
 	case copyLen < 134:
 		tail := copyLen - 6
 		nbits := uint(bits.Len(tail)) - 2
 		prefix := tail >> nbits
 		code := (nbits << 1) + prefix + 44
 		extra := tail - (prefix << nbits)
-		commands[0] = uint32(code) | uint32(extra)<<8
+		return uint32(code) | uint32(extra)<<8
 	case copyLen < 2118:
 		tail := copyLen - 70
 		nbits := uint(bits.Len(tail)) - 1
 		code := nbits + 52
 		extra := tail - (1 << nbits)
-		commands[0] = uint32(code) | uint32(extra)<<8
+		return uint32(code) | uint32(extra)<<8
 	default:
 		extra := copyLen - 2118
-		commands[0] = 63 | uint32(extra)<<8
+		return 63 | uint32(extra)<<8
 	}
-	return 1
 }
 
 // encodeCopyLenLastDistance encodes a copy-with-last-distance command into
