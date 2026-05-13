@@ -18,7 +18,8 @@ const (
 	hashTypeLength = 8
 
 	// hashMul64 is the 64-bit hash multiplier from hash_base.h.
-	hashMul64 = 0x1FE35A7BD3579BD3
+	hashMul64        = 0x1FE35A7BD3579BD3
+	hashMul64Shifted = 0x7BD3579BD3000000 // hashMul64 << 24, truncated to 64 bits.
 )
 
 // Backward reference scoring constants from hash.h.
@@ -58,7 +59,7 @@ type streamHasher interface {
 // The caller must ensure len(data) >= offset+8.
 func hashBytes(data []byte, offset uint) uint32 {
 	v := loadU64LE(data, offset)
-	h := (v << (64 - 8*hashLen)) * hashMul64
+	h := v * hashMul64Shifted
 	return uint32(h >> (64 - bucketBits))
 }
 
