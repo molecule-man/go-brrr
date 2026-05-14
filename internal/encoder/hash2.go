@@ -3,7 +3,11 @@
 
 package encoder
 
-import "github.com/molecule-man/go-brrr/internal/core"
+import (
+	"math/bits"
+
+	"github.com/molecule-man/go-brrr/internal/core"
+)
 
 // h2 is the H2 hasher: a forgetful hash table of fixed size that maps
 // 5-byte sequences to positions. Each bucket stores a single uint32 position.
@@ -429,8 +433,12 @@ func (h *h2) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos ui
 		var dictEligible bool
 		{
 			lastDistance := s.distCache[0]
-			guardByte := loadByte(data, position)
-			key := hashBytes(data, position)
+			// Load curWord once and derive guardByte and the hash from it,
+			// then reuse it as the b-side first chunk in the inlined match
+			// loops below — saves one loadU64LE per match probe.
+			curWord := loadU64LE(data, position)
+			guardByte := byte(curWord)
+			key := uint32((curWord * hashMul64Shifted) >> (64 - bucketBits))
 			bestScore := sr.score
 
 			lastDistanceHit := false
@@ -438,7 +446,16 @@ func (h *h2) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos ui
 				prev := position - lastDistance
 				if prev < position {
 					if guardByte == loadByte(data, prev) {
-						length := matchLenAt(data, prev, position, int(maxLength))
+						// Inline first 8-byte chunk of matchLenAt, reusing
+						// curWord. Short matches return without entering the
+						// matchLenAt tail.
+						length := 0
+						xor := loadU64LE(data, prev) ^ curWord
+						if xor != 0 {
+							length = bits.TrailingZeros64(xor) / 8
+						} else {
+							length = 8 + matchLenAt(data, prev+8, position+8, int(maxLength)-8)
+						}
 						if length >= 4 {
 							score := backwardReferenceScoreUsingLastDistance(uint(length))
 							if bestScore < score {
@@ -459,7 +476,13 @@ func (h *h2) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos ui
 				backward := position - prev
 				if guardByte == loadByte(data, prev) && backward != 0 && backward <= maxDistance {
 					dictEligible = true
-					length := matchLenAt(data, prev, position, int(maxLength))
+					length := 0
+					xor := loadU64LE(data, prev) ^ curWord
+					if xor != 0 {
+						length = bits.TrailingZeros64(xor) / 8
+					} else {
+						length = 8 + matchLenAt(data, prev+8, position+8, int(maxLength)-8)
+					}
 					if length >= 4 {
 						score := backwardReferenceScore(uint(length), backward)
 						if bestScore < score {
@@ -498,7 +521,10 @@ func (h *h2) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos ui
 					lastDistance := s.distCache[0]
 					bestLen := sr2.len
 					guardByte := loadByte(data, cur2+bestLen)
-					key := hashBytes(data, cur2)
+					// curWord is the 8 bytes at cur2; reuse it for the hash and
+					// for the b-side first chunk in the inlined match loops.
+					curWord := loadU64LE(data, cur2)
+					key := uint32((curWord * hashMul64Shifted) >> (64 - bucketBits))
 					bestScore := sr2.score
 
 					lastDistanceHit := false
@@ -506,7 +532,13 @@ func (h *h2) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos ui
 						prev := cur2 - lastDistance
 						if prev < cur2 {
 							if guardByte == loadByte(data, prev+bestLen) {
-								length := matchLenAt(data, prev, cur2, int(maxLength))
+								length := 0
+								xor := loadU64LE(data, prev) ^ curWord
+								if xor != 0 {
+									length = bits.TrailingZeros64(xor) / 8
+								} else {
+									length = 8 + matchLenAt(data, prev+8, cur2+8, int(maxLength)-8)
+								}
 								if length >= 4 {
 									score := backwardReferenceScoreUsingLastDistance(uint(length))
 									if bestScore < score {
@@ -527,7 +559,13 @@ func (h *h2) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos ui
 						backward := cur2 - prev
 						if guardByte == loadByte(data, prev+bestLen) && backward != 0 && backward <= maxDistance {
 							dictEligible2 = true
-							length := matchLenAt(data, prev, cur2, int(maxLength))
+							length := 0
+							xor := loadU64LE(data, prev) ^ curWord
+							if xor != 0 {
+								length = bits.TrailingZeros64(xor) / 8
+							} else {
+								length = 8 + matchLenAt(data, prev+8, cur2+8, int(maxLength)-8)
+							}
 							if length >= 4 {
 								score := backwardReferenceScore(uint(length), backward)
 								if bestScore < score {
