@@ -216,7 +216,11 @@ func (c *fragmentCompressor) writeCommands() {
 			candidate = updateHashTable(input, table, ip, baseIP, shift)
 		}
 
-		// Try to find another match immediately.
+		// Try to find another match immediately. writeCopyAndDistance is
+		// inlined here so the inner-repeat-match loop's hottest call site
+		// avoids per-iteration prologue/epilogue overhead. The function is
+		// otherwise too large to inline automatically (cost ~400 vs the
+		// 80-instruction budget) yet it's the only caller.
 		for isMatch(input, uint(ip), uint(candidate)) {
 			base := ip
 			matched := 5 + matchLenAt(
@@ -226,7 +230,49 @@ func (c *fragmentCompressor) writeCommands() {
 			}
 			ip += matched
 			lastDistance = base - candidate
-			c.writeCopyAndDistance(uint(matched), uint(lastDistance))
+			distance := uint(lastDistance)
+			copyLen := uint(matched)
+			if copyLen >= 134 {
+				c.writeCopyLen(copyLen)
+				c.writeDistance(distance)
+			} else {
+				depth := c.arena.cmdDepth[:]
+				cmdBits := c.arena.cmdBits[:]
+				histo := c.arena.cmdHisto[:]
+
+				// Distance: 2*(nbits-1)+prefix+80 ∈ [80,111]; total ≤ 31 bits.
+				dd := distance + 3
+				dNbits := (uint(bits.Len(dd)) - 2) & 63
+				dPrefix := (dd >> dNbits) & 1
+				dOffset := (2 + dPrefix) << dNbits
+				distcode := 2*(dNbits-1) + dPrefix + 80
+				dDepth := uint(depth[distcode]) & 63
+				dBits := uint64(cmdBits[distcode]) | uint64(dd-dOffset)<<dDepth
+				dLen := dDepth + dNbits
+
+				// Copy length: depth-only when copyLen < 10, else depth+nbits.
+				var cBits uint64
+				var cLen uint
+				var ccode uint
+				if copyLen < 10 {
+					ccode = copyLen + 14
+					cBits = uint64(cmdBits[ccode])
+					cLen = uint(depth[ccode])
+				} else {
+					tail := copyLen - 6
+					nbits := (uint(bits.Len(tail)) - 2) & 63
+					prefix := tail >> nbits
+					ccode = (nbits << 1) + prefix + 20
+					d := uint(depth[ccode]) & 63
+					cBits = uint64(cmdBits[ccode]) | uint64(tail-(prefix<<nbits))<<d
+					cLen = d + nbits
+				}
+
+				// Combined ≤ 51 bits, safely under the 56-bit writeBits limit.
+				c.b.writeBits(cLen+dLen, cBits|dBits<<(cLen&63))
+				histo[ccode]++
+				histo[distcode]++
+			}
 
 			c.nextEmit = ip
 			if ip >= ipLimit {
@@ -458,7 +504,7 @@ func (c *fragmentCompressor) writeCopyLenLastDistance(copyLen uint) {
 // both Huffman codes and their extra bits fit in a single 56-bit writeBits
 // call. Folding the two writes into one cuts the bitstream load-modify-store
 // dependency chain in half for the q0 first-match path, mirroring the
-// writeCopyAndDistance fold on the inner-repeat-match loop.
+// inner-repeat-match fold inlined directly into writeCommands.
 func (c *fragmentCompressor) writeDistanceAndCopyLenLastDistance(distance, copyLen uint) {
 	if copyLen >= 72 {
 		c.writeDistance(distance)
@@ -503,58 +549,6 @@ func (c *fragmentCompressor) writeDistanceAndCopyLenLastDistance(distance, copyL
 
 	// Combined ≤ 31 + 20 = 51 bits, safely under the 56-bit writeBits limit.
 	c.b.writeBits(dLen+cLen, dBits|cBits<<(dLen&63))
-	histo[ccode]++
-	histo[distcode]++
-}
-
-// writeCopyAndDistance emits the copy length code immediately followed by a
-// distance code. For copyLen < 134 (the common inner-repeat-match case on
-// real corpora) both Huffman codes and their extra bits fit in a single
-// 56-bit writeBits call. Folding the two writes into one cuts the bitstream
-// load-modify-store dependency chain in half for this hot loop iteration.
-func (c *fragmentCompressor) writeCopyAndDistance(copyLen, distance uint) {
-	if copyLen >= 134 {
-		c.writeCopyLen(copyLen)
-		c.writeDistance(distance)
-		return
-	}
-
-	depth := c.arena.cmdDepth[:]
-	cmdBits := c.arena.cmdBits[:]
-	histo := c.arena.cmdHisto[:]
-
-	// Distance: 2*(nbits-1)+prefix+80 ∈ [80,111]; total bits ≤ 15+16 = 31.
-	// Masking shift amounts with 63 lets the compiler elide the variable-shift
-	// safety mask (dNbits ≤ 62, dDepth ≤ 15 in practice).
-	dd := distance + 3
-	dNbits := (uint(bits.Len(dd)) - 2) & 63
-	dPrefix := (dd >> dNbits) & 1
-	dOffset := (2 + dPrefix) << dNbits
-	distcode := 2*(dNbits-1) + dPrefix + 80
-	dDepth := uint(depth[distcode]) & 63
-	dBits := uint64(cmdBits[distcode]) | uint64(dd-dOffset)<<dDepth
-	dLen := dDepth + dNbits
-
-	// Copy length: either depth-only (copyLen < 10) or depth+nbits (≤ 20 bits).
-	var cBits uint64
-	var cLen uint
-	var ccode uint
-	if copyLen < 10 {
-		ccode = copyLen + 14
-		cBits = uint64(cmdBits[ccode])
-		cLen = uint(depth[ccode])
-	} else {
-		tail := copyLen - 6
-		nbits := (uint(bits.Len(tail)) - 2) & 63
-		prefix := tail >> nbits
-		ccode = (nbits << 1) + prefix + 20
-		d := uint(depth[ccode]) & 63
-		cBits = uint64(cmdBits[ccode]) | uint64(tail-(prefix<<nbits))<<d
-		cLen = d + nbits
-	}
-
-	// Combined ≤ 20 + 31 = 51 bits, safely under the 56-bit writeBits limit.
-	c.b.writeBits(cLen+dLen, cBits|dBits<<(cLen&63))
 	histo[ccode]++
 	histo[distcode]++
 }
