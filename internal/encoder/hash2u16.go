@@ -317,9 +317,23 @@ func (h *h2u16) createBackwardReferences(s *encodeState, bytes, wrappedPos uint3
 				rangeStart = min(rangeEnd, max(rangeStart, position+sr.len-(sr.distance<<2)))
 			}
 			if directStoreRange {
-				for i := rangeStart; i < rangeEnd; i++ {
-					key := hashBytes(data, i&mask)
-					buckets[key] = uint16(i)
+				if rangeEnd >= rangeStart+4 {
+					last := rangeEnd - 4
+					i := rangeStart
+					for ; i < last; i += 4 {
+						buckets[hashBytes(data, i&mask)] = uint16(i)
+						buckets[hashBytes(data, (i+1)&mask)] = uint16(i + 1)
+						buckets[hashBytes(data, (i+2)&mask)] = uint16(i + 2)
+						buckets[hashBytes(data, (i+3)&mask)] = uint16(i + 3)
+					}
+					buckets[hashBytes(data, last&mask)] = uint16(last)
+					buckets[hashBytes(data, (last+1)&mask)] = uint16(last + 1)
+					buckets[hashBytes(data, (last+2)&mask)] = uint16(last + 2)
+					buckets[hashBytes(data, (last+3)&mask)] = uint16(last + 3)
+				} else {
+					for i := rangeStart; i < rangeEnd; i++ {
+						buckets[hashBytes(data, i&mask)] = uint16(i)
+					}
 				}
 			} else {
 				h.storeRange(data, mask, rangeStart, rangeEnd)
