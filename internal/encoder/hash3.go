@@ -3,7 +3,11 @@
 
 package encoder
 
-import "github.com/molecule-man/go-brrr/internal/core"
+import (
+	"math/bits"
+
+	"github.com/molecule-man/go-brrr/internal/core"
+)
 
 // H3-specific configuration constants.
 const (
@@ -500,7 +504,18 @@ func (h *h3) createBackwardReferencesNoCompoundNoWrap(s *encodeState, bytes, wra
 				prev := position - lastDistance
 				if prev < position && lastDistance <= maxDistance {
 					if guardByte == loadByte(data, prev+bestLen) {
-						length := matchLenAt(data, prev, curMasked, int(maxLength))
+						// Manually inline first 8-byte chunk of matchLenAt,
+						// reusing curWord (= loadU64LE(data, curMasked)) instead
+						// of issuing a second load for the b side. Short matches
+						// (< 8 bytes) return without a function call to the
+						// matchLenAt tail.
+						length := 0
+						xor := loadU64LE(data, prev) ^ curWord
+						if xor != 0 {
+							length = bits.TrailingZeros64(xor) / 8
+						} else {
+							length = 8 + matchLenAt(data, prev+8, curMasked+8, int(maxLength)-8)
+						}
 						if length >= 4 {
 							score := backwardReferenceScoreUsingLastDistance(uint(length))
 							if bestScore < score {
@@ -519,7 +534,13 @@ func (h *h3) createBackwardReferencesNoCompoundNoWrap(s *encodeState, bytes, wra
 			{
 				backward := position - prev0
 				if guardByte == loadByte(data, prev0+bestLen) && backward != 0 && backward <= maxDistance {
-					length := matchLenAt(data, prev0, curMasked, int(maxLength))
+					length := 0
+					xor := loadU64LE(data, prev0) ^ curWord
+					if xor != 0 {
+						length = bits.TrailingZeros64(xor) / 8
+					} else {
+						length = 8 + matchLenAt(data, prev0+8, curMasked+8, int(maxLength)-8)
+					}
 					if length >= 4 {
 						score := backwardReferenceScore(uint(length), backward)
 						if bestScore < score {
@@ -537,7 +558,13 @@ func (h *h3) createBackwardReferencesNoCompoundNoWrap(s *encodeState, bytes, wra
 			{
 				backward := position - prev1
 				if guardByte == loadByte(data, prev1+bestLen) && backward != 0 && backward <= maxDistance {
-					length := matchLenAt(data, prev1, curMasked, int(maxLength))
+					length := 0
+					xor := loadU64LE(data, prev1) ^ curWord
+					if xor != 0 {
+						length = bits.TrailingZeros64(xor) / 8
+					} else {
+						length = 8 + matchLenAt(data, prev1+8, curMasked+8, int(maxLength)-8)
+					}
 					if length >= 4 {
 						score := backwardReferenceScore(uint(length), backward)
 						if bestScore < score {
