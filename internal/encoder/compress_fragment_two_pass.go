@@ -211,6 +211,8 @@ func (c *twoPassCompressor) createCommands(
 					input[candidate+minMatch:], input[ip+minMatch:], ipEnd-ip-minMatch)
 				ip += matched
 				lastDistance = base - candidate
+
+				// manually inlined encodeCopyLen
 				switch cl := uint(matched); {
 				case cl < 10:
 					commands[cmdPos] = uint32(cl + 38)
@@ -232,6 +234,7 @@ func (c *twoPassCompressor) createCommands(
 					commands[cmdPos] = 63 | uint32(extra)<<8
 				}
 				cmdPos++
+
 				cmdPos += encodeDistance(commands[cmdPos:], uint(lastDistance))
 
 				nextEmit = ip
@@ -374,6 +377,8 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 					input, uint(candidate+minMatch), uint(ip+minMatch), ipEnd-ip-minMatch)
 				ip += matched
 				lastDistance = base - candidate
+
+				// manually inlined encodeCopyLen
 				switch cl := uint(matched); {
 				case cl < 10:
 					commands[cmdPos] = uint32(cl + 38)
@@ -395,6 +400,7 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 					commands[cmdPos] = 63 | uint32(extra)<<8
 				}
 				cmdPos++
+
 				cmdPos += encodeDistance(commands[cmdPos:], uint(lastDistance))
 
 				nextEmit = ip
