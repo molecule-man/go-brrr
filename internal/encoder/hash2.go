@@ -604,15 +604,23 @@ func (h *h2) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos ui
 				rangeStart = min(rangeEnd, max(rangeStart, position+sr.len-(sr.distance<<2)))
 			}
 			if directStoreRange {
-				i := rangeStart
-				for ; i+3 < rangeEnd; i += 4 {
-					buckets[hashBytes(data, i)] = uint32(i)
-					buckets[hashBytes(data, i+1)] = uint32(i + 1)
-					buckets[hashBytes(data, i+2)] = uint32(i + 2)
-					buckets[hashBytes(data, i+3)] = uint32(i + 3)
-				}
-				for ; i < rangeEnd; i++ {
-					buckets[hashBytes(data, i)] = uint32(i)
+				if rangeEnd >= rangeStart+4 {
+					last := rangeEnd - 4
+					i := rangeStart
+					for ; i < last; i += 4 {
+						buckets[hashBytes(data, i)] = uint32(i)
+						buckets[hashBytes(data, i+1)] = uint32(i + 1)
+						buckets[hashBytes(data, i+2)] = uint32(i + 2)
+						buckets[hashBytes(data, i+3)] = uint32(i + 3)
+					}
+					buckets[hashBytes(data, last)] = uint32(last)
+					buckets[hashBytes(data, last+1)] = uint32(last + 1)
+					buckets[hashBytes(data, last+2)] = uint32(last + 2)
+					buckets[hashBytes(data, last+3)] = uint32(last + 3)
+				} else {
+					for i := rangeStart; i < rangeEnd; i++ {
+						buckets[hashBytes(data, i)] = uint32(i)
+					}
 				}
 			} else {
 				h.storeRangeNoWrap(data, rangeStart, rangeEnd)
