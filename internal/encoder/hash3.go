@@ -728,10 +728,21 @@ func (h *h3) createBackwardReferencesNoCompoundNoWrap(s *encodeState, bytes, wra
 			if sr.distance < sr.len>>2 {
 				rangeStart = min(rangeEnd, max(rangeStart, position+sr.len-(sr.distance<<2)))
 			}
-			for i := rangeStart; i < rangeEnd; i++ {
-				key := hashBytes(data, i)
-				off := uint32(i) & h3BucketSweepMsk
-				buckets[(key+off)&bucketMask] = uint32(i)
+			if rangeEnd >= rangeStart+2 {
+				last := rangeEnd - 2
+				i := rangeStart
+				for ; i < last; i += 2 {
+					buckets[(hashBytes(data, i)+uint32(i)&h3BucketSweepMsk)&bucketMask] = uint32(i)
+					buckets[(hashBytes(data, i+1)+uint32(i+1)&h3BucketSweepMsk)&bucketMask] = uint32(i + 1)
+				}
+				buckets[(hashBytes(data, last)+uint32(last)&h3BucketSweepMsk)&bucketMask] = uint32(last)
+				buckets[(hashBytes(data, last+1)+uint32(last+1)&h3BucketSweepMsk)&bucketMask] = uint32(last + 1)
+			} else {
+				for i := rangeStart; i < rangeEnd; i++ {
+					key := hashBytes(data, i)
+					off := uint32(i) & h3BucketSweepMsk
+					buckets[(key+off)&bucketMask] = uint32(i)
+				}
 			}
 
 			position += sr.len
