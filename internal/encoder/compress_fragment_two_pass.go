@@ -5,7 +5,10 @@ package encoder
 // buffers. In the second pass, they are emitted into the bitstream using
 // prefix codes built from actual command and literal histograms.
 
-import "math/bits"
+import (
+	"math/bits"
+	"unsafe"
+)
 
 const twoPassBlockSize = 1 << 17
 
@@ -505,9 +508,11 @@ func (c *twoPassCompressor) writeCommands(literals []byte, commands []uint32) {
 	c.b.buildAndWriteHuffmanTreeFast(s.tree[:], s.litHisto[:],
 		uint(len(literals)), 8, s.litDepth[:], s.litBits[:])
 
-	// Build command histogram and Huffman code.
+	// Build command histogram and Huffman code. Mask with 0x7F (rather
+	// than 0xFF) so the compiler can prove `code < 128` and drop the
+	// bounds check on s.cmdHisto, which is [128]uint32.
 	for _, cmd := range commands {
-		code := cmd & 0xFF
+		code := cmd & 0x7F
 		s.cmdHisto[code]++
 	}
 	// Ensure some baseline counts for codes that must exist.
@@ -517,22 +522,70 @@ func (c *twoPassCompressor) writeCommands(literals []byte, commands []uint32) {
 	s.cmdHisto[84]++
 	s.buildAndWriteCommandPrefixCode(b)
 
-	// Emit commands and interleaved literals.
+	// Emit commands and interleaved literals. Inline writeBits with both
+	// bitOffset and the buffer base pointer hoisted to locals so the
+	// compiler can keep them in registers across iterations; the regular
+	// b.writeBits cannot avoid reloading b.bitOffset and re-deriving the
+	// buffer base on every call because writes into b.buf could alias the
+	// bitWriter fields. Literals are packed three at a time into a single
+	// write — the literal Huffman tree is built with a depth limit of 14
+	// (set in encodeHuffmanTree), so 3 codes total at most 42 bits, well
+	// within the 56-bit writeBits limit. This cuts the literal-stream
+	// writeBits call count by ~3x in the common case.
+	bufBase := unsafe.Pointer(unsafe.SliceData(b.buf))
+	bitOffset := b.bitOffset
 	litIdx := 0
 	for _, cmd := range commands {
-		code := byte(cmd)
+		// Brotli insert-and-copy command codes are in [0, 128); masking
+		// lets the compiler drop the bounds checks on cmdDepth/cmdBits/
+		// numExtraBits which would otherwise hit on every iteration.
+		code := uint(cmd) & 0x7F
 		extra := uint64(cmd >> 8)
 		depth := uint(cmdDepth[code])
-		b.writeBits(depth+numExtraBits[code], uint64(cmdBits[code])|extra<<depth)
+		{
+			nbits := depth + numExtraBits[code]
+			value := uint64(cmdBits[code]) | extra<<depth
+			p := (*uint64)(unsafe.Add(bufBase, bitOffset>>3))
+			*p = uint64(*(*byte)(unsafe.Pointer(p))) | value<<(bitOffset&7)
+			bitOffset += nbits
+		}
 		if code < 24 {
-			nextLitIdx := litIdx + int(insertOffset[code]) + int(extra)
-			for litIdx < nextLitIdx {
-				lit := literals[litIdx]
-				b.writeBits(uint(litDepth[lit]), uint64(litBits[lit]))
+			j := int(insertOffset[code]) + int(extra)
+			for j > 0 {
+				lit0 := literals[litIdx]
+				n0 := uint(litDepth[lit0])
+				v0 := uint64(litBits[lit0])
 				litIdx++
+				j--
+				if j == 0 {
+					p := (*uint64)(unsafe.Add(bufBase, bitOffset>>3))
+					*p = uint64(*(*byte)(unsafe.Pointer(p))) | v0<<(bitOffset&7)
+					bitOffset += n0
+					break
+				}
+				lit1 := literals[litIdx]
+				n1 := uint(litDepth[lit1])
+				v1 := uint64(litBits[lit1])
+				litIdx++
+				j--
+				if j == 0 {
+					p := (*uint64)(unsafe.Add(bufBase, bitOffset>>3))
+					*p = uint64(*(*byte)(unsafe.Pointer(p))) | (v0|v1<<n0)<<(bitOffset&7)
+					bitOffset += n0 + n1
+					break
+				}
+				lit2 := literals[litIdx]
+				n2 := uint(litDepth[lit2])
+				v2 := uint64(litBits[lit2])
+				litIdx++
+				j--
+				p := (*uint64)(unsafe.Add(bufBase, bitOffset>>3))
+				*p = uint64(*(*byte)(unsafe.Pointer(p))) | (v0|v1<<n0|v2<<(n0+n1))<<(bitOffset&7)
+				bitOffset += n0 + n1 + n2
 			}
 		}
 	}
+	b.bitOffset = bitOffset
 }
 
 // shouldCompress decides whether to use compressed or uncompressed mode
