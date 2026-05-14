@@ -73,12 +73,6 @@ func (h *h2u16) storeNoWrap(data []byte, pos uint) {
 	h.buckets[key] = uint16(pos)
 }
 
-func (h *h2u16) storeRangeNoWrap(data []byte, start, end uint) {
-	for i := start; i < end; i++ {
-		h.storeNoWrap(data, i)
-	}
-}
-
 // stitchToPreviousBlock seeds the hash table with the last 3 positions of
 // the previous block so that cross-block matches can be found.
 func (h *h2u16) stitchToPreviousBlock(numBytes, position uint, ringBuffer []byte, ringBufferMask uint) {
@@ -579,7 +573,24 @@ func (h *h2u16) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos
 			if sr.distance < sr.len>>2 {
 				rangeStart = min(rangeEnd, max(rangeStart, position+sr.len-(sr.distance<<2)))
 			}
-			h.storeRangeNoWrap(data, rangeStart, rangeEnd)
+			if rangeEnd >= rangeStart+4 {
+				last := rangeEnd - 4
+				i := rangeStart
+				for ; i < last; i += 4 {
+					buckets[hashBytes(data, i)] = uint16(i)
+					buckets[hashBytes(data, i+1)] = uint16(i + 1)
+					buckets[hashBytes(data, i+2)] = uint16(i + 2)
+					buckets[hashBytes(data, i+3)] = uint16(i + 3)
+				}
+				buckets[hashBytes(data, last)] = uint16(last)
+				buckets[hashBytes(data, last+1)] = uint16(last + 1)
+				buckets[hashBytes(data, last+2)] = uint16(last + 2)
+				buckets[hashBytes(data, last+3)] = uint16(last + 3)
+			} else {
+				for i := rangeStart; i < rangeEnd; i++ {
+					buckets[hashBytes(data, i)] = uint16(i)
+				}
+			}
 
 			position += sr.len
 		} else {
