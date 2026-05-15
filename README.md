@@ -133,19 +133,19 @@ Read these rows as repeated complete-stream compression through the Go APIs. The
 <!-- bench:compress -->
 | | go-brrr (sec/op) | andybalholm (sec/op) | cbrotli (sec/op) |
 | --- | --- | --- | --- |
-| CompressOneshot/q=0/payload=VariedPayloads | 7.527m ± 0% | 12.331m ± 1%   +63.83% (p=0.000 n=8) | 6.862m ± 0%    -8.83% (p=0.000 n=8) |
-| CompressOneshot/q=1/payload=VariedPayloads | 10.22m ± 0% | 20.18m ± 0%   +97.40% (p=0.000 n=8) | 10.79m ± 0%    +5.60% (p=0.000 n=8) |
-| CompressOneshot/q=2/payload=VariedPayloads | 15.97m ± 0% | 38.52m ± 2%  +141.23% (p=0.000 n=8) | 18.15m ± 0%   +13.67% (p=0.000 n=8) |
-| CompressOneshot/q=3/payload=VariedPayloads | 17.04m ± 0% | 43.88m ± 3%  +157.49% (p=0.000 n=8) | 20.96m ± 0%   +23.00% (p=0.000 n=8) |
-| CompressOneshot/q=4/payload=VariedPayloads | 25.35m ± 0% | 63.43m ± 1%  +150.18% (p=0.000 n=8) | 29.96m ± 0%   +18.16% (p=0.000 n=8) |
-| CompressOneshot/q=5/payload=VariedPayloads | 36.66m ± 0% | 80.79m ± 1%  +120.39% (p=0.000 n=8) | 47.35m ± 0%   +29.16% (p=0.000 n=8) |
-| CompressOneshot/q=6/payload=VariedPayloads | 43.79m ± 0% | 91.85m ± 1%  +109.75% (p=0.000 n=8) | 55.07m ± 0%   +25.77% (p=0.000 n=8) |
-| CompressOneshot/q=7/payload=VariedPayloads | 51.67m ± 0% | 127.63m ± 3%  +147.00% (p=0.000 n=8) | 69.35m ± 0%   +34.22% (p=0.000 n=8) |
-| CompressOneshot/q=8/payload=VariedPayloads | 60.79m ± 0% | 147.37m ± 1%  +142.43% (p=0.000 n=8) | 82.54m ± 1%   +35.78% (p=0.000 n=8) |
-| CompressOneshot/q=9/payload=VariedPayloads | 75.49m ± 0% | 211.12m ± 4%  +179.67% (p=0.000 n=8) | 236.02m ± 1%  +212.65% (p=0.000 n=8) |
-| CompressOneshot/q=10/payload=VariedPayloads | 1220.4m ± 0% | 1375.6m ± 1%   +12.72% (p=0.000 n=8) | 861.9m ± 0%   -29.38% (p=0.000 n=8) |
-| CompressOneshot/q=11/payload=VariedPayloads | 2.948 ± 1% | 3.433 ± 1%   +16.47% (p=0.000 n=8) | 2.270 ± 0%   -22.98% (p=0.000 n=8) |
-| **geomean** | 54.76m | 111.6m       +103.71% | 65.12m        +18.93% |
+| CompressOneshot/q=0/payload=VariedPayloads | 6.610m ± 0% | 12.299m ± 0%   +86.06% (p=0.000 n=8) | 6.854m ± 0%    +3.68% (p=0.000 n=8) |
+| CompressOneshot/q=1/payload=VariedPayloads | 10.19m ± 0% | 20.17m ± 0%   +97.93% (p=0.000 n=8) | 10.80m ± 0%    +6.02% (p=0.000 n=8) |
+| CompressOneshot/q=2/payload=VariedPayloads | 15.24m ± 0% | 37.71m ± 1%  +147.38% (p=0.000 n=8) | 17.95m ± 0%   +17.79% (p=0.000 n=8) |
+| CompressOneshot/q=3/payload=VariedPayloads | 16.18m ± 0% | 43.39m ± 1%  +168.15% (p=0.000 n=8) | 20.73m ± 0%   +28.13% (p=0.000 n=8) |
+| CompressOneshot/q=4/payload=VariedPayloads | 25.16m ± 0% | 62.69m ± 2%  +149.15% (p=0.000 n=8) | 30.06m ± 0%   +19.46% (p=0.000 n=8) |
+| CompressOneshot/q=5/payload=VariedPayloads | 36.82m ± 0% | 81.14m ± 3%  +120.38% (p=0.000 n=8) | 47.30m ± 0%   +28.47% (p=0.000 n=8) |
+| CompressOneshot/q=6/payload=VariedPayloads | 43.89m ± 0% | 90.40m ± 1%  +105.99% (p=0.000 n=8) | 54.64m ± 0%   +24.49% (p=0.000 n=8) |
+| CompressOneshot/q=7/payload=VariedPayloads | 51.60m ± 0% | 126.63m ± 2%  +145.41% (p=0.000 n=8) | 109.60m ± 0%  +112.41% (p=0.000 n=8) |
+| CompressOneshot/q=8/payload=VariedPayloads | 60.37m ± 0% | 147.50m ± 2%  +144.31% (p=0.000 n=8) | 80.89m ± 0%   +33.98% (p=0.000 n=8) |
+| CompressOneshot/q=9/payload=VariedPayloads | 74.99m ± 0% | 209.73m ± 2%  +179.67% (p=0.000 n=8) | 235.43m ± 0%  +213.95% (p=0.000 n=8) |
+| CompressOneshot/q=10/payload=VariedPayloads | 1210.6m ± 0% | 1371.8m ± 2%   +13.32% (p=0.000 n=8) | 858.2m ± 0%   -29.11% (p=0.000 n=8) |
+| CompressOneshot/q=11/payload=VariedPayloads | 2.946 ± 1% | 3.423 ± 0%   +16.19% (p=0.000 n=8) | 2.264 ± 0%   -23.15% (p=0.000 n=8) |
+| **geomean** | 53.61m | 110.8m       +106.75% | 67.33m        +25.61% |
 <!-- /bench:compress -->
 
 *Streaming* uses `brrr.NewReader` + `io.ReadAll`; *one-shot* uses `brrr.Decompress` on a complete in-memory blob.
