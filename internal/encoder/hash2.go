@@ -178,9 +178,11 @@ func (h *h2) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 		}
 
 		if dictEligible && sr.score == minScore {
-			if m, ok := searchStaticDictionary(data[position&mask:], maxLength, maxDistance+gap, maxBackwardDistance,
-				&s.dictNumLookups, &s.dictNumMatches, sr.score); ok {
-				sr = m
+			posM := position & mask
+			if wl, wi, ok := searchStaticDictAt(data, posM, maxLength, &s.dictNumLookups, &s.dictNumMatches); ok {
+				if matchStaticDictEntryAt(data, posM, wl, wi, maxDistance+gap, sr.score, &sr) {
+					s.dictNumMatches++
+				}
 			}
 		}
 
@@ -252,9 +254,11 @@ func (h *h2) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 				}
 
 				if dictEligible2 && sr2.score == minScore {
-					if m, ok := searchStaticDictionary(data[(position+1)&mask:], maxLength, maxDistance+gap, maxBackwardDistance,
-						&s.dictNumLookups, &s.dictNumMatches, sr2.score); ok {
-						sr2 = m
+					posM := (position + 1) & mask
+					if wl, wi, ok := searchStaticDictAt(data, posM, maxLength, &s.dictNumLookups, &s.dictNumMatches); ok {
+						if matchStaticDictEntryAt(data, posM, wl, wi, maxDistance+gap, sr2.score, &sr2) {
+							s.dictNumMatches++
+						}
 					}
 				}
 
@@ -469,9 +473,10 @@ func (h *h2) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos ui
 		}
 
 		if dictEligible && sr.score == minScore {
-			if m, ok := searchStaticDictionary(data[position:], maxLength, maxDistance+gap, maxBackwardDistance,
-				&s.dictNumLookups, &s.dictNumMatches, sr.score); ok {
-				sr = m
+			if wl, wi, ok := searchStaticDictAt(data, position, maxLength, &s.dictNumLookups, &s.dictNumMatches); ok {
+				if matchStaticDictEntryAt(data, position, wl, wi, maxDistance+gap, sr.score, &sr) {
+					s.dictNumMatches++
+				}
 			}
 		}
 
@@ -536,9 +541,10 @@ func (h *h2) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos ui
 				}
 
 				if dictEligible2 && sr2.score == minScore {
-					if m, ok := searchStaticDictionary(data[position+1:], maxLength, maxDistance+gap, maxBackwardDistance,
-						&s.dictNumLookups, &s.dictNumMatches, sr2.score); ok {
-						sr2 = m
+					if wl, wi, ok := searchStaticDictAt(data, position+1, maxLength, &s.dictNumLookups, &s.dictNumMatches); ok {
+						if matchStaticDictEntryAt(data, position+1, wl, wi, maxDistance+gap, sr2.score, &sr2) {
+							s.dictNumMatches++
+						}
 					}
 				}
 
