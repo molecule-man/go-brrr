@@ -37,14 +37,14 @@ var sink float64
 func BenchmarkMathLog2(b *testing.B) {
 	b.SkipNow()
 	b.Run("math.Log2", func(b *testing.B) {
-		for b.Loop() {
+		for range b.N {
 			for v := 1; v <= 256; v++ {
 				sink = math.Log2(float64(v))
 			}
 		}
 	})
 	b.Run("fastLog2", func(b *testing.B) {
-		for b.Loop() {
+		for range b.N {
 			for v := 1; v <= 256; v++ {
 				sink = fastLog2(v)
 			}

@@ -47,7 +47,8 @@ func createHuffmanTree(data []uint32, treeLimit int, tree []huffmanTreeNode, dep
 	// would need this, we would be better off with the Katajainen algorithm.
 	for countLimit := uint32(1); ; countLimit *= 2 {
 		n := 0
-		for i, c := range slices.Backward(data) {
+		for i := len(data) - 1; i >= 0; i-- {
+			c := data[i]
 			if c != 0 {
 				tree[n] = huffmanTreeNode{
 					totalCount:   max(c, countLimit),
