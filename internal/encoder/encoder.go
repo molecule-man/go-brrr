@@ -579,7 +579,8 @@ func (e *encoderArena) writeMetaBlockInternal(length, numLiterals, numCommands i
 
 // writeMetaBlockFast encodes commands into a compressed meta-block using the
 // fast Huffman tree builder. For <= 128 commands, uses static command/distance
-// prefix codes. For more commands, builds all three prefix codes dynamically.
+// prefix codes. For more commands, builds all three prefix codes dynamically
+// via writeMetaBlockFastDynamic.
 func (e *encoderArena) writeMetaBlockFast(length int, isLast bool) {
 	s := &e.encodeState
 	b := &s.b
@@ -588,7 +589,6 @@ func (e *encoderArena) writeMetaBlockFast(length int, isLast bool) {
 	startPos := wrapPosition(s.lastFlushPos)
 	mask := uint(s.mask)
 	commands := s.commands
-	distAlphabetBits := uint(bits.Len(s.distAlphabetSizeMax - 1))
 
 	b.writeMetaBlockHeader(length, isLast, false)
 	// No block splits, no context maps.
@@ -602,91 +602,117 @@ func (e *encoderArena) writeMetaBlockFast(length int, isLast bool) {
 		s.distHisto = nil
 	}
 
-	if len(commands) <= 128 {
-		// Fast path: build literal codes only, use static cmd/dist codes.
-		litHisto := &arena.litHisto
-		var numLiterals uint
-		if prebuilt {
-			numLiterals = s.numLiterals
-		} else {
-			*litHisto = [core.AlphabetSizeLiteral]uint32{}
-			pos := startPos
-			for i := range commands {
-				cmd := &commands[i]
-				for j := cmd.insertLen; j != 0; j-- {
-					litHisto[input[pos&mask]]++
-					pos++
-				}
-				numLiterals += uint(cmd.insertLen)
-				pos += uint(cmd.copyLength())
-			}
+	if len(commands) > 128 {
+		e.writeMetaBlockFastDynamic(prebuilt)
+		if isLast {
+			b.byteAlign()
 		}
-
-		b.buildAndWriteHuffmanTreeFast(arena.tree[:], litHisto[:], numLiterals,
-			8, arena.litDepth[:], arena.litBits[:])
-		b.writeStaticCommandHuffmanTree()
-		b.writeStaticDistanceHuffmanTree()
-		huffmanBlock{
-			input:     input,
-			commands:  commands,
-			litDepth:  arena.litDepth[:],
-			litBits:   arena.litBits[:],
-			cmdDepth:  staticCommandCodeDepth[:],
-			cmdBits:   staticCommandCodeBits[:],
-			distDepth: staticDistanceCodeDepth[:],
-			distBits:  staticDistanceCodeBits[:],
-			startPos:  startPos,
-			mask:      mask,
-		}.writeData(b)
-	} else {
-		// Normal path: build all three prefix codes from histogram data.
-		var litTotal, distTotal uint
-		if prebuilt {
-			litTotal = s.numLiterals
-			for _, c := range &arena.distHisto {
-				distTotal += uint(c)
-			}
-		} else {
-			arena.resetHistograms()
-
-			hist := blockHistograms{
-				lit:  arena.litHisto[:],
-				cmd:  arena.cmdHisto[:],
-				dist: arena.distHisto[:],
-			}
-			pos := startPos
-			for i := range commands {
-				cmd := commands[i]
-				posDelta, distDelta := hist.tally(input, pos, mask, cmd)
-				pos += posDelta
-				litTotal += uint(cmd.insertLen)
-				distTotal += distDelta
-			}
-		}
-
-		b.buildAndWriteHuffmanTreeFast(arena.tree[:], arena.litHisto[:], litTotal,
-			8, arena.litDepth[:], arena.litBits[:])
-		b.buildAndWriteHuffmanTreeFast(arena.tree[:], arena.cmdHisto[:], uint(len(commands)),
-			10, arena.cmdDepth[:], arena.cmdBits[:])
-		b.buildAndWriteHuffmanTreeFast(arena.tree[:], arena.distHisto[:], distTotal,
-			distAlphabetBits, arena.distDepth[:], arena.distBits[:])
-		huffmanBlock{
-			input:     input,
-			commands:  commands,
-			litDepth:  arena.litDepth[:],
-			litBits:   arena.litBits[:],
-			cmdDepth:  arena.cmdDepth[:],
-			cmdBits:   arena.cmdBits[:],
-			distDepth: arena.distDepth[:],
-			distBits:  arena.distBits[:],
-			startPos:  startPos,
-			mask:      mask,
-		}.writeData(b)
+		return
 	}
+
+	// Build literal codes only; use static cmd/dist codes.
+	litHisto := &arena.litHisto
+	var numLiterals uint
+	if prebuilt {
+		numLiterals = s.numLiterals
+	} else {
+		*litHisto = [core.AlphabetSizeLiteral]uint32{}
+		pos := startPos
+		for i := range commands {
+			cmd := &commands[i]
+			for j := cmd.insertLen; j != 0; j-- {
+				litHisto[input[pos&mask]]++
+				pos++
+			}
+			numLiterals += uint(cmd.insertLen)
+			pos += uint(cmd.copyLength())
+		}
+	}
+
+	b.buildAndWriteHuffmanTreeFast(arena.tree[:], litHisto[:], numLiterals,
+		8, arena.litDepth[:], arena.litBits[:])
+	b.writeStaticCommandHuffmanTree()
+	b.writeStaticDistanceHuffmanTree()
+	huffmanBlock{
+		input:     input,
+		commands:  commands,
+		litDepth:  arena.litDepth[:],
+		litBits:   arena.litBits[:],
+		cmdDepth:  staticCommandCodeDepth[:],
+		cmdBits:   staticCommandCodeBits[:],
+		distDepth: staticDistanceCodeDepth[:],
+		distBits:  staticDistanceCodeBits[:],
+		startPos:  startPos,
+		mask:      mask,
+	}.writeData(b)
 
 	if isLast {
 		b.byteAlign()
 	}
+}
+
+// writeMetaBlockFastDynamic builds dynamic Huffman codes for the literal,
+// command, and distance alphabets from histogram data, then emits the
+// compressed meta-block body. The header and any final byte-alignment are
+// handled by the caller.
+//
+// Kept out of [encoderArena.writeMetaBlockFast] so its instructions are not
+// fetched into L1i when the static-code fast path is taken; the dynamic path
+// only runs for metablocks with > 128 commands.
+//
+//go:noinline
+func (e *encoderArena) writeMetaBlockFastDynamic(prebuilt bool) {
+	s := &e.encodeState
+	b := &s.b
+	arena := &e.arena
+	input := s.data
+	startPos := wrapPosition(s.lastFlushPos)
+	mask := uint(s.mask)
+	commands := s.commands
+	distAlphabetBits := uint(bits.Len(s.distAlphabetSizeMax - 1))
+
+	var litTotal, distTotal uint
+	if prebuilt {
+		litTotal = s.numLiterals
+		for _, c := range &arena.distHisto {
+			distTotal += uint(c)
+		}
+	} else {
+		arena.resetHistograms()
+
+		hist := blockHistograms{
+			lit:  arena.litHisto[:],
+			cmd:  arena.cmdHisto[:],
+			dist: arena.distHisto[:],
+		}
+		pos := startPos
+		for i := range commands {
+			cmd := commands[i]
+			posDelta, distDelta := hist.tally(input, pos, mask, cmd)
+			pos += posDelta
+			litTotal += uint(cmd.insertLen)
+			distTotal += distDelta
+		}
+	}
+
+	b.buildAndWriteHuffmanTreeFast(arena.tree[:], arena.litHisto[:], litTotal,
+		8, arena.litDepth[:], arena.litBits[:])
+	b.buildAndWriteHuffmanTreeFast(arena.tree[:], arena.cmdHisto[:], uint(len(commands)),
+		10, arena.cmdDepth[:], arena.cmdBits[:])
+	b.buildAndWriteHuffmanTreeFast(arena.tree[:], arena.distHisto[:], distTotal,
+		distAlphabetBits, arena.distDepth[:], arena.distBits[:])
+	huffmanBlock{
+		input:     input,
+		commands:  commands,
+		litDepth:  arena.litDepth[:],
+		litBits:   arena.litBits[:],
+		cmdDepth:  arena.cmdDepth[:],
+		cmdBits:   arena.cmdBits[:],
+		distDepth: arena.distDepth[:],
+		distBits:  arena.distBits[:],
+		startPos:  startPos,
+		mask:      mask,
+	}.writeData(b)
 }
 
 // writeMetaBlockTrivial encodes commands into a compressed meta-block using
