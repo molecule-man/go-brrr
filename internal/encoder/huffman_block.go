@@ -38,24 +38,34 @@ func (block huffmanBlock) writeData(b *bitWriter) { //nolint:gocritic // stack c
 	bitOffset := b.bitOffset
 	for _, cmd := range block.commands {
 		cmdCode := cmd.cmdPrefix
-		bitOffset = writeBitsAt(buf, bitOffset,
-			uint(block.cmdDepth[cmdCode]), uint64(block.cmdBits[cmdCode]))
+		// Fold the cmd Huffman code and the insert/copy extra bits into a
+		// single writeBitsAt call. cmdDepth ≤ 15 and InsertLenExtraBits +
+		// CopyLenExtraBits ≤ 48, so the combined width is ≤ 63 bits. For
+		// typical commands (short inserts/copies) the combined width is well
+		// under 56; fall back to two writes when it would otherwise overflow
+		// the 56-bit writeBitsAt limit.
+		cmdDepth := uint(block.cmdDepth[cmdCode])
+		cmdBits := uint64(block.cmdBits[cmdCode])
 		// Use the command prefix lookup table to avoid recomputing the
 		// insert/copy length prefix classes for every command.
-		{
-			lut := core.CmdLut[cmdCode]
-			copyLenCode := cmd.copyLen
-			// Most copy commands have no encoded length delta; avoid the
-			// sign-extension path unless the high delta bits are present.
-			if copyLenCode>>25 != 0 {
-				copyLenCode = cmd.copyLenCode()
-			}
-			effCopyLen := uint(copyLenCode)
-			insNumExtra := lut.InsertLenExtraBits
+		lut := core.CmdLut[cmdCode]
+		copyLenCode := cmd.copyLen
+		// Most copy commands have no encoded length delta; avoid the
+		// sign-extension path unless the high delta bits are present.
+		if copyLenCode>>25 != 0 {
+			copyLenCode = cmd.copyLenCode()
+		}
+		effCopyLen := uint(copyLenCode)
+		insNumExtra := uint(lut.InsertLenExtraBits)
+		extraBitsLen := insNumExtra + uint(lut.CopyLenExtraBits)
+		extraBits := ((uint64(effCopyLen) - uint64(lut.CopyLenOffset)) << insNumExtra) |
+			(uint64(cmd.insertLen) - uint64(lut.InsertLenOffset))
+		if cmdDepth+extraBitsLen <= 56 {
 			bitOffset = writeBitsAt(buf, bitOffset,
-				uint(insNumExtra+lut.CopyLenExtraBits),
-				((uint64(effCopyLen)-uint64(lut.CopyLenOffset))<<insNumExtra)|
-					(uint64(cmd.insertLen)-uint64(lut.InsertLenOffset)))
+				cmdDepth+extraBitsLen, cmdBits|extraBits<<cmdDepth)
+		} else {
+			bitOffset = writeBitsAt(buf, bitOffset, cmdDepth, cmdBits)
+			bitOffset = writeBitsAt(buf, bitOffset, extraBitsLen, extraBits)
 		}
 		// Literal encoding loop: three consecutive literals are packed into a
 		// single writeBits call. Each Brotli literal code is at most 15 bits,
