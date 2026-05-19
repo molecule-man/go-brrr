@@ -242,11 +242,11 @@ func (s *onePassArena) shouldMergeBlock(data []byte, length int, depths []byte) 
 	return r >= 0.0
 }
 
-// resetHistograms zeroes the histogram and prefix code arrays before encoding
-// a new block.
+// resetHistograms zeroes the literal histogram and prefix-code arrays before
+// encoding a new block. cmdHisto is built incrementally during createCommands
+// and is zeroed there.
 func (s *twoPassArena) resetHistograms() {
 	s.litHisto = [256]uint32{}
-	s.cmdHisto = [128]uint32{}
 	s.cmdDepth = [128]byte{}
 	s.cmdBits = [128]uint16{}
 }

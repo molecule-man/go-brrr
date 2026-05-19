@@ -108,10 +108,16 @@ func (c *twoPassCompressor) createCommands(
 	input []byte, pos, blockSize, inputSize int,
 	commands []uint32, literals []byte,
 ) (numCommands, numLiterals int) {
+	// Zero the command histogram before this block. createCommands builds the
+	// histogram incrementally as it emits commands, saving the rescan pass that
+	// writeCommands used to do.
+	c.arena.cmdHisto = [128]uint32{}
+
 	if c.minMatch == 6 {
 		return c.createCommandsMinMatch6(input, pos, blockSize, inputSize, commands, literals)
 	}
 
+	cmdHisto := &c.arena.cmdHisto
 	ip := pos
 	shift := 64 - c.tableBits
 	ipEnd := pos + blockSize
@@ -186,17 +192,18 @@ func (c *twoPassCompressor) createCommands(
 				insert := base - nextEmit
 				ip += matched
 
-				cmdPos += encodeInsertLen(commands[cmdPos:], uint(insert))
+				cmdPos += encodeInsertLen(commands[cmdPos:], uint(insert), cmdHisto)
 				copy(literals[litPos:], input[nextEmit:nextEmit+insert])
 				litPos += insert
 				if distance == lastDistance {
 					commands[cmdPos] = 64
+					cmdHisto[64]++
 					cmdPos++
 				} else {
-					cmdPos += encodeDistance(commands[cmdPos:], uint(distance))
+					cmdPos += encodeDistance(commands[cmdPos:], uint(distance), cmdHisto)
 					lastDistance = distance
 				}
-				cmdPos += encodeCopyLenLastDistance(commands[cmdPos:], uint(matched))
+				cmdPos += encodeCopyLenLastDistance(commands[cmdPos:], uint(matched), cmdHisto)
 
 				nextEmit = ip
 				if ip >= ipLimit {
@@ -216,29 +223,33 @@ func (c *twoPassCompressor) createCommands(
 				lastDistance = base - candidate
 
 				// manually inlined encodeCopyLen
+				var ccode uint
 				switch cl := uint(matched); {
 				case cl < 10:
-					commands[cmdPos] = uint32(cl + 38)
+					ccode = cl + 38
+					commands[cmdPos] = uint32(ccode)
 				case cl < 134:
 					tail := cl - 6
 					nbits := uint(bits.Len(tail)) - 2
 					prefix := tail >> nbits
-					code := (nbits << 1) + prefix + 44
+					ccode = (nbits << 1) + prefix + 44
 					extra := tail - (prefix << nbits)
-					commands[cmdPos] = uint32(code) | uint32(extra)<<8
+					commands[cmdPos] = uint32(ccode) | uint32(extra)<<8
 				case cl < 2118:
 					tail := cl - 70
 					nbits := uint(bits.Len(tail)) - 1
-					code := nbits + 52
+					ccode = nbits + 52
 					extra := tail - (1 << nbits)
-					commands[cmdPos] = uint32(code) | uint32(extra)<<8
+					commands[cmdPos] = uint32(ccode) | uint32(extra)<<8
 				default:
+					ccode = 63
 					extra := cl - 2118
-					commands[cmdPos] = 63 | uint32(extra)<<8
+					commands[cmdPos] = uint32(ccode) | uint32(extra)<<8
 				}
+				cmdHisto[ccode]++
 				cmdPos++
 
-				cmdPos += encodeDistance(commands[cmdPos:], uint(lastDistance))
+				cmdPos += encodeDistance(commands[cmdPos:], uint(lastDistance), cmdHisto)
 
 				nextEmit = ip
 				if ip >= ipLimit {
@@ -257,7 +268,7 @@ encodeRemainder:
 	// Emit the remaining bytes as literals.
 	if nextEmit < ipEnd {
 		insert := ipEnd - nextEmit
-		cmdPos += encodeInsertLen(commands[cmdPos:], uint(insert))
+		cmdPos += encodeInsertLen(commands[cmdPos:], uint(insert), cmdHisto)
 		copy(literals[litPos:], input[nextEmit:ipEnd])
 		litPos += insert
 	}
@@ -273,6 +284,7 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 ) (numCommands, numLiterals int) {
 	const minMatch = 6
 
+	cmdHisto := &c.arena.cmdHisto
 	ip := pos
 	shift := 64 - c.tableBits
 	ipEnd := pos + blockSize
@@ -352,17 +364,18 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 				insert := base - nextEmit
 				ip += matched
 
-				cmdPos += encodeInsertLen(commands[cmdPos:], uint(insert))
+				cmdPos += encodeInsertLen(commands[cmdPos:], uint(insert), cmdHisto)
 				copy(literals[litPos:], input[nextEmit:nextEmit+insert])
 				litPos += insert
 				if distance == lastDistance {
 					commands[cmdPos] = 64
+					cmdHisto[64]++
 					cmdPos++
 				} else {
-					cmdPos += encodeDistance(commands[cmdPos:], uint(distance))
+					cmdPos += encodeDistance(commands[cmdPos:], uint(distance), cmdHisto)
 					lastDistance = distance
 				}
-				cmdPos += encodeCopyLenLastDistance(commands[cmdPos:], uint(matched))
+				cmdPos += encodeCopyLenLastDistance(commands[cmdPos:], uint(matched), cmdHisto)
 
 				nextEmit = ip
 				if ip >= ipLimit {
@@ -382,29 +395,33 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 				lastDistance = base - candidate
 
 				// manually inlined encodeCopyLen
+				var ccode uint
 				switch cl := uint(matched); {
 				case cl < 10:
-					commands[cmdPos] = uint32(cl + 38)
+					ccode = cl + 38
+					commands[cmdPos] = uint32(ccode)
 				case cl < 134:
 					tail := cl - 6
 					nbits := uint(bits.Len(tail)) - 2
 					prefix := tail >> nbits
-					code := (nbits << 1) + prefix + 44
+					ccode = (nbits << 1) + prefix + 44
 					extra := tail - (prefix << nbits)
-					commands[cmdPos] = uint32(code) | uint32(extra)<<8
+					commands[cmdPos] = uint32(ccode) | uint32(extra)<<8
 				case cl < 2118:
 					tail := cl - 70
 					nbits := uint(bits.Len(tail)) - 1
-					code := nbits + 52
+					ccode = nbits + 52
 					extra := tail - (1 << nbits)
-					commands[cmdPos] = uint32(code) | uint32(extra)<<8
+					commands[cmdPos] = uint32(ccode) | uint32(extra)<<8
 				default:
+					ccode = 63
 					extra := cl - 2118
-					commands[cmdPos] = 63 | uint32(extra)<<8
+					commands[cmdPos] = uint32(ccode) | uint32(extra)<<8
 				}
+				cmdHisto[ccode]++
 				cmdPos++
 
-				cmdPos += encodeDistance(commands[cmdPos:], uint(lastDistance))
+				cmdPos += encodeDistance(commands[cmdPos:], uint(lastDistance), cmdHisto)
 
 				nextEmit = ip
 				if ip >= ipLimit {
@@ -424,7 +441,7 @@ encodeRemainder:
 	// Emit the remaining bytes as literals.
 	if nextEmit < ipEnd {
 		insert := ipEnd - nextEmit
-		cmdPos += encodeInsertLen(commands[cmdPos:], uint(insert))
+		cmdPos += encodeInsertLen(commands[cmdPos:], uint(insert), cmdHisto)
 		copy(literals[litPos:], input[nextEmit:ipEnd])
 		litPos += insert
 	}
@@ -508,14 +525,8 @@ func (c *twoPassCompressor) writeCommands(literals []byte, commands []uint32) {
 	c.b.buildAndWriteHuffmanTreeFast(s.tree[:], s.litHisto[:],
 		uint(len(literals)), 8, s.litDepth[:], s.litBits[:])
 
-	// Build command histogram and Huffman code. Mask with 0x7F (rather
-	// than 0xFF) so the compiler can prove `code < 128` and drop the
-	// bounds check on s.cmdHisto, which is [128]uint32.
-	for _, cmd := range commands {
-		code := cmd & 0x7F
-		s.cmdHisto[code]++
-	}
-	// Ensure some baseline counts for codes that must exist.
+	// The command histogram has already been built incrementally during
+	// createCommands. Ensure some baseline counts for codes that must exist.
 	s.cmdHisto[1]++
 	s.cmdHisto[2]++
 	s.cmdHisto[64]++
@@ -671,42 +682,54 @@ func isMatchTwoPass6At(input []byte, a, b uint) bool {
 
 // encodeInsertLen encodes an insert length command into commands and returns
 // the number of command slots used (always 1).
-func encodeInsertLen(commands []uint32, insertLen uint) int {
+// encodeInsertLen encodes an insert length command into commands and updates
+// cmdHisto for the emitted code. Returns the number of command slots used
+// (always 1).
+func encodeInsertLen(commands []uint32, insertLen uint, cmdHisto *[128]uint32) int {
+	var code uint
 	switch {
 	case insertLen < 6:
-		commands[0] = uint32(insertLen)
+		code = insertLen
+		commands[0] = uint32(code)
 	case insertLen < 130:
 		tail := insertLen - 2
 		nbits := uint(bits.Len(tail)) - 2
 		prefix := tail >> nbits
-		inscode := (nbits << 1) + prefix + 2
+		code = (nbits << 1) + prefix + 2
 		extra := tail - (prefix << nbits)
-		commands[0] = uint32(inscode) | uint32(extra)<<8
+		commands[0] = uint32(code) | uint32(extra)<<8
 	case insertLen < 2114:
 		tail := insertLen - 66
 		nbits := uint(bits.Len(tail)) - 1
-		code := nbits + 10
+		code = nbits + 10
 		extra := tail - (1 << nbits)
 		commands[0] = uint32(code) | uint32(extra)<<8
 	case insertLen < 6210:
+		code = 21
 		extra := insertLen - 2114
-		commands[0] = 21 | uint32(extra)<<8
+		commands[0] = uint32(code) | uint32(extra)<<8
 	case insertLen < 22594:
+		code = 22
 		extra := insertLen - 6210
-		commands[0] = 22 | uint32(extra)<<8
+		commands[0] = uint32(code) | uint32(extra)<<8
 	default:
+		code = 23
 		extra := insertLen - 22594
-		commands[0] = 23 | uint32(extra)<<8
+		commands[0] = uint32(code) | uint32(extra)<<8
 	}
+	cmdHisto[code]++
 	return 1
 }
 
 // encodeCopyLenLastDistance encodes a copy-with-last-distance command into
-// commands and returns the number of command slots used (1 or 2).
-func encodeCopyLenLastDistance(commands []uint32, copyLen uint) int {
+// commands, updates cmdHisto for each emitted code, and returns the number of
+// command slots used (1 or 2).
+func encodeCopyLenLastDistance(commands []uint32, copyLen uint, cmdHisto *[128]uint32) int {
 	switch {
 	case copyLen < 12:
-		commands[0] = uint32(copyLen + 20)
+		code := copyLen + 20
+		commands[0] = uint32(code)
+		cmdHisto[code]++
 		return 1
 	case copyLen < 72:
 		tail := copyLen - 8
@@ -715,6 +738,7 @@ func encodeCopyLenLastDistance(commands []uint32, copyLen uint) int {
 		code := (nbits << 1) + prefix + 28
 		extra := tail - (prefix << nbits)
 		commands[0] = uint32(code) | uint32(extra)<<8
+		cmdHisto[code]++
 		return 1
 	case copyLen < 136:
 		tail := copyLen - 8
@@ -722,6 +746,8 @@ func encodeCopyLenLastDistance(commands []uint32, copyLen uint) int {
 		extra := tail & 31
 		commands[0] = uint32(code) | uint32(extra)<<8
 		commands[1] = 64
+		cmdHisto[code]++
+		cmdHisto[64]++
 		return 2
 	case copyLen < 2120:
 		tail := copyLen - 72
@@ -730,18 +756,23 @@ func encodeCopyLenLastDistance(commands []uint32, copyLen uint) int {
 		extra := tail - (1 << nbits)
 		commands[0] = uint32(code) | uint32(extra)<<8
 		commands[1] = 64
+		cmdHisto[code]++
+		cmdHisto[64]++
 		return 2
 	default:
 		extra := copyLen - 2120
 		commands[0] = 63 | uint32(extra)<<8
 		commands[1] = 64
+		cmdHisto[63]++
+		cmdHisto[64]++
 		return 2
 	}
 }
 
-// encodeDistance encodes a distance command into commands and returns
-// the number of command slots used (always 1).
-func encodeDistance(commands []uint32, distance uint) int {
+// encodeDistance encodes a distance command into commands, updates cmdHisto
+// for the emitted code, and returns the number of command slots used (always
+// 1).
+func encodeDistance(commands []uint32, distance uint, cmdHisto *[128]uint32) int {
 	d := distance + 3
 	nbits := uint(bits.Len(d)) - 2
 	prefix := (d >> nbits) & 1
@@ -749,5 +780,6 @@ func encodeDistance(commands []uint32, distance uint) int {
 	distcode := 2*(nbits-1) + prefix + 80
 	extra := d - offset
 	commands[0] = uint32(distcode) | uint32(extra)<<8
+	cmdHisto[distcode&0x7F]++
 	return 1
 }
