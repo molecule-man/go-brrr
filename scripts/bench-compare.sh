@@ -101,6 +101,10 @@ print_benchstat_summary() {
     done
 }
 
+# bench.sh appends each round's lucky-fa pair to these as the run progresses,
+# and the per-fa fan-out to /tmp/{before,after}-fa<N>.txt. Truncating all of
+# them here means `watch benchstat /tmp/before.txt /tmp/after.txt` tracks
+# this comparison's progress, with no leftover from prior runs.
 BEFORE_TXT="/tmp/before.txt"
 AFTER_TXT="/tmp/after.txt"
 stat_out=$(mktemp /tmp/bench-compare-stat.XXXXXX)
@@ -113,9 +117,9 @@ _interrupted=false
 # produce no output.
 #
 # Ctrl+C sends SIGINT to the whole process group, so the currently-running
-# bench.sh child is also interrupted. That is fine: any benchmark lines already
-# flushed to /tmp/before.txt and /tmp/after.txt by completed runs are still
-# used for the partial output.
+# bench.sh child is also interrupted. Its EXIT trap still flushes the lucky
+# pair from whatever partial-round samples it had collected, so those land in
+# /tmp/{before,after}.txt before this script's exit handler runs.
 _on_interrupt() {
     _interrupted=true
     exit 130
@@ -134,8 +138,22 @@ trap '_on_interrupt' INT TERM
 
 ./scripts/testbins.sh
 
+# Load funcalign manifest written by testbins.sh, used here only to know which
+# per-fa accumulators to truncate.
+MANIFEST="/tmp/bench-funcaligns"
+if [[ -s "$MANIFEST" ]]; then
+    mapfile -t FAS < "$MANIFEST"
+else
+    FAS=("")
+fi
+
 : > "$BEFORE_TXT"
 : > "$AFTER_TXT"
+for fa in "${FAS[@]}"; do
+    [[ -z "$fa" ]] && continue
+    : > "/tmp/before-fa${fa}.txt"
+    : > "/tmp/after-fa${fa}.txt"
+done
 
 for profile in "${PROFILES[@]}"; do
     load_profile "$profile"
