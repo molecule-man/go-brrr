@@ -308,7 +308,7 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 
 		ip++
 		nextLoad := loadU64LE(input, uint(ip))
-		nextHash = uint32(((nextLoad << 16) * hashMul32) >> shift)
+		nextHash = uint32(((nextLoad << 16) * hashMul32) >> (shift & 63))
 
 		for {
 			// Step 1: Scan forward looking for a match. Skip bytes
@@ -331,7 +331,7 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 					goto encodeRemainder
 				}
 				nextLoad = loadU64LE(input, uint(nextIP))
-				nextHash = uint32(((nextLoad << 16) * hashMul32) >> shift)
+				nextHash = uint32(((nextLoad << 16) * hashMul32) >> (shift & 63))
 
 				candidate = ip - lastDistance
 				if candidate >= 0 && candidate < ip &&
@@ -433,7 +433,7 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 
 			ip++
 			nextLoad = loadU64LE(input, uint(ip))
-			nextHash = uint32(((nextLoad << 16) * hashMul32) >> shift)
+			nextHash = uint32(((nextLoad << 16) * hashMul32) >> (shift & 63))
 		}
 	} // close block scope for ipLimit, lenLimit
 
@@ -661,9 +661,13 @@ func hashBytesAtOffsetTwoPass(v uint64, offset, shift uint, minMatch int) uint32
 	return uint32(h >> shift)
 }
 
+// `shift & 63` is a no-op (shift = 64 - tableBits ∈ [47, 48] on the q=1
+// minMatch=6 path) that lets the compiler elide the variable-shift safety
+// mask. The scan-loop hashes in createCommandsMinMatch6 use the same trick
+// inline.
 func hashBytesAtOffsetTwoPass6(v uint64, offset, shift uint) uint32 {
 	h := ((v >> (8 * offset)) << 16) * hashMul32
-	return uint32(h >> shift)
+	return uint32(h >> (shift & 63))
 }
 
 // isMatchTwoPass4At compares 4 bytes of input at positions a and b. Taking
