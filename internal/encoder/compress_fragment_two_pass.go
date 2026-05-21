@@ -364,7 +364,17 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 				insert := base - nextEmit
 				ip += matched
 
-				cmdPos += encodeInsertLen(commands[cmdPos:], uint(insert), cmdHisto)
+				// Fast path for short inserts (the common case on text/HTML):
+				// the < 6 branch of encodeInsertLen is a single store + histogram
+				// bump, so inlining it avoids the non-inlineable function call
+				// for the dominant insert-length bucket.
+				if u := uint(insert); u < 6 {
+					commands[cmdPos] = uint32(u)
+					cmdHisto[u]++
+					cmdPos++
+				} else {
+					cmdPos += encodeInsertLen(commands[cmdPos:], u, cmdHisto)
+				}
 				copy(literals[litPos:], input[nextEmit:nextEmit+insert])
 				litPos += insert
 				if distance == lastDistance {
