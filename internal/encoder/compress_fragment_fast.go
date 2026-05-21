@@ -54,7 +54,6 @@ type fragmentCompressor struct {
 	ipEnd          int
 	literalRatio   uint
 	metablockStart int
-	baseIP         int
 	isLast         bool
 }
 
@@ -113,7 +112,6 @@ func (c *fragmentCompressor) writeCommands() {
 	input := c.input
 	table := c.table
 	ip := c.pos
-	baseIP := c.baseIP
 	shift := c.shift
 	lastDistance := -1
 	c.ipEnd = c.pos + c.blockSize
@@ -156,15 +154,15 @@ func (c *fragmentCompressor) writeCommands() {
 			// when candidate is negative (initial state) its unsigned form is
 			// larger than uint(ip), so the compare fails.
 			if uint(candidate) < uint(ip) && isMatch(input, uint(ip), uint(candidate)) {
-				table[hash] = uint32(ip - baseIP)
+				table[hash] = uint32(ip)
 				if ip-candidate <= maxDistance {
 					break
 				}
 				continue
 			}
 
-			candidate = baseIP + int(table[hash])
-			table[hash] = uint32(ip - baseIP)
+			candidate = int(table[hash])
+			table[hash] = uint32(ip)
 			if isMatch(input, uint(ip), uint(candidate)) {
 				if ip-candidate <= maxDistance {
 					break
@@ -213,7 +211,7 @@ func (c *fragmentCompressor) writeCommands() {
 				return
 			}
 
-			candidate = updateHashTable(input, table, ip, baseIP, shift)
+			candidate = updateHashTable(input, table, ip, shift)
 		}
 
 		// Try to find another match immediately. writeCopyAndDistance is
@@ -280,7 +278,7 @@ func (c *fragmentCompressor) writeCommands() {
 				return
 			}
 
-			candidate = updateHashTable(input, table, ip, baseIP, shift)
+			candidate = updateHashTable(input, table, ip, shift)
 		}
 
 		ip++
@@ -583,19 +581,19 @@ func (c *fragmentCompressor) writeUncompressedMetaBlock(data []byte, startBitOff
 // are < 2^tableBits ≤ len(table) for q0 (whose table size is always a power
 // of two), so unsafe pointer indexing is safe and skips the five per-access
 // bounds checks on this hot path.
-func updateHashTable(input []byte, table []uint32, ip, baseIP int, shift uint) int {
+func updateHashTable(input []byte, table []uint32, ip int, shift uint) int {
 	tbl := unsafe.Pointer(unsafe.SliceData(table))
 	inputBytes := loadU64LE(input, uint(ip-3))
 	prevHash := hashBytesAtOffset(inputBytes, 0, shift)
 	curHash := hashBytesAtOffset(inputBytes, 3, shift)
-	*(*uint32)(unsafe.Add(tbl, uintptr(prevHash)*4)) = uint32(ip - baseIP - 3)
+	*(*uint32)(unsafe.Add(tbl, uintptr(prevHash)*4)) = uint32(ip - 3)
 	prevHash = hashBytesAtOffset(inputBytes, 1, shift)
-	*(*uint32)(unsafe.Add(tbl, uintptr(prevHash)*4)) = uint32(ip - baseIP - 2)
+	*(*uint32)(unsafe.Add(tbl, uintptr(prevHash)*4)) = uint32(ip - 2)
 	prevHash = hashBytesAtOffset(inputBytes, 2, shift)
-	*(*uint32)(unsafe.Add(tbl, uintptr(prevHash)*4)) = uint32(ip - baseIP - 1)
+	*(*uint32)(unsafe.Add(tbl, uintptr(prevHash)*4)) = uint32(ip - 1)
 	curPtr := (*uint32)(unsafe.Add(tbl, uintptr(curHash)*4))
-	candidate := baseIP + int(*curPtr)
-	*curPtr = uint32(ip - baseIP)
+	candidate := int(*curPtr)
+	*curPtr = uint32(ip)
 	return candidate
 }
 
