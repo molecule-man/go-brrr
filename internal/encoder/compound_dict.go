@@ -234,30 +234,47 @@ func (d *PreparedDictionary) findCompoundMatch(
 	bestScore := out.score
 	bestLen := out.len
 
-	// Phase 1: distance cache.
-	for i := range 4 {
-		distance := distCache[i]
-		if distance <= boundary || distance > distanceOffset {
-			continue
-		}
-		offset := distanceOffset - distance
-		limit := min(sourceSize-offset, maxLength)
-		ml := uint(matchLen(source[offset:offset+limit], data[curMasked:curMasked+limit], int(limit)))
-		if ml >= 2 {
-			score := backwardReferenceScoreUsingLastDistance(ml)
-			if bestScore < score {
-				if i != 0 {
-					score -= backwardReferencePenaltyUsingLastDistance(uint(i))
-				}
+	// Phase 1: distance cache. distCache holds the last 4 backward references.
+	// To match a chunk of this dictionary the distance must lie in
+	// (boundary, distanceOffset]. For the typical caller the cache contains
+	// in-window (small) distances, so all 4 checks fail; bail out cheaply by
+	// skipping the loop when the maximum cached distance is already at or
+	// below boundary.
+	maxCachedDist := distCache[0]
+	if d := distCache[1]; d > maxCachedDist {
+		maxCachedDist = d
+	}
+	if d := distCache[2]; d > maxCachedDist {
+		maxCachedDist = d
+	}
+	if d := distCache[3]; d > maxCachedDist {
+		maxCachedDist = d
+	}
+	if maxCachedDist > boundary {
+		for i := range 4 {
+			distance := distCache[i]
+			if distance <= boundary || distance > distanceOffset {
+				continue
+			}
+			offset := distanceOffset - distance
+			limit := min(sourceSize-offset, maxLength)
+			ml := uint(matchLen(source[offset:offset+limit], data[curMasked:curMasked+limit], int(limit)))
+			if ml >= 2 {
+				score := backwardReferenceScoreUsingLastDistance(ml)
 				if bestScore < score {
-					bestScore = score
-					if ml > bestLen {
-						bestLen = ml
+					if i != 0 {
+						score -= backwardReferencePenaltyUsingLastDistance(uint(i))
 					}
-					out.len = ml
-					out.lenCodeDelta = 0
-					out.distance = distance
-					out.score = bestScore
+					if bestScore < score {
+						bestScore = score
+						if ml > bestLen {
+							bestLen = ml
+						}
+						out.len = ml
+						out.lenCodeDelta = 0
+						out.distance = distance
+						out.score = bestScore
+					}
 				}
 			}
 		}
