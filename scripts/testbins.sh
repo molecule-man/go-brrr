@@ -3,6 +3,11 @@ set -euo pipefail
 
 BASE_BRANCH="${BASE_BRANCH:-main}"
 
+# PGO_BEFORE / PGO_AFTER are optional paths to pprof CPU profiles passed to
+# `go test -pgo` when building the before/after binaries. Empty means no PGO.
+PGO_BEFORE="${PGO_BEFORE:-}"
+PGO_AFTER="${PGO_AFTER:-}"
+
 # FUNCALIGNS is a space-separated list of -funcalign=N values to build with
 # (Go 1.25+). For each value, a separate before/after binary pair is produced.
 # FUNCALIGN (singular) is accepted as a shorthand for FUNCALIGNS="$FUNCALIGN".
@@ -43,12 +48,11 @@ for fa in "${FAS[@]}"; do
     read -r BEFORE_BIN _ <<< "$(bin_paths "$fa")"
     label="${fa:+ (funcalign=$fa)}"
     echo "Building test binary for $BASE_BRANCH${label}..."
+    args=(-c -o "$BEFORE_BIN")
     flag="$(build_flags_for "$fa")"
-    if [[ -n "$flag" ]]; then
-        (cd "$WORKTREE_DIR/benchmarks" && go test -c "$flag" -o "$BEFORE_BIN" .)
-    else
-        (cd "$WORKTREE_DIR/benchmarks" && go test -c -o "$BEFORE_BIN" .)
-    fi
+    [[ -n "$flag" ]] && args+=("$flag")
+    [[ -n "$PGO_BEFORE" ]] && args+=(-pgo "$PGO_BEFORE")
+    (cd "$WORKTREE_DIR/benchmarks" && go test "${args[@]}" .)
 done
 
 trap_worktree
@@ -57,12 +61,11 @@ for fa in "${FAS[@]}"; do
     read -r _ AFTER_BIN <<< "$(bin_paths "$fa")"
     label="${fa:+ (funcalign=$fa)}"
     echo "Building test binary for the current workdir${label}..."
+    args=(-c -o "$AFTER_BIN")
     flag="$(build_flags_for "$fa")"
-    if [[ -n "$flag" ]]; then
-        (cd benchmarks && go test -c "$flag" -o "$AFTER_BIN" .)
-    else
-        (cd benchmarks && go test -c -o "$AFTER_BIN" .)
-    fi
+    [[ -n "$flag" ]] && args+=("$flag")
+    [[ -n "$PGO_AFTER" ]] && args+=(-pgo "$PGO_AFTER")
+    (cd benchmarks && go test "${args[@]}" .)
 done
 
 # Manifest consumed by bench.sh / bench-compare.sh. One funcalign value per
