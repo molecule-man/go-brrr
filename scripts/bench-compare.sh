@@ -12,6 +12,7 @@ _ENV_COUNT="${COUNT:-}"
 _ENV_QUALITIES="${QUALITIES:-}"
 _ENV_PAYLOADS="${PAYLOADS:-}"
 _ENV_HASHERS="${HASHERS:-}"
+_ENV_BENCHES="${BENCHES:-}"
 
 load_profile() {
     local profile="$1"
@@ -30,7 +31,7 @@ load_profile() {
             ;;
         encc)
             BENCHTIME="2s"; COUNT=12
-            BENCHES=("CompressCorpusFile")
+            BENCHES=("Compress")
             QUALITIES=(4 6)
             PAYLOADS=()
             ;;
@@ -57,6 +58,9 @@ load_profile() {
 apply_env_overrides() {
     [[ -n "$_ENV_BENCHTIME" ]] && BENCHTIME="$_ENV_BENCHTIME"
     [[ -n "$_ENV_COUNT" ]] && COUNT="$_ENV_COUNT"
+    if [[ -n "$_ENV_BENCHES" ]]; then
+        read -ra BENCHES <<< "$_ENV_BENCHES"
+    fi
     if [[ -n "$_ENV_QUALITIES" ]]; then
         if [[ "$_ENV_QUALITIES" == "all" ]]; then
             QUALITIES=(0 1 2 3 4 5 6 7 8 9 10 11)
@@ -164,14 +168,21 @@ for profile in "${PROFILES[@]}"; do
 
     for b in "${BENCHES[@]}"; do
         case "$b" in
-            CompressCorpusFile)
-                for rawfile in "$BENCH_CORPUS_DIR"/*; do
-                    [[ -f "$rawfile" ]] || continue
-                    [[ "$rawfile" == *.br ]] && continue
+            Compress)
+                for p in "${PAYLOADS[@]}"; do
                     for q in "${QUALITIES[@]}"; do
-                        BENCH_CORPUS_FILE="$rawfile" ./scripts/bench.sh "CompressCorpusFile\$/q=$q\$" > /dev/null
+                        ./scripts/bench.sh "$b\$/q=$q\$/$p\$" > /dev/null
                     done
                 done
+                if [[ -n "${BENCH_CORPUS_DIR:-}" ]]; then
+                    for rawfile in "$BENCH_CORPUS_DIR"/*; do
+                        [[ -f "$rawfile" ]] || continue
+                        [[ "$rawfile" == *.br ]] && continue
+                        for q in "${QUALITIES[@]}"; do
+                            ./scripts/bench.sh "$b\$/q=$q\$/corpus_$(basename "$rawfile")\$" > /dev/null
+                        done
+                    done
+                fi
                 ;;
             DecompressCorpusFile)
                 for brfile in "$BENCH_CORPUS_DIR"/*.br; do
@@ -184,11 +195,6 @@ for profile in "${PROFILES[@]}"; do
                     for h in "${HASHERS[@]}"; do
                         ./scripts/bench.sh "$b\$/h=$h\$/$p\$" > /dev/null
                     done
-                done
-                ;;
-            CompressDict)
-                for q in "${QUALITIES[@]}"; do
-                    ./scripts/bench.sh "$b\$/q=$q\$" > /dev/null
                 done
                 ;;
             *)

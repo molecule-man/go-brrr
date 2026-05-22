@@ -181,11 +181,29 @@ func benchParamSuffix(lgwin int, sizeHint uint) string {
 	return s
 }
 
+// minDictQuality is the lowest quality level whose encoder accepts a compound
+// dictionary; q0/q1 reject [brrr.WriterOptions.Dictionaries].
+const minDictQuality = 2
+
 func BenchmarkCompress(b *testing.B) {
 	lgwin := benchLGWin()
 	sizeHint := benchSizeHint()
 
+	benchDictEnv := os.Getenv("BENCH_DICT")
+	var fileDict []byte
+	if path := resolveUserPath(benchDictEnv); path != "" {
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			fileDict, err = os.ReadFile(path)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+
 	for q := range 12 {
+		if benchDictEnv != "" && q < minDictQuality {
+			continue
+		}
 		b.Run(fmt.Sprintf("q=%d", q), func(b *testing.B) {
 			suffix := benchParamSuffix(lgwin, sizeHint)
 
@@ -199,14 +217,34 @@ func BenchmarkCompress(b *testing.B) {
 					payloads[i] = data
 				}
 
+				var dict []byte
+				switch {
+				case fileDict != nil:
+					dict = fileDict
+				case benchDictEnv != "" && len(payloads) > 0:
+					p := payloads[0]
+					dict = p[:len(p)*20/100]
+				}
+
 				b.Run("payload="+tc.name+suffix, func(b *testing.B) {
 					b.Run("impl=go-brrr", func(b *testing.B) {
-						w, err := brrr.NewWriterOptions(io.Discard, q, brrr.WriterOptions{LGWin: lgwin, SizeHint: sizeHint})
+						opts := brrr.WriterOptions{LGWin: lgwin, SizeHint: sizeHint}
+						if dict != nil {
+							pd, err := brrr.PrepareDictionary(dict)
+							if err != nil {
+								b.Fatal(err)
+							}
+							opts.Dictionaries = []*brrr.PreparedDictionary{pd}
+						}
+						w, err := brrr.NewWriterOptions(io.Discard, q, opts)
 						if err != nil {
 							b.Fatal(err)
 						}
 						benchCompress(b, w, payloads)
 					})
+					if dict != nil {
+						return
+					}
 					for _, ec := range extraCompressors {
 						b.Run("impl="+ec.name, func(b *testing.B) {
 							w, err := ec.factory(io.Discard, q, lgwin)
@@ -278,103 +316,6 @@ func BenchmarkCompressHasher(b *testing.B) {
 				})
 			}
 		})
-	}
-}
-
-//nolint:unused // oneshotDictCompressorFactory is used by extraDictCompressBenches.
-type oneshotDictCompressorFactory func(w io.Writer, quality int, dict []byte) (io.WriteCloser, error)
-
-// extraDictCompressBenches holds dict compress benchmarks that need custom
-// setup (e.g. managing PreparedDictionary lifetime).
-var extraDictCompressBenches []struct {
-	name string
-	fn   func(b *testing.B, input []byte, quality int, dict []byte)
-}
-
-func BenchmarkCompressDict(b *testing.B) {
-	var benchDict []byte
-	if dictPath := resolveUserPath(os.Getenv("BENCH_DICT")); dictPath != "" {
-		var err error
-		benchDict, err = os.ReadFile(dictPath)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-
-	cases := benchTestCases(b)
-	if corpusFile := resolveUserPath(os.Getenv("BENCH_CORPUS_FILE")); corpusFile != "" {
-		cases = []testCase{{name: filepath.Base(corpusFile), paths: []string{corpusFile}}}
-	}
-
-	for _, tc := range cases {
-		if len(tc.paths) != 1 {
-			continue
-		}
-
-		b.Run("payload="+tc.name, func(b *testing.B) {
-			corpus, err := os.ReadFile(tc.paths[0])
-			if err != nil {
-				b.Fatal(err)
-			}
-
-			var dict, input []byte
-			if benchDict != nil {
-				dict = benchDict
-				input = corpus
-			} else {
-				dictEnd := len(corpus) * 20 / 100
-				inputStart := len(corpus) * 10 / 100
-				dict = corpus[:dictEnd]
-				input = corpus[inputStart:]
-			}
-
-			pd, err := brrr.PrepareDictionary(dict)
-			if err != nil {
-				b.Fatal(err)
-			}
-
-			for _, q := range []int{3, 4, 5, 6, 7, 8, 9, 10, 11} {
-				b.Run(fmt.Sprintf("q=%d", q), func(b *testing.B) {
-					b.Run("impl=go-brrr", func(b *testing.B) {
-						w, err := brrr.NewWriterOptions(io.Discard, q, brrr.WriterOptions{
-							Dictionaries: []*brrr.PreparedDictionary{pd},
-						})
-						if err != nil {
-							b.Fatal(err)
-						}
-						benchCompress(b, w, [][]byte{input})
-					})
-					for _, ec := range extraDictCompressBenches {
-						b.Run("impl="+ec.name, func(b *testing.B) {
-							ec.fn(b, input, q, dict)
-						})
-					}
-				})
-			}
-		})
-	}
-}
-
-//nolint:unused // benchCompressDictOneshot is used by extraDictCompressBenches.
-func benchCompressDictOneshot(b *testing.B, factory oneshotDictCompressorFactory, input []byte, quality int, dict []byte) {
-	b.Helper()
-	b.SetBytes(int64(len(input)))
-	b.ReportAllocs()
-
-	var buf bytes.Buffer
-
-	for b.Loop() {
-		buf.Reset()
-		w, err := factory(&buf, quality, dict)
-		if err != nil {
-			b.Fatal(err)
-		}
-		if _, err := w.Write(input); err != nil {
-			b.Fatal(err)
-		}
-		if err := w.Close(); err != nil {
-			b.Fatal(err)
-		}
 	}
 }
 
@@ -721,45 +662,6 @@ func BenchmarkDecompressDict(b *testing.B) {
 					benchDecompressDict(b, input, compressed, dict, ed.factory)
 				})
 			}
-		})
-	}
-}
-
-func BenchmarkCompressCorpusFile(b *testing.B) {
-	path := resolveUserPath(os.Getenv("BENCH_CORPUS_FILE"))
-	if path == "" {
-		b.Skip("BENCH_CORPUS_FILE not set")
-	}
-
-	payload, err := os.ReadFile(path)
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	lgwin := benchLGWin()
-	sizeHint := benchSizeHint()
-	name := filepath.Base(path)
-
-	for q := range 12 {
-		b.Run(fmt.Sprintf("q=%d", q), func(b *testing.B) {
-			b.Run("payload="+name+benchParamSuffix(lgwin, sizeHint), func(b *testing.B) {
-				b.Run("impl=go-brrr", func(b *testing.B) {
-					w, err := brrr.NewWriterOptions(io.Discard, q, brrr.WriterOptions{LGWin: lgwin, SizeHint: sizeHint})
-					if err != nil {
-						b.Fatal(err)
-					}
-					benchCompress(b, w, [][]byte{payload})
-				})
-				for _, ec := range extraCompressors {
-					b.Run("impl="+ec.name, func(b *testing.B) {
-						w, err := ec.factory(io.Discard, q, lgwin)
-						if err != nil {
-							b.Fatal(err)
-						}
-						benchCompress(b, w, [][]byte{payload})
-					})
-				}
-			})
 		})
 	}
 }
