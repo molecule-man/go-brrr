@@ -70,6 +70,32 @@ var testCases = []testCase{
 	{"LargeTechnical", []string{dataPath("brotli-ref", "tests", "testdata", "lcet10.txt")}},
 }
 
+// benchTestCases returns the standard testCases, extended with one entry per
+// file found in BENCH_CORPUS_DIR (named "corpus_<filename>") when that env
+// var is set. Subdirectories are skipped.
+func benchTestCases(b *testing.B) []testCase {
+	b.Helper()
+	cases := testCases
+	dir := resolveUserPath(os.Getenv("BENCH_CORPUS_DIR"))
+	if dir == "" {
+		return cases
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		b.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		cases = append(cases, testCase{
+			name:  "corpus_" + e.Name(),
+			paths: []string{filepath.Join(dir, e.Name())},
+		})
+	}
+	return cases
+}
+
 func benchLGWin() int {
 	if s := os.Getenv("BENCH_LGWIN"); s != "" {
 		v, err := strconv.Atoi(s)
@@ -163,7 +189,7 @@ func BenchmarkCompress(b *testing.B) {
 		b.Run(fmt.Sprintf("q=%d", q), func(b *testing.B) {
 			suffix := benchParamSuffix(lgwin, sizeHint)
 
-			for _, tc := range testCases {
+			for _, tc := range benchTestCases(b) {
 				payloads := make([][]byte, len(tc.paths))
 				for i, path := range tc.paths {
 					data, err := os.ReadFile(path)
@@ -230,7 +256,7 @@ var hasherBenchCases = []struct {
 func BenchmarkCompressHasher(b *testing.B) {
 	for _, hc := range hasherBenchCases {
 		b.Run("h="+hc.name, func(b *testing.B) {
-			for _, tc := range testCases {
+			for _, tc := range benchTestCases(b) {
 				payloads := make([][]byte, len(tc.paths))
 				for i, path := range tc.paths {
 					data, err := os.ReadFile(path)
@@ -275,7 +301,7 @@ func BenchmarkCompressDict(b *testing.B) {
 		}
 	}
 
-	cases := testCases
+	cases := benchTestCases(b)
 	if corpusFile := resolveUserPath(os.Getenv("BENCH_CORPUS_FILE")); corpusFile != "" {
 		cases = []testCase{{name: filepath.Base(corpusFile), paths: []string{corpusFile}}}
 	}
@@ -418,7 +444,7 @@ func BenchmarkCompressOneshot(b *testing.B) {
 		b.Run(fmt.Sprintf("q=%d", q), func(b *testing.B) {
 			suffix := benchParamSuffix(lgwin, sizeHint)
 
-			for _, tc := range testCases {
+			for _, tc := range benchTestCases(b) {
 				payloads := make([][]byte, len(tc.paths))
 				for i, path := range tc.paths {
 					data, err := os.ReadFile(path)
@@ -518,7 +544,7 @@ func BenchmarkDecompress(b *testing.B) {
 		b.Run(fmt.Sprintf("q=%d", q), func(b *testing.B) {
 			suffix := benchParamSuffix(lgwin, 0)
 
-			for _, tc := range testCases {
+			for _, tc := range benchTestCases(b) {
 				payloads := make([][]byte, len(tc.paths))
 				for i, path := range tc.paths {
 					data, err := os.ReadFile(path)
@@ -554,7 +580,7 @@ func BenchmarkDecompressOneshot(b *testing.B) {
 		b.Run(fmt.Sprintf("q=%d", q), func(b *testing.B) {
 			suffix := benchParamSuffix(lgwin, 0)
 
-			for _, tc := range testCases {
+			for _, tc := range benchTestCases(b) {
 				payloads := make([][]byte, len(tc.paths))
 				for i, path := range tc.paths {
 					data, err := os.ReadFile(path)
