@@ -98,12 +98,12 @@ func (block huffmanBlock) writeData(b *bitWriter) { //nolint:gocritic // stack c
 			bitOffset = writeBitsAt(buf, bitOffset, n0+n1+n2,
 				v0|v1<<n0|uint64(block.litBits[lit2])<<(n0+n1))
 		}
-		copyLen := cmd.copyLength()
+		copyLen := cmd.copyLen & 0x1FFFFFF
 		pos += uint(copyLen)
-		if copyLen != 0 && !cmd.usesLastDistance() {
-			distCode := cmd.distPrefixCode()
+		if copyLen != 0 && cmdCode >= 128 {
+			distCode := cmd.distPrefix & 0x3FF
 			distBitsLen := uint(block.distDepth[distCode])
-			distNumExtra := uint(cmd.distExtraBitsLen())
+			distNumExtra := uint(cmd.distPrefix >> 10)
 			// Merge the distance Huffman code and its extra bits into one
 			// writeBits call. distBitsLen ≤ 15, distNumExtra ≤ ~24, total ≤ 39 bits.
 			bitOffset = writeBitsAt(buf, bitOffset, distBitsLen+distNumExtra,

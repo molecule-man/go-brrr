@@ -178,10 +178,6 @@ func (c command) distPrefixCode() uint16 {
 	return c.distPrefix & 0x3FF
 }
 
-func (c command) distExtraBitsLen() uint16 {
-	return c.distPrefix >> 10
-}
-
 // copyLenCode returns the effective copy length code, applying the
 // signed delta stored in the high 7 bits of copyLen.
 func (c command) copyLenCode() uint32 {
