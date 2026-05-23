@@ -35,6 +35,29 @@ var insertOffset = [24]uint{
 	34, 50, 66, 98, 130, 194, 322, 578, 1090, 2114, 6210, 22594,
 }
 
+// copyLenCodeQ1Small precomputes the q1 copy-length command word for every
+// copyLen in [4, 133] - the dominant range on real-world corpora. The packed
+// uint32 is exactly the value to store into commands[]: bits 0..7 are the
+// command code (43..47 for cl<10, 48..57 for cl<134) and bits 8..23 are the
+// extra-bits payload. This replaces the bits.Len + shift chain in the
+// inner-repeat-match emit loop with one table load . ccode is recovered as `cmd & 0x7F`.
+var copyLenCodeQ1Small = func() [134]uint32 {
+	var t [134]uint32
+	for cl := 4; cl < 134; cl++ {
+		if cl < 10 {
+			t[cl] = uint32(cl + 38)
+			continue
+		}
+		tail := uint32(cl - 6)
+		nbits := uint32(bits.Len32(tail)) - 2
+		prefix := tail >> nbits
+		ccode := (nbits << 1) + prefix + 44
+		extra := tail - (prefix << nbits)
+		t[cl] = ccode | extra<<8
+	}
+	return t
+}()
+
 type twoPassCompressor struct {
 	arena      *twoPassArena
 	b          *bitWriter
@@ -222,26 +245,21 @@ func (c *twoPassCompressor) createCommands(
 				ip += matched
 				lastDistance = base - candidate
 
-				// manually inlined encodeCopyLen
+				// Fast path for cl < 134 (the dominant range on real corpora):
+				// one table load delivers both the command word and ccode,
+				// replacing the bits.Len + shift chain.
 				var ccode uint
-				switch cl := uint(matched); {
-				case cl < 10:
-					ccode = cl + 38
-					commands[cmdPos] = uint32(ccode)
-				case cl < 134:
-					tail := cl - 6
-					nbits := uint(bits.Len(tail)) - 2
-					prefix := tail >> nbits
-					ccode = (nbits << 1) + prefix + 44
-					extra := tail - (prefix << nbits)
-					commands[cmdPos] = uint32(ccode) | uint32(extra)<<8
-				case cl < 2118:
+				if cl := uint(matched); cl < 134 {
+					cmd := copyLenCodeQ1Small[cl]
+					commands[cmdPos] = cmd
+					ccode = uint(cmd & 0x7F)
+				} else if cl < 2118 {
 					tail := cl - 70
 					nbits := uint(bits.Len(tail)) - 1
 					ccode = nbits + 52
 					extra := tail - (1 << nbits)
 					commands[cmdPos] = uint32(ccode) | uint32(extra)<<8
-				default:
+				} else {
 					ccode = 63
 					extra := cl - 2118
 					commands[cmdPos] = uint32(ccode) | uint32(extra)<<8
@@ -404,26 +422,21 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 				ip += matched
 				lastDistance = base - candidate
 
-				// manually inlined encodeCopyLen
+				// Fast path for cl < 134 (the dominant range on real corpora):
+				// one table load delivers both the command word and ccode,
+				// replacing the bits.Len + shift chain.
 				var ccode uint
-				switch cl := uint(matched); {
-				case cl < 10:
-					ccode = cl + 38
-					commands[cmdPos] = uint32(ccode)
-				case cl < 134:
-					tail := cl - 6
-					nbits := uint(bits.Len(tail)) - 2
-					prefix := tail >> nbits
-					ccode = (nbits << 1) + prefix + 44
-					extra := tail - (prefix << nbits)
-					commands[cmdPos] = uint32(ccode) | uint32(extra)<<8
-				case cl < 2118:
+				if cl := uint(matched); cl < 134 {
+					cmd := copyLenCodeQ1Small[cl]
+					commands[cmdPos] = cmd
+					ccode = uint(cmd & 0x7F)
+				} else if cl < 2118 {
 					tail := cl - 70
 					nbits := uint(bits.Len(tail)) - 1
 					ccode = nbits + 52
 					extra := tail - (1 << nbits)
 					commands[cmdPos] = uint32(ccode) | uint32(extra)<<8
-				default:
+				} else {
 					ccode = 63
 					extra := cl - 2118
 					commands[cmdPos] = uint32(ccode) | uint32(extra)<<8
