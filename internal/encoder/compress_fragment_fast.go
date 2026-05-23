@@ -39,6 +39,31 @@ var cmdHistoSeed = [128]uint32{
 	1, 1, 1, 1, 0, 0, 0, 0,
 }
 
+// copyLenCodeInfo packs the per-copyLen encoding for the inner-repeat-match
+// fast emit path (copyLen ∈ [5, 133]). Replaces the branch + bits.Len + extra
+// shifts in the hot loop with a single table load, freeing the CL register
+// from extra shift-count contention in the encoding block.
+//
+// Layout: bits 0..7 = ccode (in [19, 33]); bits 8..15 = nbits (in [0, 5]);
+// bits 16..31 = cextra (in [0, 31]).
+var copyLenCodeInfo = func() [134]uint32 {
+	var t [134]uint32
+	for copyLen := 5; copyLen < 134; copyLen++ {
+		var ccode, nbits, cextra uint32
+		if copyLen < 10 {
+			ccode = uint32(copyLen) + 14
+		} else {
+			tail := uint32(copyLen - 6)
+			nbits = uint32(bits.Len32(tail)) - 2
+			prefix := tail >> nbits
+			ccode = (nbits << 1) + prefix + 20
+			cextra = tail - (prefix << nbits)
+		}
+		t[copyLen] = ccode | (nbits << 8) | (cextra << 16)
+	}
+	return t
+}()
+
 type fragmentCompressor struct {
 	arena          *onePassArena
 	b              *bitWriter
@@ -248,23 +273,16 @@ func (c *fragmentCompressor) writeCommands() {
 				dBits := uint64(cmdBits[distcode]) | uint64(dd-dOffset)<<dDepth
 				dLen := dDepth + dNbits
 
-				// Copy length: depth-only when copyLen < 10, else depth+nbits.
-				var cBits uint64
-				var cLen uint
-				var ccode uint
-				if copyLen < 10 {
-					ccode = copyLen + 14
-					cBits = uint64(cmdBits[ccode])
-					cLen = uint(depth[ccode])
-				} else {
-					tail := copyLen - 6
-					nbits := (uint(bits.Len(tail)) - 2) & 63
-					prefix := tail >> nbits
-					ccode = (nbits << 1) + prefix + 20
-					d := uint(depth[ccode]) & 63
-					cBits = uint64(cmdBits[ccode]) | uint64(tail-(prefix<<nbits))<<d
-					cLen = d + nbits
-				}
+				// Copy length: lookup precomputed (ccode, nbits, cextra) so the
+				// hot path is one table load + one depth/bits load instead of
+				// the bits.Len + shift sequence (frees CL across the block).
+				info := copyLenCodeInfo[copyLen]
+				ccode := uint(info & 0xFF)
+				nbits := uint((info >> 8) & 0xFF)
+				cextra := uint(info >> 16)
+				d := uint(depth[ccode]) & 63
+				cBits := uint64(cmdBits[ccode]) | uint64(cextra)<<d
+				cLen := d + nbits
 
 				// Combined ≤ 51 bits, safely under the 56-bit writeBits limit.
 				c.b.writeBits(cLen+dLen, cBits|dBits<<(cLen&63))
