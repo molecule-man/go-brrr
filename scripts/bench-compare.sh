@@ -31,7 +31,7 @@ load_profile() {
             ;;
         encc)
             BENCHTIME="2s"; COUNT=12
-            BENCHES=("Compress")
+            BENCHES=("CompressCorpusFile")
             QUALITIES=(4 6)
             PAYLOADS=()
             ;;
@@ -168,21 +168,14 @@ for profile in "${PROFILES[@]}"; do
 
     for b in "${BENCHES[@]}"; do
         case "$b" in
-            Compress)
-                for p in "${PAYLOADS[@]}"; do
+            CompressCorpusFile)
+                for rawfile in "$BENCH_CORPUS_DIR"/*; do
+                    [[ -f "$rawfile" ]] || continue
+                    [[ "$rawfile" == *.br ]] && continue
                     for q in "${QUALITIES[@]}"; do
-                        ./scripts/bench.sh "$b\$/q=$q\$/$p\$" > /dev/null
+                        ./scripts/bench.sh "Compress\$/q=$q\$/corpus_$(basename "$rawfile")\$" > /dev/null
                     done
                 done
-                if [[ -n "${BENCH_CORPUS_DIR:-}" ]]; then
-                    for rawfile in "$BENCH_CORPUS_DIR"/*; do
-                        [[ -f "$rawfile" ]] || continue
-                        [[ "$rawfile" == *.br ]] && continue
-                        for q in "${QUALITIES[@]}"; do
-                            ./scripts/bench.sh "$b\$/q=$q\$/corpus_$(basename "$rawfile")\$" > /dev/null
-                        done
-                    done
-                fi
                 ;;
             DecompressCorpusFile)
                 for brfile in "$BENCH_CORPUS_DIR"/*.br; do
