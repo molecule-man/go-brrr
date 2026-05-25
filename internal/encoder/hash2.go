@@ -5,6 +5,7 @@ package encoder
 
 import (
 	"math/bits"
+	"unsafe"
 
 	"github.com/molecule-man/go-brrr/internal/core"
 )
@@ -617,13 +618,22 @@ func (h *h2) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos ui
 			insCode := getInsertLenCode(insertLength)
 			copyCode := getCopyLenCode(effectiveCopyLen)
 			cmdPrefix := combineLengthCodes(insCode, copyCode, (distPrefix&0x3FF) == 0)
-			s.commands = append(s.commands, command{
-				insertLen:  uint32(insertLength),
-				copyLen:    uint32(sr.len) | (delta << 25),
-				distExtra:  distExtra,
-				cmdPrefix:  cmdPrefix,
-				distPrefix: distPrefix,
-			})
+			// Direct-write to the slice slot via unsafe.Add to skip the
+			// composite-literal autotmp zero-init + MOVUPS load+store
+			// roundtrip. The manual len bump avoids the bounds check the
+			// compiler emits on `s.commands[:n+1]` (provably dead after the
+			// `n == cap` branch, but not eliminated).
+			n := len(s.commands)
+			if n == cap(s.commands) {
+				s.commands = append(s.commands, command{})
+			}
+			slot := (*command)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(s.commands)), uintptr(n)*unsafe.Sizeof(command{})))
+			slot.insertLen = uint32(insertLength)
+			slot.copyLen = uint32(sr.len) | (delta << 25)
+			slot.distExtra = distExtra
+			slot.cmdPrefix = cmdPrefix
+			slot.distPrefix = distPrefix
+			(*[3]int)(unsafe.Pointer(&s.commands))[1] = n + 1
 			if s.cmdHisto != nil {
 				s.cmdHisto[cmdPrefix]++
 				if cmdPrefix >= 128 {
