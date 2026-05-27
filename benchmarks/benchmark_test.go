@@ -72,28 +72,53 @@ var testCases = []testCase{
 
 // benchTestCases returns the standard testCases, extended with one entry per
 // file found in BENCH_CORPUS_DIR (named "corpus_<filename>") when that env
-// var is set. Subdirectories are skipped.
+// var is set. Subdirectories are skipped. When PAYLOAD_MIN_SIZE is set,
+// payloads smaller than the threshold are dropped and test cases left with no
+// payloads are omitted entirely.
 func benchTestCases(b *testing.B) []testCase {
 	b.Helper()
 	cases := testCases
 	dir := resolveUserPath(os.Getenv("BENCH_CORPUS_DIR"))
-	if dir == "" {
+	if dir != "" {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			b.Fatal(err)
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			cases = append(cases, testCase{
+				name:  "corpus_" + e.Name(),
+				paths: []string{filepath.Join(dir, e.Name())},
+			})
+		}
+	}
+
+	minSize := payloadMinSize()
+	if minSize == 0 {
 		return cases
 	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		b.Fatal(err)
-	}
-	for _, e := range entries {
-		if e.IsDir() {
+
+	filtered := make([]testCase, 0, len(cases))
+	for _, tc := range cases {
+		paths := make([]string, 0, len(tc.paths))
+		for _, path := range tc.paths {
+			info, err := os.Stat(path)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if info.Size() < int64(minSize) {
+				continue
+			}
+			paths = append(paths, path)
+		}
+		if len(paths) == 0 {
 			continue
 		}
-		cases = append(cases, testCase{
-			name:  "corpus_" + e.Name(),
-			paths: []string{filepath.Join(dir, e.Name())},
-		})
+		filtered = append(filtered, testCase{name: tc.name, paths: paths})
 	}
-	return cases
+	return filtered
 }
 
 func benchLGWin() int {
@@ -161,6 +186,24 @@ func benchChunkSize() int {
 	}
 	if v < 0 {
 		panic(fmt.Sprintf("invalid BENCH_CHUNK_SIZE=%q: must be >= 0", s))
+	}
+	return v
+}
+
+// payloadMinSize returns the minimum payload size in bytes read from
+// PAYLOAD_MIN_SIZE. benchTestCases drops any payload smaller than this from
+// the bench matrix. 0 (the default) keeps all payloads.
+func payloadMinSize() int {
+	s := os.Getenv("PAYLOAD_MIN_SIZE")
+	if s == "" {
+		return 0
+	}
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		panic(fmt.Sprintf("invalid PAYLOAD_MIN_SIZE=%q: %v", s, err))
+	}
+	if v < 0 {
+		panic(fmt.Sprintf("invalid PAYLOAD_MIN_SIZE=%q: must be >= 0", s))
 	}
 	return v
 }
