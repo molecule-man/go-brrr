@@ -4,6 +4,7 @@ package encoder
 
 import (
 	"errors"
+	"unsafe"
 )
 
 // MaxCompoundDicts is the upper bound on compound dictionary chunks per
@@ -304,8 +305,13 @@ func (d *PreparedDictionary) findCompoundMatch(
 	}
 	maxValidOffset := sourceSize - bestLen
 	curProbe := loadU32LE(data, curMasked+bestLen-3)
+	// Pin items.data into a single local pointer: the gc compiler otherwise
+	// spills d and reloads both items.data and items.len from the slice header
+	// on every iteration. The chain is built so every visited index is within
+	// d.items, so the bounds check is provably unnecessary.
+	itemsPtr := unsafe.Pointer(unsafe.SliceData(d.items))
 	for i := d.slotOffsets[slot] + uint32(head); ; i++ {
-		item := d.items[i]
+		item := *(*uint32)(unsafe.Add(itemsPtr, uintptr(i)*4))
 		offset := uint(item & 0x7FFFFFFF)
 		distance := distanceOffset - offset
 		// limit (= min(sourceSize-offset, maxLength)) is computed lazily after
