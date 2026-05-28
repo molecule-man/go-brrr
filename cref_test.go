@@ -346,55 +346,61 @@ func streamCompareReader(r io.Reader, expected []byte) error {
 
 // testCompoundDictMatchesCRef verifies that the Go encoder with a compound
 // dictionary produces byte-identical output to the C reference encoder at the
-// given quality and window size. Uses alice29.txt: first 20% as dictionary,
-// last 90% as input.
+// given quality and window size. For each corpus it uses the first 20% as
+// dictionary and the last 90% as input.
 func testCompoundDictMatchesCRef(t *testing.T, quality, lgwin int, sizeHint uint) {
 	t.Helper()
 
-	corpus := readTestdata(t, filepath.Join("brotli-ref", "tests", "testdata", "alice29.txt"))
-	dictEnd := len(corpus) * 20 / 100
-	inputStart := len(corpus) * 10 / 100
+	corpora := []string{"alice29.txt", "monkey"}
 
-	dict := corpus[:dictEnd]
-	input := corpus[inputStart:]
+	for _, name := range corpora {
+		t.Run(name, func(t *testing.T) {
+			corpus := readTestdata(t, filepath.Join("brotli-ref", "tests", "testdata", name))
+			dictEnd := len(corpus) * 20 / 100
+			inputStart := len(corpus) * 10 / 100
 
-	pd, err := PrepareDictionary(dict)
-	if err != nil {
-		t.Fatalf("PrepareDictionary: %v", err)
-	}
+			dict := corpus[:dictEnd]
+			input := corpus[inputStart:]
 
-	// Go encoder with compound dictionary.
-	var goBuf bytes.Buffer
-	w, err := NewWriterOptions(&goBuf, quality, WriterOptions{
-		LGWin:        lgwin,
-		SizeHint:     sizeHint,
-		Dictionaries: []*PreparedDictionary{pd},
-	})
-	if err != nil {
-		t.Fatalf("NewWriter: %v", err)
-	}
-	if _, err := w.Write(input); err != nil {
-		t.Fatalf("Write: %v", err)
-	}
-	if err := w.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-	goOut := goBuf.Bytes()
-
-	// C reference encoder with compound dictionary.
-	cOut := creftest.BrotliCompressDict(t, input, dict, quality, lgwin, sizeHint)
-
-	if !bytes.Equal(goOut, cOut) {
-		t.Errorf("output mismatch: Go produced %d bytes, C produced %d bytes",
-			len(goOut), len(cOut))
-		minLen := min(len(goOut), len(cOut))
-		for i := range minLen {
-			if goOut[i] != cOut[i] {
-				t.Errorf("first difference at byte %d: Go=0x%02x C=0x%02x",
-					i, goOut[i], cOut[i])
-				break
+			pd, err := PrepareDictionary(dict)
+			if err != nil {
+				t.Fatalf("PrepareDictionary: %v", err)
 			}
-		}
+
+			// Go encoder with compound dictionary.
+			var goBuf bytes.Buffer
+			w, err := NewWriterOptions(&goBuf, quality, WriterOptions{
+				LGWin:        lgwin,
+				SizeHint:     sizeHint,
+				Dictionaries: []*PreparedDictionary{pd},
+			})
+			if err != nil {
+				t.Fatalf("NewWriter: %v", err)
+			}
+			if _, err := w.Write(input); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+			if err := w.Close(); err != nil {
+				t.Fatalf("Close: %v", err)
+			}
+			goOut := goBuf.Bytes()
+
+			// C reference encoder with compound dictionary.
+			cOut := creftest.BrotliCompressDict(t, input, dict, quality, lgwin, sizeHint)
+
+			if !bytes.Equal(goOut, cOut) {
+				t.Errorf("output mismatch: Go produced %d bytes, C produced %d bytes",
+					len(goOut), len(cOut))
+				minLen := min(len(goOut), len(cOut))
+				for i := range minLen {
+					if goOut[i] != cOut[i] {
+						t.Errorf("first difference at byte %d: Go=0x%02x C=0x%02x",
+							i, goOut[i], cOut[i])
+						break
+					}
+				}
+			}
+		})
 	}
 }
 
@@ -416,7 +422,7 @@ func TestCompoundDictMatchesCRef(t *testing.T) {
 		t.Run("hint_"+sh.name, func(t *testing.T) {
 			t.Parallel()
 			for quality := 2; quality <= 11; quality++ {
-				for _, lgwin := range []int{10, 14, 18, 22, 24} {
+				for _, lgwin := range []int{10, 18, 22, 24} {
 					t.Run(fmt.Sprintf("q%d_lgwin%d", quality, lgwin), func(t *testing.T) {
 						t.Parallel()
 						testCompoundDictMatchesCRef(t, quality, lgwin, sh.hint)

@@ -225,8 +225,9 @@ func benchParamSuffix(lgwin int, sizeHint uint) string {
 }
 
 // minDictQuality is the lowest quality level whose encoder accepts a compound
-// dictionary; q0/q1 reject [brrr.WriterOptions.Dictionaries].
-const minDictQuality = 2
+// dictionary; q0/q1 reject [brrr.WriterOptions.Dictionaries]. q2 accepts it but
+// doesn't use it
+const minDictQuality = 3
 
 func BenchmarkCompress(b *testing.B) {
 	lgwin := benchLGWin()
