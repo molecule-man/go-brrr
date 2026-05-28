@@ -80,7 +80,7 @@ apply_env_overrides() {
 # PGO_BEFORE / PGO_AFTER so testbins.sh builds the test binaries with -pgo.
 # The bench filter is `Compress$/q=<qualities>$` where <qualities> is the
 # union of QUALITIES across all requested profiles after env overrides.
-collect_pgo_profiles() {
+collect_pgo_profile() {
     local -A qset=()
     local profile q
     for profile in "${PROFILES[@]}"; do
@@ -116,15 +116,12 @@ collect_pgo_profiles() {
     rm -rf "$pgo_wt/brotli-ref"
     ln -s "$PWD/brotli-ref" "$pgo_wt/brotli-ref"
 
-    echo "=== Collecting PGO profile from $base_branch -> /tmp/cpu.before (-bench='$bench_pattern') ==="
-    (cd "$pgo_wt/benchmarks" && go test -run '^$' -bench "$bench_pattern" -benchtime 1s -cpu 1 -cpuprofile /tmp/cpu.before .)
+    echo "=== Collecting PGO profile from $base_branch -> /tmp/cpu.prof (-bench='$bench_pattern') ==="
+    (cd "$pgo_wt/benchmarks" && go test -run '^$' -bench "$bench_pattern" -benchtime 1s -cpu 1 -cpuprofile /tmp/cpu.prof .)
     git worktree remove --force "$pgo_wt" 2>/dev/null || rm -rf "$pgo_wt"
 
-    echo "=== Collecting PGO profile from workdir -> /tmp/cpu.after (-bench='$bench_pattern') ==="
-    (cd benchmarks && go test -run '^$' -bench "$bench_pattern" -benchtime 1s -cpu 1 -cpuprofile /tmp/cpu.after .)
-
-    export PGO_BEFORE=/tmp/cpu.before
-    export PGO_AFTER=/tmp/cpu.after
+    export PGO_BEFORE=/tmp/cpu.prof
+    export PGO_AFTER=/tmp/cpu.prof
 }
 
 # Prints the filtered B/s benchstat table and geomean lines for whatever data
@@ -192,7 +189,7 @@ trap '_on_exit' EXIT
 trap '_on_interrupt' INT TERM
 
 if [[ "${BENCH_PGO:-}" == "1" ]]; then
-    collect_pgo_profiles
+    collect_pgo_profile
 fi
 
 ./scripts/testbins.sh
