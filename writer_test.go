@@ -94,6 +94,99 @@ func TestWriterFlush(t *testing.T) {
 	}
 }
 
+// TestWriterFastChunkedBoundedMemory feeds the q0/q1 fast path far more input
+// than one fragment (1<<lgwin) in small chunks, forcing Write to drain full
+// fragments mid-stream rather than buffering the whole input. The compressed
+// bytes must be identical to compressing the same input in a single Write, so
+// chunking changes neither correctness nor ratio.
+func TestWriterFastChunkedBoundedMemory(t *testing.T) {
+	const lgwin = 10 // fragment size 1<<10 = 1024 bytes
+	input := bytes.Repeat([]byte("The quick brown fox jumps over the lazy dog. "), 2000)
+
+	compressOnce := func(t *testing.T, level int, chunk int) []byte {
+		t.Helper()
+		var buf bytes.Buffer
+		w, err := NewWriterOptions(&buf, level, WriterOptions{LGWin: lgwin})
+		if err != nil {
+			t.Fatalf("NewWriter: %v", err)
+		}
+		if chunk == 0 {
+			chunk = len(input)
+		}
+		for i := 0; i < len(input); i += chunk {
+			end := min(i+chunk, len(input))
+			if _, err := w.Write(input[i:end]); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+		}
+		if err := w.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		return buf.Bytes()
+	}
+
+	for _, level := range []int{0, 1} {
+		t.Run(fmt.Sprintf("quality_%d", level), func(t *testing.T) {
+			oneShot := compressOnce(t, level, 0)
+			chunked := compressOnce(t, level, 100)
+
+			if !bytes.Equal(chunked, oneShot) {
+				t.Errorf("chunked output differs from single-shot: %d vs %d bytes",
+					len(chunked), len(oneShot))
+			}
+			decompressed := creftest.BrotliDecompress(t, chunked)
+			if !bytes.Equal(decompressed, input) {
+				t.Errorf("round-trip mismatch: got %d bytes, want %d bytes",
+					len(decompressed), len(input))
+			}
+		})
+	}
+}
+
+// TestWriterFastFlushAfterDrain exercises a Flush on the q0/q1 fast path after
+// Write has already drained full fragments mid-stream, so flushCarry must
+// byte-align the continued bitstream correctly.
+func TestWriterFastFlushAfterDrain(t *testing.T) {
+	const lgwin = 10
+	part1 := bytes.Repeat([]byte("alpha beta gamma delta "), 300) // > many fragments
+	part2 := bytes.Repeat([]byte("epsilon zeta eta theta "), 300)
+	want := append(append([]byte{}, part1...), part2...)
+
+	for _, level := range []int{0, 1} {
+		t.Run(fmt.Sprintf("quality_%d", level), func(t *testing.T) {
+			var buf bytes.Buffer
+			w, err := NewWriterOptions(&buf, level, WriterOptions{LGWin: lgwin})
+			if err != nil {
+				t.Fatalf("NewWriter: %v", err)
+			}
+			for i := 0; i < len(part1); i += 100 {
+				end := min(i+100, len(part1))
+				if _, err := w.Write(part1[i:end]); err != nil {
+					t.Fatalf("Write part1: %v", err)
+				}
+			}
+			if err := w.Flush(); err != nil {
+				t.Fatalf("Flush: %v", err)
+			}
+			for i := 0; i < len(part2); i += 100 {
+				end := min(i+100, len(part2))
+				if _, err := w.Write(part2[i:end]); err != nil {
+					t.Fatalf("Write part2: %v", err)
+				}
+			}
+			if err := w.Close(); err != nil {
+				t.Fatalf("Close: %v", err)
+			}
+
+			decompressed := creftest.BrotliDecompress(t, buf.Bytes())
+			if !bytes.Equal(decompressed, want) {
+				t.Errorf("round-trip mismatch: got %d bytes, want %d bytes",
+					len(decompressed), len(want))
+			}
+		})
+	}
+}
+
 func TestWriterEmpty(t *testing.T) {
 	// Closing without writing any data should produce a valid empty stream.
 	for _, level := range writerLevels {

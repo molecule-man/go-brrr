@@ -1,5 +1,6 @@
 // Fast compressor: q0 (one-pass) and q1 (two-pass).
-// Buffers all input, compresses on Flush/Close in fragments of 1<<lgwin.
+// Compresses incrementally in fragments of 1<<lgwin, retaining at most one
+// fragment in memory; remaining data is emitted on Flush/Close.
 
 package encoder
 
@@ -24,20 +25,23 @@ var (
 	poolFastLiterals   sync.Pool
 )
 
-// fastCompressor implements Compressor for q0 and q1. Input is buffered
-// in-memory; output is produced in fragments at Flush/Close time.
+// fastCompressor implements Compressor for q0 and q1. Input is compressed
+// incrementally; at most one 1<<lgwin fragment is buffered in memory.
 type fastCompressor struct {
 	onePass *onePassArena // non-nil when quality == 0
 	twoPass *twoPassArena // non-nil when quality == 1
 
-	buf        []byte // buffered uncompressed input
+	buf        []byte // pending input, at most one fragment (1<<lgwin bytes)
 	outBuf     []byte // scratch for compressed output
 	table      []uint32
 	commandBuf []uint32 // q1 only
 	literalBuf []byte   // q1 only
 
-	quality     int
-	lgwin       int
+	carryBits uint // number of valid sub-byte bits held in carry (0..7)
+	quality   int
+	lgwin     int
+
+	carry       byte // trailing output bits (carryBits of them) not yet byte-complete
 	wroteHeader bool
 }
 
@@ -57,30 +61,69 @@ func newFastCompressor(quality, lgwin int) *fastCompressor {
 	return c
 }
 
-// Write buffers input. Compression runs at Flush/Close time.
-func (c *fastCompressor) Write(_ io.Writer, p []byte) (int, error) {
-	c.buf = append(c.buf, p...)
-	return len(p), nil
+// Write compresses input incrementally. Full fragments (1<<lgwin bytes) are
+// emitted to dst as they fill; at most one fragment is retained in memory, so
+// total buffering is bounded regardless of stream length. The final fragment
+// is deferred to Flush/Close, where it may be marked last.
+func (c *fastCompressor) Write(dst io.Writer, p []byte) (int, error) {
+	total := len(p)
+	blockSizeLimit := 1 << c.lgwin
+	for len(p) > 0 {
+		// With nothing buffered and more than a full fragment available,
+		// compress straight from p to avoid copying.
+		if len(c.buf) == 0 && len(p) > blockSizeLimit {
+			if err := c.emitFragment(dst, p[:blockSizeLimit], false); err != nil {
+				return total - len(p), err
+			}
+			p = p[blockSizeLimit:]
+			continue
+		}
+		room := blockSizeLimit - len(c.buf)
+		take := min(room, len(p))
+		c.buf = append(c.buf, p[:take]...)
+		p = p[take:]
+		// Emit only when the fragment is full and more input follows, so the
+		// last fragment stays buffered for Flush/Close.
+		if len(c.buf) == blockSizeLimit && len(p) > 0 {
+			if err := c.emitFragment(dst, c.buf, false); err != nil {
+				return total - len(p), err
+			}
+			c.buf = c.buf[:0]
+		}
+	}
+	return total, nil
 }
 
-// Flush compresses buffered input as non-final meta-blocks and emits them to
-// dst. After Flush the buffered input is empty.
+// Flush emits buffered input as a non-final meta-block and writes all complete
+// output bytes to dst. As in the C reference fast path, the trailing sub-byte
+// (at most 7 bits) is retained and continues into the next meta-block rather
+// than being padded out, so the bitstream stays continuous. The brotli stream
+// is not finalized.
 func (c *fastCompressor) Flush(dst io.Writer) error {
 	if len(c.buf) == 0 {
 		return nil
 	}
-	return c.compress(dst, false)
+	err := c.emitFragment(dst, c.buf, false)
+	c.buf = c.buf[:0]
+	return err
 }
 
-// Close compresses any remaining buffered input and emits the final meta-block.
+// Close emits any remaining buffered input as the final meta-block, finalizing
+// the brotli stream.
 func (c *fastCompressor) Close(dst io.Writer) error {
-	return c.compress(dst, true)
+	if err := c.emitFragment(dst, c.buf, true); err != nil {
+		return err
+	}
+	c.buf = c.buf[:0]
+	return nil
 }
 
 // Reset clears per-stream state for reuse with the same quality/lgwin.
 // The arena is preserved (not returned to pool) and re-initialized.
 func (c *fastCompressor) Reset() {
 	c.buf = c.buf[:0]
+	c.carry = 0
+	c.carryBits = 0
 	c.wroteHeader = false
 	if c.quality == 0 {
 		c.onePass.initCommandPrefixCodes()
@@ -117,28 +160,27 @@ func (c *fastCompressor) Release() {
 	} else {
 		c.buf = c.buf[:0]
 	}
+	c.carry = 0
+	c.carryBits = 0
 	c.quality = 0
 	c.lgwin = 0
 	c.wroteHeader = false
 	poolFastCompressor.Put(c)
 }
 
-// compress runs the fast encoder on buffered data and writes compressed
-// output to dst. If isLast is true the brotli stream is finalized.
-func (c *fastCompressor) compress(dst io.Writer, isLast bool) error {
-	// The C reference limits each fragment to 1<<lgwin bytes.
-	blockSizeLimit := 1 << c.lgwin
-
-	// Ensure the output buffer is large enough for the largest fragment.
-	// Worst case: uncompressed meta-block = header + data + padding.
-	maxBlock := min(len(c.buf), blockSizeLimit)
-	needed := maxBlock*2 + 1024
+// emitFragment compresses a single fragment (at most 1<<lgwin bytes) and writes
+// the resulting whole bytes to dst. Trailing sub-byte bits are retained in
+// c.carry and seeded into the next fragment, so consecutive fragments form one
+// continuous bitstream. If isLast is true the fragment finalizes the stream and
+// the output is byte-aligned.
+func (c *fastCompressor) emitFragment(dst io.Writer, block []byte, isLast bool) error {
+	// Worst case output: uncompressed meta-block = header + data + padding.
+	needed := len(block)*2 + 1024
 	if len(c.outBuf) < needed {
 		c.outBuf = getFastByteBuffer(&poolFastOutBuf, needed)
 	}
-	c.outBuf[0] = 0
-
-	b := bitWriter{buf: c.outBuf}
+	c.outBuf[0] = c.carry
+	b := bitWriter{buf: c.outBuf, bitOffset: c.carryBits}
 
 	if !c.wroteHeader {
 		// For quality 0-1 the C reference clamps the header lgwin to at
@@ -149,89 +191,51 @@ func (c *fastCompressor) compress(dst io.Writer, isLast bool) error {
 		c.wroteHeader = true
 	}
 
-	// Lazily grow command/literal buffers for q=1, sized to actual need.
-	if c.quality == 1 {
-		bufSize := min(maxBlock, twoPassBlockSize)
+	// Size and clear the hash table for this fragment, matching the C reference.
+	htsize := fastHashTableSize(c.quality, len(block))
+	switch c.quality {
+	case 0:
+		var smallTable32 [1024]uint32
+		var table []uint32
+		if htsize <= len(smallTable32) {
+			table = smallTable32[:htsize]
+		} else {
+			if len(c.table) < htsize {
+				c.table = getFastUint32Slice(htsize)
+			}
+			table = c.table[:htsize]
+		}
+		clear(table)
+		compressFragmentFast(c.onePass, block, isLast, table, &b)
+	case 1:
+		bufSize := min(len(block), twoPassBlockSize)
 		if len(c.commandBuf) < bufSize {
 			c.commandBuf = getFastCommandBuffer(bufSize)
 		}
 		if len(c.literalBuf) < bufSize {
 			c.literalBuf = getFastByteBuffer(&poolFastLiterals, bufSize)
 		}
+		if len(c.table) < htsize {
+			c.table = getFastUint32Slice(htsize)
+		}
+		table := c.table[:htsize]
+		clear(table)
+		compressFragmentTwoPass(c.twoPass, block, isLast,
+			c.commandBuf[:bufSize], c.literalBuf[:bufSize], table, &b)
 	}
 
-	input := c.buf
-	var smallTable32 [1024]uint32
-	var table32 []uint32
-	var table32Ptr *[]uint32
-	for len(input) > 0 || isLast {
-		blockSize := min(len(input), blockSizeLimit)
-		blockIsLast := isLast && blockSize == len(input)
-		block := input[:blockSize]
-		input = input[blockSize:]
-
-		// Size and clear hash table per block, matching the C reference.
-		htsize := fastHashTableSize(c.quality, blockSize)
-
-		switch c.quality {
-		case 0:
-			if htsize <= len(smallTable32) {
-				table := smallTable32[:htsize]
-				clear(table)
-				compressFragmentFast(c.onePass, block, blockIsLast, table, &b)
-				break
-			}
-			if len(table32) < htsize {
-				if table32Ptr == nil {
-					table32Ptr, table32 = getFastUint32Buffer(htsize)
-				} else {
-					*table32Ptr = make([]uint32, htsize)
-					table32 = *table32Ptr
-				}
-				clear(table32)
-			} else {
-				clear(table32[:htsize])
-			}
-			table := table32[:htsize]
-			compressFragmentFast(c.onePass, block, blockIsLast, table, &b)
-		case 1:
-			if len(c.table) < htsize {
-				c.table = getFastUint32Slice(htsize)
-				clear(c.table)
-			} else {
-				clear(c.table[:htsize])
-			}
-			table := c.table[:htsize]
-			compressFragmentTwoPass(c.twoPass, block, blockIsLast, c.commandBuf[:min(blockSize, twoPassBlockSize)], c.literalBuf[:min(blockSize, twoPassBlockSize)], table, &b)
-		}
-
-		// Flush compressed bytes between blocks to keep memory bounded.
-		n := b.bitOffset / 8
-		if n > 0 {
-			if _, err := dst.Write(c.outBuf[:n]); err != nil {
-				putFastUint32Buffer(table32Ptr, table32)
-				return err
-			}
-			// Carry trailing sub-byte bits to the start of the buffer.
-			c.outBuf[0] = c.outBuf[n]
-			b.bitOffset &= 7
-		}
-
-		if blockIsLast {
-			break
-		}
-	}
-	c.buf = c.buf[:0]
-
-	// Write any remaining sub-byte bits.
-	n := (b.bitOffset + 7) / 8
+	// Emit whole bytes; retain any trailing sub-byte bits for the next fragment.
+	n := b.bitOffset / 8
 	if n > 0 {
 		if _, err := dst.Write(c.outBuf[:n]); err != nil {
-			putFastUint32Buffer(table32Ptr, table32)
 			return err
 		}
 	}
-	putFastUint32Buffer(table32Ptr, table32)
+	// Retain any trailing sub-byte bits to seed the next fragment. A last
+	// fragment is byte-aligned by compressFragment*, so n*8 == bitOffset and
+	// carryBits is 0.
+	c.carry = c.outBuf[n]
+	c.carryBits = b.bitOffset & 7
 	return nil
 }
 
@@ -287,28 +291,6 @@ func putFastUint32Slice(buf []uint32) {
 	if cap(buf) != 0 {
 		buf = buf[:0]
 		poolFastTable32.Put(&buf)
-	}
-}
-
-func getFastUint32Buffer(n int) (*[]uint32, []uint32) {
-	if v := poolFastTable32.Get(); v != nil {
-		p := v.(*[]uint32)
-		buf := *p
-		if cap(buf) >= n {
-			return p, buf[:n]
-		}
-		*p = make([]uint32, n)
-		return p, *p
-	}
-	p := new([]uint32)
-	*p = make([]uint32, n)
-	return p, *p
-}
-
-func putFastUint32Buffer(p *[]uint32, buf []uint32) {
-	if p != nil && cap(buf) != 0 {
-		*p = buf[:0]
-		poolFastTable32.Put(p)
 	}
 }
 
