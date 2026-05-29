@@ -30,6 +30,10 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        tags: ["", "purego"]
+    name: test${{ matrix.tags && format(' ({0})', matrix.tags) || '' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -43,4 +47,4 @@ jobs:
         run: make lib/libbrotli_cref.a
 
       - name: Test
-        run: go test ./...
+        run: go test -tags '${{ matrix.tags }}' ./...
