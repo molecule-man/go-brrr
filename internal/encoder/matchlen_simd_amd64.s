@@ -4,18 +4,21 @@
 
 #include "textflag.h"
 
-// func matchLenSIMD(data []byte, a, b uint, limit int) int
+// func matchLenSIMD(dataPtr unsafe.Pointer, a, b uint, limit int) int
 //
-// Returns the number of bytes common to data[a:] and data[b:], up to limit.
-// Both ranges must contain at least limit valid bytes.
-TEXT ·matchLenSIMD(SB), NOSPLIT|NOFRAME, $0-56
-	MOVQ data_base+0(FP), AX
-	MOVQ a+24(FP), DI
-	MOVQ b+32(FP), SI
-	MOVQ limit+40(FP), R8
+// Returns the number of bytes common to *(dataPtr+a) and *(dataPtr+b),
+// up to limit. Both ranges must contain at least limit valid bytes.
+//
+// Pointer-based signature (rather than the larger []byte slice) cuts two
+// stack stores at every caller in hash5.go's hot match-finding loops.
+TEXT ·matchLenSIMD(SB), NOSPLIT|NOFRAME, $0-40
+	MOVQ dataPtr+0(FP), AX
+	MOVQ a+8(FP), DI
+	MOVQ b+16(FP), SI
+	MOVQ limit+24(FP), R8
 
-	LEAQ (AX)(DI*1), DI       // DI = &data[a]
-	LEAQ (AX)(SI*1), SI       // SI = &data[b]
+	LEAQ (AX)(DI*1), DI       // DI = dataPtr+a
+	LEAQ (AX)(SI*1), SI       // SI = dataPtr+b
 
 	XORQ R9, R9               // i = 0
 	MOVQ R8, R10
@@ -69,5 +72,5 @@ tail8_mismatch:
 	ADDQ R11, R9
 
 done:
-	MOVQ R9, ret+48(FP)
+	MOVQ R9, ret+32(FP)
 	RET

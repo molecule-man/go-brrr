@@ -4,5 +4,7 @@
 
 package encoder
 
+import "unsafe"
+
 //go:noescape
-func matchLenSIMD(data []byte, a, b uint, limit int) int
+func matchLenSIMD(dataPtr unsafe.Pointer, a, b uint, limit int) int

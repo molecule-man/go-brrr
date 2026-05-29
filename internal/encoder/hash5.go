@@ -11,7 +11,11 @@
 
 package encoder
 
-import "github.com/molecule-man/go-brrr/internal/core"
+import (
+	"unsafe"
+
+	"github.com/molecule-man/go-brrr/internal/core"
+)
 
 // H5 configuration constants for quality 5.
 const (
@@ -146,6 +150,11 @@ func (h *h5) findLongestMatch(
 	// is in bounds, eliminating per-access bounds checks in phases 1–3.
 	_ = data[ringBufferMask]
 
+	// Hoist the slice's underlying data pointer so the per-call matchLenSIMD
+	// stack-arg setup passes one word instead of the full three-word slice
+	// header (saves two stores per call across Phase 1 + Phase 2).
+	dataPtr := unsafe.Pointer(unsafe.SliceData(data))
+
 	curMasked := cur & ringBufferMask
 	bestScore := out.score
 	bestLen := out.len
@@ -169,7 +178,7 @@ func (h *h5) findLongestMatch(
 	if backward-1 < maxBackward {
 		prev := (cur - backward) & ringBufferMask
 		if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
-			ml := uint(matchLenSIMD(data, prev, curMasked, int(maxLength)))
+			ml := uint(matchLenSIMD(dataPtr, prev, curMasked, int(maxLength)))
 			if ml >= 3 || ml == 2 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
 				if bestScore < score {
@@ -187,7 +196,7 @@ func (h *h5) findLongestMatch(
 	if backward-1 < maxBackward {
 		prev := (cur - backward) & ringBufferMask
 		if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
-			ml := uint(matchLenSIMD(data, prev, curMasked, int(maxLength)))
+			ml := uint(matchLenSIMD(dataPtr, prev, curMasked, int(maxLength)))
 			if ml >= 3 || ml == 2 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
 				if bestScore < score {
@@ -208,7 +217,7 @@ func (h *h5) findLongestMatch(
 	if backward-1 < maxBackward {
 		prev := (cur - backward) & ringBufferMask
 		if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
-			ml := uint(matchLenSIMD(data, prev, curMasked, int(maxLength)))
+			ml := uint(matchLenSIMD(dataPtr, prev, curMasked, int(maxLength)))
 			if ml >= 3 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
 				if bestScore < score {
@@ -229,7 +238,7 @@ func (h *h5) findLongestMatch(
 	if backward-1 < maxBackward {
 		prev := (cur - backward) & ringBufferMask
 		if loadByte(data, curMasked+bestLen) == loadByte(data, prev+bestLen) {
-			ml := uint(matchLenSIMD(data, prev, curMasked, int(maxLength)))
+			ml := uint(matchLenSIMD(dataPtr, prev, curMasked, int(maxLength)))
 			if ml >= 3 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
 				if bestScore < score {
@@ -279,7 +288,7 @@ func (h *h5) findLongestMatch(
 			continue
 		}
 
-		ml := uint(matchLenSIMD(data, prevMasked, curMasked, int(maxLength)))
+		ml := uint(matchLenSIMD(dataPtr, prevMasked, curMasked, int(maxLength)))
 		if ml >= 4 {
 			backward := cur - prevRaw
 			score := backwardReferenceScore(ml, backward)
@@ -315,6 +324,7 @@ func (h *h5) findLongestMatchSmallContiguous(
 	dictNumLookups, dictNumMatches *uint,
 	out *hasherSearchResult,
 ) {
+	dataPtr := unsafe.Pointer(unsafe.SliceData(data))
 	bestScore := out.score
 	bestLen := out.len
 	key := h.hash(data, cur)
@@ -330,7 +340,7 @@ func (h *h5) findLongestMatchSmallContiguous(
 	if backward-1 < maxBackward {
 		prev := cur - backward
 		if loadByte(data, cur+bestLen) == loadByte(data, prev+bestLen) {
-			ml := uint(matchLenSIMD(data, prev, cur, int(maxLength)))
+			ml := uint(matchLenSIMD(dataPtr, prev, cur, int(maxLength)))
 			if ml >= 3 || ml == 2 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
 				if bestScore < score {
@@ -348,7 +358,7 @@ func (h *h5) findLongestMatchSmallContiguous(
 	if backward-1 < maxBackward {
 		prev := cur - backward
 		if loadByte(data, cur+bestLen) == loadByte(data, prev+bestLen) {
-			ml := uint(matchLenSIMD(data, prev, cur, int(maxLength)))
+			ml := uint(matchLenSIMD(dataPtr, prev, cur, int(maxLength)))
 			if ml >= 3 || ml == 2 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
 				if bestScore < score {
@@ -369,7 +379,7 @@ func (h *h5) findLongestMatchSmallContiguous(
 	if backward-1 < maxBackward {
 		prev := cur - backward
 		if loadByte(data, cur+bestLen) == loadByte(data, prev+bestLen) {
-			ml := uint(matchLenSIMD(data, prev, cur, int(maxLength)))
+			ml := uint(matchLenSIMD(dataPtr, prev, cur, int(maxLength)))
 			if ml >= 3 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
 				if bestScore < score {
@@ -390,7 +400,7 @@ func (h *h5) findLongestMatchSmallContiguous(
 	if backward-1 < maxBackward {
 		prev := cur - backward
 		if loadByte(data, cur+bestLen) == loadByte(data, prev+bestLen) {
-			ml := uint(matchLenSIMD(data, prev, cur, int(maxLength)))
+			ml := uint(matchLenSIMD(dataPtr, prev, cur, int(maxLength)))
 			if ml >= 3 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
 				if bestScore < score {
@@ -428,7 +438,7 @@ func (h *h5) findLongestMatchSmallContiguous(
 			continue
 		}
 
-		ml := uint(matchLenSIMD(data, prevRaw, cur, int(maxLength)))
+		ml := uint(matchLenSIMD(dataPtr, prevRaw, cur, int(maxLength)))
 		if ml >= 4 {
 			backward := cur - prevRaw
 			score := backwardReferenceScore(ml, backward)
@@ -469,6 +479,7 @@ func (h *h5) findLongestMatchSmallBuf(
 			dictNumLookups, dictNumMatches, out)
 		return
 	}
+	dataPtr := unsafe.Pointer(unsafe.SliceData(data))
 	curMasked := cur & ringBufferMask
 	bestScore := out.score
 	bestLen := out.len
@@ -501,7 +512,7 @@ func (h *h5) findLongestMatchSmallBuf(
 			continue
 		}
 
-		ml := uint(matchLenSIMD(data, prev, curMasked, int(maxLength)))
+		ml := uint(matchLenSIMD(dataPtr, prev, curMasked, int(maxLength)))
 		if ml >= 3 || (ml == 2 && i < 2) {
 			score := backwardReferenceScoreUsingLastDistance(ml)
 			if bestScore < score {
@@ -545,7 +556,7 @@ func (h *h5) findLongestMatchSmallBuf(
 			continue
 		}
 
-		ml := uint(matchLenSIMD(data, prev, curMasked, int(maxLength)))
+		ml := uint(matchLenSIMD(dataPtr, prev, curMasked, int(maxLength)))
 		if ml >= 4 {
 			score := backwardReferenceScore(ml, backward)
 			if bestScore < score {
