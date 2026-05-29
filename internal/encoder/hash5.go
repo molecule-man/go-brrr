@@ -427,14 +427,21 @@ func (h *h5) findLongestMatchSmallContiguous(
 		down = uint(n) - h5BlockSize
 	}
 	minPrev := cur - maxBackward
-	curProbe := loadU32LE(data, cur+bestLen-3)
+	// Hoist the per-iteration `prev + bestLen - 3` address computation by
+	// folding `bestLen - 3` into a base pointer. Inside the loop the probe
+	// load becomes a single `MOV` with `[probeBase + prev*1]`, instead of the
+	// `LEAQ prev+bestLen; MOV -3(base+lea)` pair the compiler emits when the
+	// loop-invariant `bestLen - 3` term is left inside loadU32LE. bestLen is
+	// >= 3 here, so the subtraction never underflows.
+	probeBase := unsafe.Add(dataPtr, bestLen-3)
+	curProbe := *(*uint32)(unsafe.Add(probeBase, cur))
 	for i := uint(n); i > down; {
 		i--
 		prevRaw := uint(bucket[i&h5BlockMask])
 		if prevRaw < minPrev {
 			break
 		}
-		if curProbe != loadU32LE(data, prevRaw+bestLen-3) {
+		if curProbe != *(*uint32)(unsafe.Add(probeBase, prevRaw)) {
 			continue
 		}
 
@@ -448,7 +455,8 @@ func (h *h5) findLongestMatchSmallContiguous(
 				out.len = bestLen
 				out.distance = backward
 				out.score = bestScore
-				curProbe = loadU32LE(data, cur+bestLen-3)
+				probeBase = unsafe.Add(dataPtr, bestLen-3)
+				curProbe = *(*uint32)(unsafe.Add(probeBase, cur))
 			}
 		}
 	}
