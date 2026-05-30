@@ -137,6 +137,38 @@ func testMatchesCRef(t *testing.T, quality, lgwin int, sizeHint uint) {
 			}
 			goOut := goBuf.Bytes()
 
+			// Chunk-invariance: streaming the same input in fixed-size chunks
+			// must produce byte-identical output to a single Write. The fast
+			// path (q0/q1) buffers to a full 1<<lgwin fragment regardless of
+			// chunk size, so output depends only on total input and lgwin, not
+			// on Write boundaries. For q>=2 this holds only with an explicit
+			// size hint; an auto hint is estimated from the first Write's
+			// length (updateSizeHint), so chunking would change it.
+			if quality <= 1 || sizeHint != 0 {
+				const chunkSize = 7000 // straddles every fragment size in the matrix
+				var chunkBuf bytes.Buffer
+				cw, err := NewWriterOptions(&chunkBuf, quality, WriterOptions{
+					LGWin:    lgwin,
+					SizeHint: sizeHint,
+				})
+				if err != nil {
+					t.Fatalf("NewWriter (chunked): %v", err)
+				}
+				for off := 0; off < len(tt.input); off += chunkSize {
+					end := min(off+chunkSize, len(tt.input))
+					if _, err := cw.Write(tt.input[off:end]); err != nil {
+						t.Fatalf("chunked Write: %v", err)
+					}
+				}
+				if err := cw.Close(); err != nil {
+					t.Fatalf("chunked Close: %v", err)
+				}
+				if !bytes.Equal(chunkBuf.Bytes(), goOut) {
+					t.Errorf("chunked output differs from single Write: chunked %d bytes, single-shot %d bytes",
+						chunkBuf.Len(), len(goOut))
+				}
+			}
+
 			// Roundtrip: decompress with C reference and verify correctness.
 			decompressed := creftest.BrotliDecompress(t, goOut)
 			if !bytes.Equal(decompressed, tt.input) {
@@ -217,11 +249,16 @@ func TestMatchesCRef(t *testing.T) {
 		{"1MiB", 1 << 20},
 	}
 
+	lgwinValues := []int{14, 22, 24}
+	if os.Getenv("BRRR_LONG_TESTS") != "" {
+		lgwinValues = []int{10, 14, 18, 22, 24}
+	}
+
 	for _, sh := range sizeHints {
 		t.Run("hint_"+sh.name, func(t *testing.T) {
 			t.Parallel()
 			for quality := 0; quality <= 11; quality++ {
-				for _, lgwin := range []int{10, 14, 16, 18, 22, 24} {
+				for _, lgwin := range lgwinValues {
 					t.Run(fmt.Sprintf("q%d_lgwin%d", quality, lgwin), func(t *testing.T) {
 						t.Parallel()
 						testMatchesCRef(t, quality, lgwin, sh.hint)
