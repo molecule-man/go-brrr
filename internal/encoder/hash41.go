@@ -13,8 +13,7 @@ const (
 	h41BucketBits = 15
 	h41BucketSize = 1 << h41BucketBits // 32768
 	h41BankBits   = 16
-	h41BankSize   = 1 << h41BankBits // 65536
-	h41NumBanks   = 1
+	h41BankSize   = 1 << h41BankBits   // 65536
 	h41HashShift  = 32 - h41BucketBits // 17
 
 	// h41NumLastDistances is the number of distance cache entries to check.
@@ -85,8 +84,8 @@ func (h *h41) store(data []byte, mask, ix uint) {
 }
 
 // storeRange records positions [start, end) in the hash table.
-// h41NumBanks == 1 and h41BankSize == 1<<16 == cap(h.slots), so the bank/
-// slotBase indirection and the idx mask in store() are dead here; dropping
+// There is a single bank and h41BankSize == 1<<16 == cap(h.slots), so the
+// bank/slotBase indirection and the idx mask in store() are dead here; dropping
 // them, plus a single packed 32-bit slot write, keeps the loop call-free.
 func (h *h41) storeRange(data []byte, mask, start, end uint) {
 	for i := start; i < end; i++ {
@@ -190,7 +189,7 @@ func (h *h41) findLongestMatch(
 
 	// Phase 2: walk the chain.
 	//
-	// h41NumBanks == 1, so bank is always 0 and slotBase is always 0.
+	// There is a single bank, so bank is always 0 and slotBase is always 0.
 	// Capture the old chain head/addr, then store cur before the walk so
 	// the store's writes pipeline against the serial slot loads. The walk
 	// still traverses the old chain because it uses oldHead below.

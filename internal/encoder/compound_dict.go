@@ -305,6 +305,14 @@ func (d *PreparedDictionary) findCompoundMatch(
 	}
 	maxValidOffset := sourceSize - bestLen
 	curProbe := loadU32LE(data, curMasked+bestLen-3)
+	// Hoist the per-iteration `offset + bestLen - 3` address computation by
+	// folding `bestLen - 3` into a base pointer over source. Inside the loop
+	// the probe load becomes a single `MOV` with `[srcProbeBase + offset*1]`
+	// instead of the `LEA offset+bestLen; MOV -3(base+lea)` pair the compiler
+	// emits when the loop-invariant `bestLen - 3` term is left inside
+	// loadU32LE. bestLen is >= 3 here, so the subtraction never underflows.
+	sourcePtr := unsafe.Pointer(unsafe.SliceData(source))
+	srcProbeBase := unsafe.Add(sourcePtr, bestLen-3)
 	// Pin items.data into a single local pointer: the gc compiler otherwise
 	// spills d and reloads both items.data and items.len from the slice header
 	// on every iteration. The chain is built so every visited index is within
@@ -319,7 +327,7 @@ func (d *PreparedDictionary) findCompoundMatch(
 		// per-iteration min is wasted work.
 		if distance <= maxBackwardDistance &&
 			offset < maxValidOffset &&
-			curProbe == loadU32LE(source, offset+bestLen-3) {
+			curProbe == *(*uint32)(unsafe.Add(srcProbeBase, offset)) {
 			limit := min(sourceSize-offset, maxLength)
 			ml := uint(matchLen(source[offset:offset+limit], data[curMasked:curMasked+limit], int(limit)))
 			if ml >= 4 {
@@ -335,6 +343,7 @@ func (d *PreparedDictionary) findCompoundMatch(
 						return
 					}
 					maxValidOffset = sourceSize - bestLen
+					srcProbeBase = unsafe.Add(sourcePtr, bestLen-3)
 					curProbe = loadU32LE(data, curMasked+bestLen-3)
 				}
 			}
