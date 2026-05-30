@@ -321,30 +321,34 @@ func (d *PreparedDictionary) findCompoundMatch(
 	for i := d.slotOffsets[slot] + uint32(head); ; i++ {
 		item := *(*uint32)(unsafe.Add(itemsPtr, uintptr(i)*4))
 		offset := uint(item & 0x7FFFFFFF)
-		distance := distanceOffset - offset
-		// limit (= min(sourceSize-offset, maxLength)) is computed lazily after
-		// the curProbe prefilter — most iterations fail that check, so the
-		// per-iteration min is wasted work.
-		if distance <= maxBackwardDistance &&
-			offset < maxValidOffset &&
+		// Defer `distance := distanceOffset - offset` and the
+		// `distance <= maxBackwardDistance` check until after the probe
+		// prefilter succeeds. The probe compare fails on most iterations, so
+		// hoisting the SUB+CMP+JA out of the per-iteration path saves three
+		// instructions per failed probe; the match-found branch pays them
+		// instead but runs at most a handful of times per call.
+		if offset < maxValidOffset &&
 			curProbe == *(*uint32)(unsafe.Add(srcProbeBase, offset)) {
-			limit := min(sourceSize-offset, maxLength)
-			ml := uint(matchLen(source[offset:offset+limit], data[curMasked:curMasked+limit], int(limit)))
-			if ml >= 4 {
-				score := backwardReferenceScore(ml, distance)
-				if bestScore < score {
-					bestScore = score
-					bestLen = ml
-					out.len = bestLen
-					out.lenCodeDelta = 0
-					out.distance = distance
-					out.score = bestScore
-					if bestLen >= maxLength || curMasked+bestLen > ringBufferMask || sourceSize <= bestLen {
-						return
+			distance := distanceOffset - offset
+			if distance <= maxBackwardDistance {
+				limit := min(sourceSize-offset, maxLength)
+				ml := uint(matchLen(source[offset:offset+limit], data[curMasked:curMasked+limit], int(limit)))
+				if ml >= 4 {
+					score := backwardReferenceScore(ml, distance)
+					if bestScore < score {
+						bestScore = score
+						bestLen = ml
+						out.len = bestLen
+						out.lenCodeDelta = 0
+						out.distance = distance
+						out.score = bestScore
+						if bestLen >= maxLength || curMasked+bestLen > ringBufferMask || sourceSize <= bestLen {
+							return
+						}
+						maxValidOffset = sourceSize - bestLen
+						srcProbeBase = unsafe.Add(sourcePtr, bestLen-3)
+						curProbe = loadU32LE(data, curMasked+bestLen-3)
 					}
-					maxValidOffset = sourceSize - bestLen
-					srcProbeBase = unsafe.Add(sourcePtr, bestLen-3)
-					curProbe = loadU32LE(data, curMasked+bestLen-3)
 				}
 			}
 		}
