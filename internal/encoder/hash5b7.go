@@ -1140,7 +1140,7 @@ func (h *h5b7) findLongestMatchNoWrap(
 			continue
 		}
 
-		ml := uint(matchLenAtNoInline(data, prevRaw, cur, int(maxLength)))
+		ml := uint(matchLenAt(data, prevRaw, cur, int(maxLength)))
 		if ml >= 4 {
 			backward := cur - prevRaw
 			score := backwardReferenceScore(ml, backward)
