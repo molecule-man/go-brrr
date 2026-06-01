@@ -60,7 +60,7 @@ func NewWriterOptions(dst io.Writer, level int, opts WriterOptions) (*Writer, er
 	w := &Writer{dst: dst, quality: level, lgwin: lgwin, sizeHint: opts.SizeHint, dicts: opts.Dictionaries}
 	w.c = encoder.NewCompressor(w.quality, w.lgwin, w.sizeHint)
 	for _, pd := range w.dicts {
-		_ = w.c.AttachDictionary(pd)
+		_ = w.c.AttachDictionary(pd.impl)
 	}
 	return w, nil
 }
@@ -131,6 +131,6 @@ func (w *Writer) Reset(dst io.Writer) {
 		w.c.Reset()
 	}
 	for _, pd := range w.dicts {
-		_ = w.c.AttachDictionary(pd)
+		_ = w.c.AttachDictionary(pd.impl)
 	}
 }
