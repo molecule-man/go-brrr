@@ -29,6 +29,21 @@ func Example_compress() {
 	}
 }
 
+func ExampleCompress() {
+	// One-shot compression of a byte slice, paired with Decompress.
+	compressed, err := brrr.Compress([]byte("Hello, brotli!"), 6)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	result, err := brrr.Decompress(compressed)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(string(result))
+	// Output: Hello, brotli!
+}
+
 func Example_roundtrip() {
 	// Compress
 	original := []byte("Hello, brotli! This is a round-trip compression example.")

@@ -3,6 +3,7 @@
 package brrr
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"strconv"
@@ -63,6 +64,25 @@ func NewWriterOptions(dst io.Writer, level int, opts WriterOptions) (*Writer, er
 		_ = w.c.AttachDictionary(pd.impl)
 	}
 	return w, nil
+}
+
+// Compress compresses data at the given quality level and returns the
+// brotli-compressed bytes. It is the one-shot counterpart to [Decompress].
+// Supported levels are 0 (BestSpeed) through 11 (BestCompression). The exact
+// input length is supplied to the encoder as a size hint.
+func Compress(data []byte, level int) ([]byte, error) {
+	var buf bytes.Buffer
+	w, err := NewWriterOptions(&buf, level, WriterOptions{SizeHint: uint(len(data))})
+	if err != nil {
+		return nil, err
+	}
+	if _, err := w.Write(data); err != nil {
+		return nil, err
+	}
+	if err := w.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 // Write compresses p and writes it to the underlying writer.

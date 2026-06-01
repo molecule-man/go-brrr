@@ -640,3 +640,41 @@ func TestPreparedDictionaryConcurrentShare(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestCompress(t *testing.T) {
+	inputs := map[string][]byte{
+		"empty": nil,
+		"short": []byte("Hello, brotli!"),
+		"repetitive": bytes.Repeat(
+			[]byte("The quick brown fox jumps over the lazy dog. "), 200),
+	}
+
+	for name, input := range inputs {
+		for _, level := range append(writerLevels, 11) {
+			compressed, err := Compress(input, level)
+			if err != nil {
+				t.Fatalf("Compress(%s, level=%d): %v", name, level, err)
+			}
+			got, err := Decompress(compressed)
+			if err != nil {
+				t.Fatalf("Decompress(%s, level=%d): %v", name, level, err)
+			}
+			if !bytes.Equal(got, input) {
+				t.Errorf("round-trip(%s, level=%d): got %d bytes, want %d",
+					name, level, len(got), len(input))
+			}
+		}
+	}
+}
+
+func TestCompressInvalidLevel(t *testing.T) {
+	for _, level := range []int{-1, 12, 100} {
+		out, err := Compress([]byte("data"), level)
+		if err == nil {
+			t.Errorf("Compress(level=%d): expected error, got nil", level)
+		}
+		if out != nil {
+			t.Errorf("Compress(level=%d): expected nil output, got %d bytes", level, len(out))
+		}
+	}
+}
