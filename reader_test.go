@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"testing/iotest"
+	"time"
 
 	"github.com/molecule-man/go-brrr/internal/encoder"
 )
@@ -421,4 +422,69 @@ func TestReaderDictionaryValidation(t *testing.T) {
 			t.Fatalf("expected encoder.ErrTooManyDicts, got %v", err)
 		}
 	})
+}
+
+// TestReaderIncrementalFlush verifies the Reader surfaces decoded output at a
+// producer's Flush boundary, before the stream is closed. The producer here
+// only sends its second event after the reader has decoded the first, so
+// without incremental draining on needs-more-input the two sides deadlock: the
+// reader blocks for input the producer will not send until the first event is
+// read.
+func TestReaderIncrementalFlush(t *testing.T) {
+	part1 := []byte("first event payload, hello world!\n")
+	part2 := bytes.Repeat([]byte("second event "), 100)
+
+	pr, pw := io.Pipe()
+	w, err := NewWriter(pw, 5)
+	if err != nil {
+		t.Fatalf("NewWriter: %v", err)
+	}
+
+	consumed1 := make(chan struct{})
+	go func() {
+		if _, err := w.Write(part1); err != nil {
+			t.Errorf("write part1: %v", err)
+			return
+		}
+		if err := w.Flush(); err != nil {
+			t.Errorf("flush: %v", err)
+			return
+		}
+		<-consumed1 // only continue once the reader has decoded the first event
+		if _, err := w.Write(part2); err != nil {
+			t.Errorf("write part2: %v", err)
+			return
+		}
+		if err := w.Close(); err != nil {
+			t.Errorf("close: %v", err)
+			return
+		}
+		_ = pw.Close()
+	}()
+
+	r := NewReader(pr)
+
+	got1 := make([]byte, len(part1))
+	read := make(chan error, 1)
+	go func() { _, err := io.ReadFull(r, got1); read <- err }()
+	select {
+	case err := <-read:
+		if err != nil {
+			t.Fatalf("read part1: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Reader did not surface flushed output before stream close (deadlock)")
+	}
+	if !bytes.Equal(got1, part1) {
+		t.Fatalf("part1 mismatch: got %q, want %q", got1, part1)
+	}
+	close(consumed1)
+
+	rest, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read rest: %v", err)
+	}
+	if !bytes.Equal(rest, part2) {
+		t.Fatalf("part2 mismatch: got %d bytes, want %d", len(rest), len(part2))
+	}
 }

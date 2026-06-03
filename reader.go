@@ -86,6 +86,16 @@ func (r *Reader) Read(p []byte) (int, error) {
 		result := r.state.decompressStream(&r.out)
 		switch result {
 		case decoderResultNeedsMoreInput:
+			// Surface output decoded so far before blocking for more input.
+			if r.out = r.state.flushOutput(r.out); len(r.out) > 0 {
+				n := copy(p, r.out)
+				r.outPos = n
+				if r.outPos == len(r.out) {
+					r.out = r.out[:0]
+					r.outPos = 0
+				}
+				return n, nil
+			}
 			if r.srcErr != nil {
 				r.err = wrapInputError(r.srcErr)
 				r.srcErr = nil
