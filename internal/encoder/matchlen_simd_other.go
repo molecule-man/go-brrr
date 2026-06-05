@@ -19,10 +19,8 @@ func matchLenSIMD(dataPtr unsafe.Pointer, a, b uint, limit int) int {
 			return i + bits.TrailingZeros64(xor)/8
 		}
 	}
-	for ; i < limit; i++ {
-		if *(*byte)(unsafe.Add(dataPtr, a+uint(i))) != *(*byte)(unsafe.Add(dataPtr, b+uint(i))) {
-			return i
-		}
+	for ; i < limit &&
+		*(*byte)(unsafe.Add(dataPtr, a+uint(i))) == *(*byte)(unsafe.Add(dataPtr, b+uint(i))); i++ {
 	}
 	return i
 }
