@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 
-	brrr "github.com/molecule-man/go-brrr"
+	"github.com/molecule-man/go-brrr"
 )
 
 type compressor interface {
@@ -37,10 +38,17 @@ var oneshotOnlyCompressors []struct {
 type testCase struct {
 	name  string
 	paths []string
+	gen   func() []byte
+}
+
+func randomPayload(size int) []byte {
+	buf := make([]byte, size)
+	rand.New(rand.NewSource(0)).Read(buf)
+	return buf
 }
 
 var testCases = []testCase{
-	{"MixedPayloads", []string{
+	{name: "MixedPayloads", paths: []string{
 		dataPath("brotli-ref", "tests", "testdata", "alice29.txt"),
 		dataPath("brotli-ref", "tests", "testdata", "asyoulik.txt"),
 		dataPath("brotli-ref", "tests", "testdata", "lcet10.txt"),
@@ -50,7 +58,7 @@ var testCases = []testCase{
 	// payloads (mixed sizes and content types). Acts as a marker against
 	// benchmark-shaped optimizations: wins that only show up when the
 	// same input is fed back-to-back should not move this row.
-	{"VariedPayloads", []string{
+	{name: "VariedPayloads", paths: []string{
 		dataPath("testdata", "github_events_2k.json"),
 		dataPath("testdata", "github_events_5k.json"),
 		dataPath("testdata", "github_events_8k.json"),
@@ -61,13 +69,14 @@ var testCases = []testCase{
 		dataPath("brotli-ref", "tests", "testdata", "lcet10.txt"),
 		dataPath("brotli-ref", "tests", "testdata", "plrabn12.txt"),
 	}},
-	{"Small", []string{dataPath("brotli-ref", "tests", "testdata", "monkey")}},
-	{"Json_2k", []string{dataPath("testdata", "github_events_2k.json")}},
-	{"Json_5k", []string{dataPath("testdata", "github_events_5k.json")}},
-	{"Json_8k", []string{dataPath("testdata", "github_events_8k.json")}},
-	{"Medium", []string{dataPath("brotli-ref", "tests", "testdata", "alice29.txt")}},
-	{"Large", []string{dataPath("brotli-ref", "tests", "testdata", "plrabn12.txt")}},
-	{"LargeTechnical", []string{dataPath("brotli-ref", "tests", "testdata", "lcet10.txt")}},
+	{name: "Small", paths: []string{dataPath("brotli-ref", "tests", "testdata", "monkey")}},
+	{name: "Json_2k", paths: []string{dataPath("testdata", "github_events_2k.json")}},
+	{name: "Json_5k", paths: []string{dataPath("testdata", "github_events_5k.json")}},
+	{name: "Json_8k", paths: []string{dataPath("testdata", "github_events_8k.json")}},
+	{name: "Medium", paths: []string{dataPath("brotli-ref", "tests", "testdata", "alice29.txt")}},
+	{name: "Large", paths: []string{dataPath("brotli-ref", "tests", "testdata", "plrabn12.txt")}},
+	{name: "LargeTechnical", paths: []string{dataPath("brotli-ref", "tests", "testdata", "lcet10.txt")}},
+	{name: "Random10k", gen: func() []byte { return randomPayload(10000) }},
 }
 
 // benchTestCases returns the standard testCases, extended with one entry per
@@ -102,6 +111,12 @@ func benchTestCases(b *testing.B) []testCase {
 
 	filtered := make([]testCase, 0, len(cases))
 	for _, tc := range cases {
+		if tc.gen != nil {
+			if len(tc.gen()) >= minSize {
+				filtered = append(filtered, tc)
+			}
+			continue
+		}
 		paths := make([]string, 0, len(tc.paths))
 		for _, path := range tc.paths {
 			info, err := os.Stat(path)
@@ -119,6 +134,24 @@ func benchTestCases(b *testing.B) []testCase {
 		filtered = append(filtered, testCase{name: tc.name, paths: paths})
 	}
 	return filtered
+}
+
+// loadPayloads returns the payload bytes for a test case: the synthetic data
+// from tc.gen when set, otherwise the contents of each path in tc.paths.
+func loadPayloads(b *testing.B, tc testCase) [][]byte {
+	b.Helper()
+	if tc.gen != nil {
+		return [][]byte{tc.gen()}
+	}
+	payloads := make([][]byte, len(tc.paths))
+	for i, path := range tc.paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			b.Fatal(err)
+		}
+		payloads[i] = data
+	}
+	return payloads
 }
 
 func benchLGWin() int {
@@ -252,14 +285,7 @@ func BenchmarkCompress(b *testing.B) {
 			suffix := benchParamSuffix(lgwin, sizeHint)
 
 			for _, tc := range benchTestCases(b) {
-				payloads := make([][]byte, len(tc.paths))
-				for i, path := range tc.paths {
-					data, err := os.ReadFile(path)
-					if err != nil {
-						b.Fatal(err)
-					}
-					payloads[i] = data
-				}
+				payloads := loadPayloads(b, tc)
 
 				var dict []byte
 				switch {
@@ -339,14 +365,7 @@ func BenchmarkCompressHasher(b *testing.B) {
 	for _, hc := range hasherBenchCases {
 		b.Run("h="+hc.name, func(b *testing.B) {
 			for _, tc := range benchTestCases(b) {
-				payloads := make([][]byte, len(tc.paths))
-				for i, path := range tc.paths {
-					data, err := os.ReadFile(path)
-					if err != nil {
-						b.Fatal(err)
-					}
-					payloads[i] = data
-				}
+				payloads := loadPayloads(b, tc)
 
 				b.Run("payload="+tc.name, func(b *testing.B) {
 					w, err := brrr.NewWriterOptions(io.Discard, hc.quality, brrr.WriterOptions{
@@ -430,14 +449,7 @@ func BenchmarkCompressOneshot(b *testing.B) {
 			suffix := benchParamSuffix(lgwin, sizeHint)
 
 			for _, tc := range benchTestCases(b) {
-				payloads := make([][]byte, len(tc.paths))
-				for i, path := range tc.paths {
-					data, err := os.ReadFile(path)
-					if err != nil {
-						b.Fatal(err)
-					}
-					payloads[i] = data
-				}
+				payloads := loadPayloads(b, tc)
 
 				b.Run("payload="+tc.name+suffix, func(b *testing.B) {
 					b.Run("impl=go-brrr", func(b *testing.B) {
@@ -530,14 +542,7 @@ func BenchmarkDecompress(b *testing.B) {
 			suffix := benchParamSuffix(lgwin, 0)
 
 			for _, tc := range benchTestCases(b) {
-				payloads := make([][]byte, len(tc.paths))
-				for i, path := range tc.paths {
-					data, err := os.ReadFile(path)
-					if err != nil {
-						b.Fatal(err)
-					}
-					payloads[i] = data
-				}
+				payloads := loadPayloads(b, tc)
 
 				compressed := compressPayloads(b, payloads, q, lgwin)
 
@@ -566,14 +571,7 @@ func BenchmarkDecompressOneshot(b *testing.B) {
 			suffix := benchParamSuffix(lgwin, 0)
 
 			for _, tc := range benchTestCases(b) {
-				payloads := make([][]byte, len(tc.paths))
-				for i, path := range tc.paths {
-					data, err := os.ReadFile(path)
-					if err != nil {
-						b.Fatal(err)
-					}
-					payloads[i] = data
-				}
+				payloads := loadPayloads(b, tc)
 
 				compressed := compressPayloads(b, payloads, q, lgwin)
 

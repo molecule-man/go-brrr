@@ -10,23 +10,61 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/klauspost/compress/zstd"
-	brrr "github.com/molecule-man/go-brrr"
+	"github.com/molecule-man/go-brrr"
 )
 
-func BenchmarkCrossLib(b *testing.B) {
+type namedPayload struct {
+	name string
+	data []byte
+}
+
+func crosslibPayloads(b *testing.B) []namedPayload {
+	b.Helper()
+
+	if os.Getenv("BENCH_TESTCASES") != "" {
+		var payloads []namedPayload
+		for _, tc := range benchTestCases(b) {
+			data := loadPayloads(b, tc)
+			if len(data) == 1 {
+				payloads = append(payloads, namedPayload{tc.name, data[0]})
+				continue
+			}
+			for i, p := range data {
+				payloads = append(payloads, namedPayload{fmt.Sprintf("%s_%d", tc.name, i), p})
+			}
+		}
+		return payloads
+	}
+
 	path := resolveUserPath(os.Getenv("BENCH_CORPUS_FILE"))
 	if path == "" {
 		path = dataPath("brotli-ref", "tests", "testdata", "alice29.txt")
 	}
-
-	payload, err := os.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		b.Fatal(err)
 	}
+	return []namedPayload{{filepath.Base(path), data}}
+}
 
+func BenchmarkCrossLib(b *testing.B) {
+	payloads := crosslibPayloads(b)
+	for _, np := range payloads {
+		if len(payloads) == 1 {
+			benchCrossLibCompress(b, np.data)
+			continue
+		}
+		b.Run("payload="+np.name, func(b *testing.B) {
+			benchCrossLibCompress(b, np.data)
+		})
+	}
+}
+
+func benchCrossLibCompress(b *testing.B, payload []byte) {
 	type lib struct {
 		name   string
 		levels []int
@@ -114,16 +152,19 @@ func BenchmarkCrossLib(b *testing.B) {
 }
 
 func BenchmarkCrossLibDecompress(b *testing.B) {
-	path := resolveUserPath(os.Getenv("BENCH_CORPUS_FILE"))
-	if path == "" {
-		path = dataPath("brotli-ref", "tests", "testdata", "alice29.txt")
+	payloads := crosslibPayloads(b)
+	for _, np := range payloads {
+		if len(payloads) == 1 {
+			benchCrossLibDecompress(b, np.data)
+			continue
+		}
+		b.Run("payload="+np.name, func(b *testing.B) {
+			benchCrossLibDecompress(b, np.data)
+		})
 	}
+}
 
-	payload, err := os.ReadFile(path)
-	if err != nil {
-		b.Fatal(err)
-	}
-
+func benchCrossLibDecompress(b *testing.B, payload []byte) {
 	type lib struct {
 		name     string
 		levels   []int
