@@ -1,6 +1,6 @@
 ![go brrr](assets/go-brrr-logo.jpg)
 
-# go-brrr
+# go-brrr - Brotli compression for Go
 
 [![CI](https://github.com/molecule-man/go-brrr/actions/workflows/ci.yml/badge.svg)](https://github.com/molecule-man/go-brrr/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/molecule-man/go-brrr.svg)](https://pkg.go.dev/github.com/molecule-man/go-brrr)
@@ -20,7 +20,7 @@ Brotli compression library for Go (RFC 7932), with encoder and decoder support.
 
 ## Status
 
-The encoder and decoder are covered by compatibility tests and fuzzing, but the public API may still evolve before v1.0.0.
+The encoder and decoder are covered by compatibility tests and fuzzing. The public API is stable and follows semantic versioning.
 
 ## Compatibility
 
