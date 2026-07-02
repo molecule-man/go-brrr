@@ -681,9 +681,9 @@ func (e *encoderArena) writeMetaBlockFastDynamic(prebuilt bool) {
 		arena.resetHistograms()
 
 		hist := blockHistograms{
-			lit:  arena.litHisto[:],
-			cmd:  arena.cmdHisto[:],
-			dist: arena.distHisto[:],
+			lit:  &arena.litHisto,
+			cmd:  &arena.cmdHisto,
+			dist: &arena.distHisto,
 		}
 		pos := startPos
 		for i := range commands {
@@ -737,9 +737,9 @@ func (e *encoderArena) writeMetaBlockTrivial(length int, isLast bool) {
 		arena.resetHistograms()
 
 		hist := blockHistograms{
-			lit:  arena.litHisto[:],
-			cmd:  arena.cmdHisto[:],
-			dist: arena.distHisto[:],
+			lit:  &arena.litHisto,
+			cmd:  &arena.cmdHisto,
+			dist: &arena.distHisto,
 		}
 		pos := startPos
 		for i := range commands {

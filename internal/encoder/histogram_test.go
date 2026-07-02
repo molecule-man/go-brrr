@@ -27,8 +27,8 @@ func TestBlockHistogramsTally(t *testing.T) {
 
 	var litHist [core.AlphabetSizeLiteral]uint32
 	var cmdHist [core.AlphabetSizeInsertAndCopyLength]uint32
-	var distHist [64]uint32
-	hist := blockHistograms{lit: litHist[:], cmd: cmdHist[:], dist: distHist[:]}
+	var distHist [alphabetSizeDistance]uint32
+	hist := blockHistograms{lit: &litHist, cmd: &cmdHist, dist: &distHist}
 
 	pos := uint(0)
 	var distTotal uint
@@ -86,8 +86,8 @@ func TestBlockHistogramsTally(t *testing.T) {
 func TestBlockHistogramsTallyEmpty(t *testing.T) {
 	var litHist [core.AlphabetSizeLiteral]uint32
 	var cmdHist [core.AlphabetSizeInsertAndCopyLength]uint32
-	var distHist [64]uint32
-	hist := blockHistograms{lit: litHist[:], cmd: cmdHist[:], dist: distHist[:]}
+	var distHist [alphabetSizeDistance]uint32
+	hist := blockHistograms{lit: &litHist, cmd: &cmdHist, dist: &distHist}
 
 	posDelta, distDelta := hist.tally(nil, 0, 0, command{cmdPrefix: 42})
 
@@ -112,8 +112,8 @@ func TestBlockHistogramsTallyZeroCopyNoDistance(t *testing.T) {
 
 	var litHist [core.AlphabetSizeLiteral]uint32
 	var cmdHist [core.AlphabetSizeInsertAndCopyLength]uint32
-	var distHist [64]uint32
-	hist := blockHistograms{lit: litHist[:], cmd: cmdHist[:], dist: distHist[:]}
+	var distHist [alphabetSizeDistance]uint32
+	hist := blockHistograms{lit: &litHist, cmd: &cmdHist, dist: &distHist}
 
 	// Zero copy length must not record a distance, even with cmdPrefix >= 128.
 	cmd := command{insertLen: 2, copyLen: 0, cmdPrefix: 200, distPrefix: 0x0003}

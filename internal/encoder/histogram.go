@@ -7,9 +7,9 @@ import "github.com/molecule-man/go-brrr/internal/core"
 // blockHistograms groups frequency counts for the three prefix code alphabets
 // in a brotli meta-block: literals, insert-and-copy lengths, and distances.
 type blockHistograms struct {
-	lit  []uint32
-	cmd  []uint32
-	dist []uint32
+	lit  *[core.AlphabetSizeLiteral]uint32
+	cmd  *[core.AlphabetSizeInsertAndCopyLength]uint32
+	dist *[alphabetSizeDistance]uint32
 }
 
 // blockSplitIterator walks through the blocks of a blockSplit sequentially.
@@ -42,20 +42,16 @@ func (h *blockHistograms) tally(input []byte, pos, mask uint, cmd command) (posD
 	h.cmd[cmd.cmdPrefix]++
 	insLen := uint(cmd.insertLen)
 	if insLen > 0 {
-		// Use a fixed-size array pointer so the compiler knows the index is
-		// always in-bounds for any byte value, eliminating per-access bounds
-		// checks on h.lit.
-		lit := (*[core.AlphabetSizeLiteral]uint32)(h.lit)
 		basePos := pos & mask
 		// Fast path: no ring-buffer wrap. Iterate over a subslice so the
 		// compiler can eliminate per-iteration bounds checks on input too.
 		if basePos+insLen <= mask {
 			for _, b := range input[basePos : basePos+insLen] {
-				lit[b]++
+				h.lit[b]++
 			}
 		} else {
 			for j := range insLen {
-				lit[input[(pos+j)&mask]]++
+				h.lit[input[(pos+j)&mask]]++
 			}
 		}
 	}
