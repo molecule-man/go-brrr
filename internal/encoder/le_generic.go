@@ -1,7 +1,9 @@
-// Portable fallback for big-endian platforms or purego builds: safe-Go load
-// primitives and bit writer hot loops that avoid unsafe pointer arithmetic.
+// Portable fallback for platforms without unaligned little-endian access
+// (big-endian, strict-alignment archs such as arm/mips/riscv, or purego builds):
+// safe-Go load primitives and bit writer hot loops that avoid unsafe pointer
+// arithmetic.
 
-//go:build purego || !(amd64 || 386 || arm || arm64 || loong64 || mips64le || mipsle || ppc64le || riscv64 || wasm)
+//go:build purego || !(amd64 || 386 || arm64 || loong64 || ppc64le || wasm)
 
 package encoder
 

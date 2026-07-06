@@ -1,7 +1,7 @@
 // Unsafe fast path for little-endian platforms: load primitives and bit
 // writer hot loops that rely on unaligned uint32/uint64 reads and writes.
 
-//go:build !purego && (amd64 || 386 || arm || arm64 || loong64 || mips64le || mipsle || ppc64le || riscv64 || wasm)
+//go:build !purego && (amd64 || 386 || arm64 || loong64 || ppc64le || wasm)
 
 package encoder
 
