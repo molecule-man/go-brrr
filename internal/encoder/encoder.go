@@ -307,7 +307,7 @@ func (c *encoderCore) prepareMetaBlock(isLast, forceFlush bool) (metablockSize u
 	// Grow command buffer if needed.
 	needed := int(s.numCommands) + int(bytes)/2 + 1
 	if needed > cap(s.commands) {
-		newCap := needed + int(bytes)/4 + 16
+		newCap := max(needed+int(bytes)/4+16, 2*cap(s.commands))
 		newCmds := make([]command, len(s.commands), newCap)
 		copy(newCmds, s.commands)
 		s.commands = newCmds

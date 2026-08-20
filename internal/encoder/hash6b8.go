@@ -152,7 +152,8 @@ func (h *h6b8) findLongestMatch(
 	nextN := h.num[nextKey]
 	h.nextBucket = h.buckets[nextBase]
 	if nextN > 0 {
-		h.nextBucket = h.buckets[nextBase+uint((nextN-1)&h6b8BlockMask)]
+		p := uint(h.buckets[nextBase+uint((nextN-1)&h6b8BlockMask)]) & ringBufferMask
+		h.nextBucket = uint32(data[p])
 	}
 
 	out.len = 0
@@ -567,7 +568,8 @@ func (h *h6b8) findLongestMatchSmallBuf(
 	nextN := h.num[nextKey]
 	h.nextBucket = h.buckets[nextBase]
 	if nextN > 0 {
-		h.nextBucket = h.buckets[nextBase+uint((nextN-1)&h6b8BlockMask)]
+		p := uint(h.buckets[nextBase+uint((nextN-1)&h6b8BlockMask)]) & ringBufferMask
+		h.nextBucket = uint32(data[p])
 	}
 
 	out.len = 0
@@ -1023,7 +1025,8 @@ func (h *h6b8) findLongestMatchNoWrap(
 	nextN := h.num[nextKey]
 	h.nextBucket = h.buckets[nextBase]
 	if nextN > 0 {
-		h.nextBucket = h.buckets[nextBase+uint((nextN-1)&h6b8BlockMask)]
+		p := uint(h.buckets[nextBase+uint((nextN-1)&h6b8BlockMask)])
+		h.nextBucket = uint32(data[p])
 	}
 
 	out.len = 0
