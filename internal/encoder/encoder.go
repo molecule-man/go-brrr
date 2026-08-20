@@ -906,7 +906,11 @@ func (e *encoderSplit) reset(quality, lgwin int, sizeHint uint) {
 	// Pre-allocate Q10 buffers to avoid first-use allocations.
 	if quality >= 10 {
 		if e.hasher == nil {
-			e.hasher = &h10{lgwin: lgwin, quality: quality, bufs: &e.q10}
+			h := poolH10.Get().(*h10)
+			h.lgwin = lgwin
+			h.quality = quality
+			h.bufs = &e.q10
+			e.hasher = h
 			e.resetHasher()
 		}
 		blockSize := 1 << e.lgblock
