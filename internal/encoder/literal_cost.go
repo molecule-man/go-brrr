@@ -72,9 +72,7 @@ func estimateBitCostsForLiteralsUTF8(data []byte, pos, length, mask uint, histog
 	var inWindowUTF8 [3]uint
 
 	// Clear histograms: 3 * 256 entries.
-	for i := range histogram[:3*256] {
-		histogram[i] = 0
-	}
+	clear(histogram[:3*256])
 
 	// Bootstrap histograms from the initial window.
 	lastC := uint(0)
@@ -147,9 +145,7 @@ func estimateBitCostsForLiteralsRaw(data []byte, pos, length, mask uint, histogr
 	windowHalf := uint(2000)
 	inWindow := min(windowHalf, length)
 
-	for i := range histogram[:256] {
-		histogram[i] = 0
-	}
+	clear(histogram[:256])
 
 	// Bootstrap histogram.
 	for i := range inWindow {

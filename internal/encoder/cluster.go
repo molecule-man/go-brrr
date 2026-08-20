@@ -50,9 +50,7 @@ func histogramAdd(dst, src []uint32, alphabetSize int) {
 
 // histogramClear zeroes a histogram.
 func histogramClear(h []uint32, alphabetSize int) {
-	for i := range alphabetSize {
-		h[i] = 0
-	}
+	clear(h[:alphabetSize])
 }
 
 // histogramCopy copies src histogram into dst.
