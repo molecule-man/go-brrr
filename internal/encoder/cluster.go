@@ -410,9 +410,7 @@ func clusterHistograms(
 	bufs.chPairs = growHistogramPairs(bufs.chPairs, pairsCapacity+1)
 	pairs := bufs.chPairs
 
-	for i := range inSize {
-		clusterSize[i] = 1
-	}
+	fillSlice(clusterSize[:inSize], 1)
 
 	// Initialize output histograms and compute initial bit costs.
 	for i := range inSize {

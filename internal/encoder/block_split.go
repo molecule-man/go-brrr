@@ -447,10 +447,8 @@ func (cs *contextBlockSplitter) finishBlock(isFinal bool) {
 			split.types[cs.numBlocks] = byte(split.numTypes)
 			cs.lastHistogramIdx[1] = cs.lastHistogramIdx[0]
 			cs.lastHistogramIdx[0] = split.numTypes * nc
-			for i := range nc {
-				cs.lastEntropy[nc+i] = cs.lastEntropy[i]
-				cs.lastEntropy[i] = entropy[i]
-			}
+			copy(cs.lastEntropy[nc:nc+nc], cs.lastEntropy[:nc])
+			copy(cs.lastEntropy[:nc], entropy[:nc])
 			cs.numBlocks++
 			split.numTypes++
 			cs.currHistogramIdx += nc

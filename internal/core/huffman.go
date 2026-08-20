@@ -146,8 +146,9 @@ func BuildCodeLengthsHuffmanTable(table []HuffmanCode, codeLengths []byte, count
 	// Special case: all symbols but one have 0 code length.
 	if offset[0] == 0 {
 		code := HuffmanCode{Bits: 0, Value: uint16(sorted[0])}
-		for key := range tableSize {
-			table[key] = code
+		table[0] = code
+		for i := 1; i < tableSize; i *= 2 {
+			copy(table[i:tableSize], table[:i])
 		}
 		return
 	}
