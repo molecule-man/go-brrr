@@ -269,6 +269,62 @@ func TestMatchesCRef(t *testing.T) {
 	}
 }
 
+func TestCompressMatchesCRef(t *testing.T) {
+	t.Parallel()
+
+	for quality := 0; quality <= 11; quality++ {
+		t.Run(fmt.Sprintf("q%d", quality), func(t *testing.T) {
+			t.Parallel()
+			for _, tt := range crefTestCases(t) {
+				t.Run(tt.name, func(t *testing.T) {
+					goOut, err := Compress(tt.input, quality)
+					if err != nil {
+						t.Fatalf("Compress: %v", err)
+					}
+
+					decompressed := creftest.BrotliDecompress(t, goOut)
+					if !bytes.Equal(decompressed, tt.input) {
+						t.Fatalf("C roundtrip mismatch: decompressed %d bytes, want %d bytes",
+							len(decompressed), len(tt.input))
+					}
+
+					goDecompressed, err := Decompress(goOut)
+					if err != nil {
+						t.Fatalf("Go Decompress: %v", err)
+					}
+					if !bytes.Equal(goDecompressed, tt.input) {
+						t.Fatalf("Go roundtrip mismatch: got %d bytes, want %d bytes",
+							len(goDecompressed), len(tt.input))
+					}
+
+					cOut := creftest.BrotliCompress(t, tt.input, quality, defaultLGWin, uint(len(tt.input)))
+
+					if quality >= 5 {
+						threshold := float64(len(cOut)) * 1.0002
+						if float64(len(goOut)) > threshold {
+							t.Errorf("Go output too large: %d bytes (C: %d bytes, threshold: %.0f)",
+								len(goOut), len(cOut), threshold)
+						}
+						return
+					}
+					if !bytes.Equal(goOut, cOut) {
+						t.Errorf("output mismatch: Go produced %d bytes, C produced %d bytes",
+							len(goOut), len(cOut))
+						minLen := min(len(goOut), len(cOut))
+						for i := range minLen {
+							if goOut[i] != cOut[i] {
+								t.Errorf("first difference at byte %d: Go=0x%02x C=0x%02x",
+									i, goOut[i], cOut[i])
+								break
+							}
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
 // TestPositionWrap exercises the hasher reset in updateLastProcessedPos that
 // fires when the 32-bit wrapped stream position rolls over. Instead of
 // compressing 3+ GiB of real input, it pokes the encoder's position fields
