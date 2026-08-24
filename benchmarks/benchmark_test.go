@@ -505,6 +505,46 @@ func benchCompressOneshot(b *testing.B, factory oneshotCompressorFactory, payloa
 	}
 }
 
+var compressSink []byte
+
+func BenchmarkCompressOneshotAPI(b *testing.B) {
+	for _, q := range benchQualities() {
+		b.Run(fmt.Sprintf("q=%d", q), func(b *testing.B) {
+			for _, tc := range benchTestCases(b) {
+				payloads := loadPayloads(b, tc)
+
+				b.Run("payload="+tc.name, func(b *testing.B) {
+					totalBytes := 0
+					lenSum, capSum := 0, 0
+					for _, data := range payloads {
+						totalBytes += len(data)
+						out, err := brrr.Compress(data, q)
+						if err != nil {
+							b.Fatal(err)
+						}
+						lenSum += len(out)
+						capSum += cap(out)
+					}
+					b.SetBytes(int64(totalBytes))
+					b.ReportAllocs()
+
+					for b.Loop() {
+						for _, data := range payloads {
+							out, err := brrr.Compress(data, q)
+							if err != nil {
+								b.Fatal(err)
+							}
+							compressSink = out
+						}
+					}
+
+					b.ReportMetric(float64(capSum)/float64(lenSum), "cap/len")
+				})
+			}
+		})
+	}
+}
+
 // decompressor reads brotli-compressed data and supports resetting the source.
 type decompressor interface {
 	io.ReadCloser
