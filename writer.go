@@ -71,8 +71,8 @@ func NewWriterOptions(dst io.Writer, level int, opts WriterOptions) (*Writer, er
 // Supported levels are 0 (BestSpeed) through 11 (BestCompression). The exact
 // input length is supplied to the encoder as a size hint.
 func Compress(data []byte, level int) ([]byte, error) {
-	buf := bytes.NewBuffer(make([]byte, 0, compressedSizeEstimate(len(data))))
-	w, err := NewWriterOptions(buf, level, WriterOptions{SizeHint: uint(len(data))})
+	var buf bytes.Buffer
+	w, err := NewWriterOptions(&buf, level, WriterOptions{SizeHint: uint(len(data))})
 	if err != nil {
 		return nil, err
 	}
@@ -83,13 +83,6 @@ func Compress(data []byte, level int) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
-}
-
-func compressedSizeEstimate(n int) int {
-	if n < 1<<10 {
-		return n + 64
-	}
-	return n/4 + 64
 }
 
 // Write compresses p and writes it to the underlying writer.
