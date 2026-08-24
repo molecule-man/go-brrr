@@ -71,12 +71,26 @@ func NewWriterOptions(dst io.Writer, level int, opts WriterOptions) (*Writer, er
 // Supported levels are 0 (BestSpeed) through 11 (BestCompression). The exact
 // input length is supplied to the encoder as a size hint.
 func Compress(data []byte, level int) ([]byte, error) {
-	var buf bytes.Buffer
-	w, err := NewWriterOptions(&buf, level, WriterOptions{SizeHint: uint(len(data))})
+	return CompressAppend(nil, data, level)
+}
+
+// CompressAppend compresses src at the given quality level, appends the
+// brotli-compressed bytes to dst and returns the extended slice. Supported
+// levels are 0 (BestSpeed) through 11 (BestCompression). The exact input
+// length is supplied to the encoder as a size hint.
+//
+// Passing a dst with spare capacity — typically one retained from a previous
+// call and resliced to dst[:0] — lets callers compress repeatedly without
+// reallocating the output buffer. A nil dst is valid and makes CompressAppend
+// equivalent to [Compress]. On error the returned slice is nil and dst is
+// unusable, since the encoder may already have written into its capacity.
+func CompressAppend(dst, src []byte, level int) ([]byte, error) {
+	buf := bytes.NewBuffer(dst)
+	w, err := NewWriterOptions(buf, level, WriterOptions{SizeHint: uint(len(src))})
 	if err != nil {
 		return nil, err
 	}
-	if _, err := w.Write(data); err != nil {
+	if _, err := w.Write(src); err != nil {
 		return nil, err
 	}
 	if err := w.Close(); err != nil {
