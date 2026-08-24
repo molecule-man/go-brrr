@@ -916,13 +916,9 @@ func (e *encoderSplit) reset(quality, lgwin int, sizeHint uint) {
 		blockSize := 1 << e.lgblock
 		e.q10.preallocQ10(blockSize)
 
-		// Pre-allocate h10 forest.
-		if h, ok := e.hasher.(*h10); ok {
-			numNodes := uint(1) << lgwin
-			if cap(h.forest) < int(2*numNodes) {
-				h.forest = make([]uint32, 2*numNodes)
-			}
-		}
+		// The h10 forest is sized in h10.reset, which knows the real input
+		// size and whether the encode is one-shot. Pre-allocating here would
+		// force the full window even for a small input.
 
 		// Pre-allocate metaBlockSplit context maps.
 		const (
