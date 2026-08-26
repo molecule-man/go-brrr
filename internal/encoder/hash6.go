@@ -227,7 +227,6 @@ func (h *h6) findLongestMatch(
 						out.len = bestLen
 						out.distance = backward
 						out.score = bestScore
-						curByte = loadByte(data, curMasked+bestLen)
 					}
 				}
 			}
