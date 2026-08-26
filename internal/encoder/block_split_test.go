@@ -10,7 +10,8 @@ func TestContextBlockSplitterBasic(t *testing.T) {
 	// Create a simple context block splitter with 2 contexts and feed it
 	// symbols to verify it produces a valid block split.
 	var split blockSplit
-	cs := newContextBlockSplitter(&split, 256, 2, 4, 400.0, 100)
+	var b0 splitBufs
+	cs := newContextBlockSplitter(&split, 256, 2, 4, 400.0, 100, &b0)
 
 	// Feed 20 symbols alternating between contexts 0 and 1.
 	for i := range 20 {
@@ -43,12 +44,13 @@ func TestContextBlockSplitterBasic(t *testing.T) {
 func TestContextBlockSplitterMaxBlockTypes(t *testing.T) {
 	// With numContexts=2, maxBlockTypes should be 128 (256/2).
 	var split blockSplit
-	cs := newContextBlockSplitter(&split, 256, 2, 4, 400.0, 100)
+	var b0 splitBufs
+	cs := newContextBlockSplitter(&split, 256, 2, 4, 400.0, 100, &b0)
 	if cs.maxBlockTypes != 128 {
 		t.Errorf("maxBlockTypes = %d, want 128", cs.maxBlockTypes)
 	}
 
-	cs2 := newContextBlockSplitter(&split, 256, 13, 4, 400.0, 100)
+	cs2 := newContextBlockSplitter(&split, 256, 13, 4, 400.0, 100, &b0)
 	if cs2.maxBlockTypes != 256/13 {
 		t.Errorf("maxBlockTypes = %d, want %d", cs2.maxBlockTypes, 256/13)
 	}

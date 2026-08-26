@@ -164,10 +164,11 @@ func (h *h6b5) findLongestMatch(
 
 	// Phase 1: try cached distances. Unrolled so the per-entry conditions
 	// (penalty index, ml >= 2 acceptance) are compile-time constants.
+	curByte := loadByte(data, curMasked+bestLen)
 	backward := distCache[0]
 	if backward-1 < maxBackward {
 		prev := (cur - backward) & ringBufferMask
-		if data[curMasked+bestLen] == data[prev+bestLen] {
+		if curByte == loadByte(data, prev+bestLen) {
 			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
 			if ml >= 3 || ml == 2 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
@@ -177,6 +178,7 @@ func (h *h6b5) findLongestMatch(
 					out.len = bestLen
 					out.distance = backward
 					out.score = bestScore
+					curByte = loadByte(data, curMasked+bestLen)
 				}
 			}
 		}
@@ -185,7 +187,7 @@ func (h *h6b5) findLongestMatch(
 	backward = distCache[1]
 	if backward-1 < maxBackward {
 		prev := (cur - backward) & ringBufferMask
-		if data[curMasked+bestLen] == data[prev+bestLen] {
+		if curByte == loadByte(data, prev+bestLen) {
 			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
 			if ml >= 3 || ml == 2 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
@@ -197,6 +199,7 @@ func (h *h6b5) findLongestMatch(
 						out.len = bestLen
 						out.distance = backward
 						out.score = bestScore
+						curByte = loadByte(data, curMasked+bestLen)
 					}
 				}
 			}
@@ -206,7 +209,7 @@ func (h *h6b5) findLongestMatch(
 	backward = distCache[2]
 	if backward-1 < maxBackward {
 		prev := (cur - backward) & ringBufferMask
-		if data[curMasked+bestLen] == data[prev+bestLen] {
+		if curByte == loadByte(data, prev+bestLen) {
 			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
 			if ml >= 3 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
@@ -218,6 +221,7 @@ func (h *h6b5) findLongestMatch(
 						out.len = bestLen
 						out.distance = backward
 						out.score = bestScore
+						curByte = loadByte(data, curMasked+bestLen)
 					}
 				}
 			}
@@ -227,7 +231,7 @@ func (h *h6b5) findLongestMatch(
 	backward = distCache[3]
 	if backward-1 < maxBackward {
 		prev := (cur - backward) & ringBufferMask
-		if data[curMasked+bestLen] == data[prev+bestLen] {
+		if curByte == loadByte(data, prev+bestLen) {
 			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
 			if ml >= 3 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
@@ -257,21 +261,22 @@ func (h *h6b5) findLongestMatch(
 	if uint(n) > h6b5BlockSize {
 		down = uint(n) - h6b5BlockSize
 	}
+	minPrev := cur - maxBackward
 	curProbe := loadU32LE(data, curMasked+bestLen-3)
 	for i := uint(n); i > down; {
 		i--
-		prev := uint(bucket[i&h6b5BlockMask])
-		backward := cur - prev
-		if backward > maxBackward {
+		prevRaw := uint(bucket[i&h6b5BlockMask])
+		if prevRaw < minPrev {
 			break
 		}
-		prev &= ringBufferMask
-		if curProbe != loadU32LE(data, prev+bestLen-3) {
+		prevMasked := prevRaw & ringBufferMask
+		if curProbe != loadU32LE(data, prevMasked+bestLen-3) {
 			continue
 		}
 
-		ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+		ml := uint(matchLenAtNoInline(data, prevMasked, curMasked, int(maxLength)))
 		if ml >= 4 {
+			backward := cur - prevRaw
 			score := backwardReferenceScore(ml, backward)
 			if bestScore < score {
 				bestScore = score

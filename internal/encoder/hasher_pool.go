@@ -29,10 +29,11 @@ var (
 	poolH6b6    = sync.Pool{New: func() any { return new(h6b6) }}
 	poolH6b7    = sync.Pool{New: func() any { return new(h6b7) }}
 	poolH6b8    = sync.Pool{New: func() any { return new(h6b8) }}
+	poolH10     = sync.Pool{New: func() any { return new(h10) }}
 )
 
 // releaseHasher returns a hasher to its type-specific pool. Hashers without a
-// pool (h10, h40, h41, h42) are dropped on the floor — they're allocated
+// pool (h40, h41, h42) are dropped on the floor — they're allocated
 // directly and Go's GC reclaims them.
 func releaseHasher(h streamHasher) {
 	switch h := h.(type) {
@@ -72,5 +73,8 @@ func releaseHasher(h streamHasher) {
 		poolH6b7.Put(h)
 	case *h6b8:
 		poolH6b8.Put(h)
+	case *h10:
+		h.bufs = nil
+		poolH10.Put(h)
 	}
 }

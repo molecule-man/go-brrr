@@ -21,6 +21,8 @@ type blockSplit struct {
 // After the first metablock they typically never allocate again.
 type splitBufs struct {
 	litHistograms  []uint32
+	ctxCombined    []uint32
+	ctxLastEntropy []float64
 	cmdHistograms  []uint32
 	distHistograms []uint32
 	litTypes       []byte
@@ -175,13 +177,17 @@ func newContextBlockSplitter(
 	alphabetSize, numContexts, minBlockSize int,
 	splitThreshold float64,
 	numSymbols int,
+	bufs *splitBufs,
 ) contextBlockSplitter {
 	maxNumBlocks := numSymbols/minBlockSize + 1
 	maxBlockTypes := maxNumberOfBlockTypes / numContexts
 	maxNumTypes := min(maxNumBlocks, maxBlockTypes+1)
 
 	histSize := maxNumTypes * numContexts * alphabetSize
-	histBuf := make([]uint32, histSize)
+	bufs.litHistograms = growUint32Clear(bufs.litHistograms, histSize)
+	histBuf := bufs.litHistograms
+	bufs.ctxLastEntropy = growFloat64(bufs.ctxLastEntropy, 2*numContexts)
+	bufs.ctxCombined = growUint32(bufs.ctxCombined, 2*numContexts*alphabetSize)
 
 	if cap(split.types) < maxNumBlocks {
 		split.types = make([]byte, maxNumBlocks)
@@ -195,9 +201,6 @@ func newContextBlockSplitter(
 	}
 	split.numTypes = 0
 
-	// Clear the first numContexts histograms (the initial candidate block).
-	clear(histBuf[:numContexts*alphabetSize])
-
 	return contextBlockSplitter{
 		alphabetSize:    alphabetSize,
 		numContexts:     numContexts,
@@ -208,8 +211,8 @@ func newContextBlockSplitter(
 		histograms:      histBuf,
 		histogramsSize:  maxNumTypes * numContexts,
 		targetBlockSize: minBlockSize,
-		lastEntropy:     make([]float64, 2*numContexts),
-		combined:        make([]uint32, 2*numContexts*alphabetSize),
+		lastEntropy:     bufs.ctxLastEntropy,
+		combined:        bufs.ctxCombined,
 	}
 }
 
@@ -414,8 +417,10 @@ func (cs *contextBlockSplitter) finishBlock(isFinal bool) {
 		// Compute per-context entropies and combined entropies with the
 		// last two block types. Sum the diffs to decide on split/merge.
 		var diff [2]float64
-		entropy := make([]float64, nc)
-		combinedEntropy := make([]float64, 2*nc)
+		var entropyArr [maxStaticContexts]float64
+		var combinedEntropyArr [2 * maxStaticContexts]float64
+		entropy := entropyArr[:nc]
+		combinedEntropy := combinedEntropyArr[:2*nc]
 
 		for i := range nc {
 			currStart := (cs.currHistogramIdx + i) * as
@@ -447,10 +452,8 @@ func (cs *contextBlockSplitter) finishBlock(isFinal bool) {
 			split.types[cs.numBlocks] = byte(split.numTypes)
 			cs.lastHistogramIdx[1] = cs.lastHistogramIdx[0]
 			cs.lastHistogramIdx[0] = split.numTypes * nc
-			for i := range nc {
-				cs.lastEntropy[nc+i] = cs.lastEntropy[i]
-				cs.lastEntropy[i] = entropy[i]
-			}
+			copy(cs.lastEntropy[nc:nc+nc], cs.lastEntropy[:nc])
+			copy(cs.lastEntropy[:nc], entropy[:nc])
 			cs.numBlocks++
 			split.numTypes++
 			cs.currHistogramIdx += nc
@@ -578,7 +581,7 @@ func buildMetaBlockGreedy(
 	} else {
 		// Multi-context path (quality >= 5): multiple histograms per block type.
 		ctxSplitter := newContextBlockSplitter(
-			&mb.litSplit, core.AlphabetSizeLiteral, int(numContexts), 512, 400.0, numLiterals)
+			&mb.litSplit, core.AlphabetSizeLiteral, int(numContexts), 512, 400.0, numLiterals, bufs)
 		utf8LUT := uint(core.ContextUTF8) << 9
 
 		for i := range commands {

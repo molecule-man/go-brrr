@@ -321,9 +321,7 @@ var nonZeroRepsBits = [core.AlphabetSizeInsertAndCopyLength]uint64{
 // symbols under the static command prefix code (9 for symbols 0–447, 11 for
 // symbols 448–703).
 var staticCommandCodeDepth = func() (d [core.AlphabetSizeInsertAndCopyLength]byte) {
-	for i := range d[:448] {
-		d[i] = 9
-	}
+	fillSlice(d[:448], 9)
 	for i := 448; i < core.AlphabetSizeInsertAndCopyLength; i++ {
 		d[i] = 11
 	}
@@ -426,9 +424,7 @@ var staticCommandCodeBits = [core.AlphabetSizeInsertAndCopyLength]uint16{
 // staticDistanceCodeDepth contains the bit depths for the 64 distance symbols
 // under the static distance prefix code (all depth 6).
 var staticDistanceCodeDepth = func() (d [64]byte) {
-	for i := range d {
-		d[i] = 6
-	}
+	fillSlice(d[:], 6)
 	return
 }()
 

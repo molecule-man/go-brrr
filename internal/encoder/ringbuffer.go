@@ -41,9 +41,7 @@ func (e *encodeState) initRingBuffer(buflen uint32) {
 	e.data = e.ringBufAlloc[2:]
 	e.ringBufAlloc[0] = 0
 	e.ringBufAlloc[1] = 0
-	for i := range uint32(7) {
-		e.data[buflen+i] = 0
-	}
+	clear(e.data[buflen : buflen+7])
 }
 
 // releaseRingBuffer returns the ring buffer allocation to the pool for
@@ -128,8 +126,6 @@ func (e *encodeState) copyInputToRingBuffer(input []byte) {
 	// hash functions).
 	if e.ringBufPos <= rbMask {
 		newPos := e.ringBufPos & rbMask
-		for i := range uint32(7) {
-			e.data[newPos+i] = 0
-		}
+		clear(e.data[newPos : newPos+7])
 	}
 }

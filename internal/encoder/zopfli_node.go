@@ -82,9 +82,7 @@ func initZopfliNodes(nodes []zopfliNode) {
 		dcodeInsertLength: 0,
 		u:                 math.Float32bits(infinity),
 	}
-	for i := range nodes {
-		nodes[i] = stub
-	}
+	fillSlice(nodes, stub)
 }
 
 // updateZopfliNode writes a better solution into nodes[pos+length].

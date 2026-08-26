@@ -99,9 +99,7 @@ func (m *zopfliCostModel) setFromCommands(position uint, ringbuffer []byte, ring
 	// Clear histograms.
 	arena.histogramLiteral = [core.AlphabetSizeLiteral]uint32{}
 	arena.histogramCmd = [core.AlphabetSizeInsertAndCopyLength]uint32{}
-	for i := range arena.histogramDist[:m.distanceHistogramSize] {
-		arena.histogramDist[i] = 0
-	}
+	clear(arena.histogramDist[:m.distanceHistogramSize])
 
 	pos := position - lastInsertLen
 	for i := range commands {

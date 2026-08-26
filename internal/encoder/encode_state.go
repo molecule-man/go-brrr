@@ -148,6 +148,13 @@ func (s *encodeState) reset(quality, lgwin int, sizeHint uint) {
 		fullBufLen := s.ringBufSize + tailSize
 		needed := int(2 + fullBufLen + 7)
 		if cap(s.ringBufAlloc) < needed {
+			if v := ringBufPool.Get(); v != nil {
+				if bp := v.(*[]byte); cap(*bp) >= needed {
+					s.ringBufAlloc = (*bp)[:0]
+				}
+			}
+		}
+		if cap(s.ringBufAlloc) < needed {
 			s.ringBufAlloc = make([]byte, 0, needed)
 		}
 	}

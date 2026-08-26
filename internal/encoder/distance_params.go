@@ -79,9 +79,7 @@ func computeDistanceCost(
 		origParams.numDirectCodes == newParams.numDirectCodes
 
 	// Clear the scratch histogram.
-	for i := range tmpHist {
-		tmpHist[i] = 0
-	}
+	clear(tmpHist)
 
 	var extraBits float64
 	for i := range cmds {

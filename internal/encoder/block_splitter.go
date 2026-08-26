@@ -164,9 +164,7 @@ func findBlocks(
 	numBlocks := 1
 
 	if numHistograms <= 1 {
-		for i := range length {
-			blockID[i] = 0
-		}
+		clear(blockID[:length])
 		return 1
 	}
 

@@ -933,10 +933,8 @@ func (s *decodeState) decodeContextMap(contextMapSize uint, contextMap *[]byte, 
 					s.err = decompressError("context map repeat overflow")
 					return decoderResultError
 				}
-				for range int(reps) {
-					(*contextMap)[h.contextIndex] = 0
-					h.contextIndex++
-				}
+				clear((*contextMap)[h.contextIndex : h.contextIndex+uint(reps)])
+				h.contextIndex += uint(reps)
 			}
 			h.substateContextMap = contextMapTransform
 			fallthrough
