@@ -17,7 +17,11 @@
 
 package encoder
 
-import "github.com/molecule-man/go-brrr/internal/core"
+import (
+	"unsafe"
+
+	"github.com/molecule-man/go-brrr/internal/core"
+)
 
 // h5b6u16 is the h5b6 hasher with uint16 bucket slots, dispatched only when
 // the encoder expects the input to fit in 64 KiB. Configuration constants
@@ -30,6 +34,17 @@ type h5b6u16 struct {
 }
 
 func (h *h5b6u16) common() *hasherCommon { return &h.hasherCommon }
+
+// bucketAt returns a pointer to the h5b6BlockSize-entry ring buffer for key.
+//
+// hash() shifts its product right by h5b6HashShift, so key is always <
+// h5b6BucketSize and key<<h5b6BlockBits addresses a whole block inside buckets.
+// Handing the scan loops a fixed-size array pointer instead of a slice lets
+// the compiler prove `i & h5b6BlockMask` is in range, dropping a bounds check
+// from every probe iteration of the match search.
+func (h *h5b6u16) bucketAt(key uint32) *[h5b6BlockSize]uint16 {
+	return (*[h5b6BlockSize]uint16)(unsafe.Add(unsafe.Pointer(&h.buckets), uintptr(key)<<(h5b6BlockBits+1)))
+}
 
 // hash computes a 15-bit bucket index from 4 bytes at data[i:i+4].
 func (h *h5b6u16) hash(data []byte, i uint) uint32 {
@@ -266,7 +281,7 @@ func (h *h5b6u16) findLongestMatch(
 	bestScore := out.score
 	bestLen := out.len
 	key := h.hash(data, cur)
-	bucket := h.buckets[uint(key)<<h5b6BlockBits:]
+	bucket := h.bucketAt(key)
 	n := h.num[key]
 
 	out.len = 0
@@ -522,7 +537,7 @@ func (h *h5b6u16) findLongestMatch(
 	}
 
 	// Store current position in the bucket.
-	h.buckets[uint(h.num[key]&h5b6BlockMask)+uint(key)<<h5b6BlockBits] = uint16(cur)
+	bucket[h.num[key]&h5b6BlockMask] = uint16(cur)
 	h.num[key]++
 
 	// Phase 3: static dictionary fallback when no hash match was found.
