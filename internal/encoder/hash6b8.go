@@ -8,7 +8,11 @@
 
 package encoder
 
-import "github.com/molecule-man/go-brrr/internal/core"
+import (
+	"unsafe"
+
+	"github.com/molecule-man/go-brrr/internal/core"
+)
 
 // h6b8 configuration constants for quality 9.
 const (
@@ -47,6 +51,17 @@ type h6b8 struct {
 }
 
 func (h *h6b8) common() *hasherCommon { return &h.hasherCommon }
+
+// bucketAt returns a pointer to the h6b8BlockSize-entry ring buffer for key.
+//
+// hash() shifts its product right by h6b8HashShift, so key is always <
+// h6b8BucketSize and key<<h6b8BlockBits addresses a whole block inside buckets.
+// Handing the scan loops a fixed-size array pointer instead of a slice lets
+// the compiler prove `i & h6b8BlockMask` is in range, dropping a bounds check
+// from every probe iteration of the match search.
+func (h *h6b8) bucketAt(key uint32) *[h6b8BlockSize]uint32 {
+	return (*[h6b8BlockSize]uint32)(unsafe.Add(unsafe.Pointer(&h.buckets), uintptr(key)<<(h6b8BlockBits+2)))
+}
 
 // hash computes a 15-bit bucket index from 8 bytes at data[i:i+8].
 func (h *h6b8) hash(data []byte, i uint) uint32 {
@@ -144,15 +159,15 @@ func (h *h6b8) findLongestMatch(
 	bestScore := out.score
 	bestLen := out.len
 	key := h.hash(data, curMasked)
-	bucket := h.buckets[uint(key)<<h6b8BlockBits:]
+	bucket := h.bucketAt(key)
 
 	// Speculatively load from the next position's bucket to warm the cache.
 	nextKey := h.hash(data, (cur+1)&ringBufferMask)
-	nextBase := uint(nextKey) << h6b8BlockBits
+	nextBucket := h.bucketAt(nextKey)
 	nextN := h.num[nextKey]
-	h.nextBucket = h.buckets[nextBase]
+	h.nextBucket = nextBucket[0]
 	if nextN > 0 {
-		p := uint(h.buckets[nextBase+uint((nextN-1)&h6b8BlockMask)]) & ringBufferMask
+		p := uint(nextBucket[(nextN-1)&h6b8BlockMask]) & ringBufferMask
 		h.nextBucket = uint32(data[p])
 	}
 
@@ -537,7 +552,7 @@ func (h *h6b8) findLongestMatch(
 	}
 
 	// Store current position in the bucket.
-	h.buckets[uint(h.num[key]&h6b8BlockMask)+uint(key)<<h6b8BlockBits] = uint32(cur)
+	bucket[h.num[key]&h6b8BlockMask] = uint32(cur)
 	h.num[key]++
 
 	// Phase 3: static dictionary fallback when no hash match was found.
@@ -560,15 +575,15 @@ func (h *h6b8) findLongestMatchSmallBuf(
 	bestScore := out.score
 	bestLen := out.len
 	key := h.hash(data, curMasked)
-	bucket := h.buckets[uint(key)<<h6b8BlockBits:]
+	bucket := h.bucketAt(key)
 
 	// Speculatively load from the next position's bucket to warm the cache.
 	nextKey := h.hash(data, (cur+1)&ringBufferMask)
-	nextBase := uint(nextKey) << h6b8BlockBits
+	nextBucket := h.bucketAt(nextKey)
 	nextN := h.num[nextKey]
-	h.nextBucket = h.buckets[nextBase]
+	h.nextBucket = nextBucket[0]
 	if nextN > 0 {
-		p := uint(h.buckets[nextBase+uint((nextN-1)&h6b8BlockMask)]) & ringBufferMask
+		p := uint(nextBucket[(nextN-1)&h6b8BlockMask]) & ringBufferMask
 		h.nextBucket = uint32(data[p])
 	}
 
@@ -700,7 +715,7 @@ func (h *h6b8) findLongestMatchSmallBuf(
 	}
 
 	// Store current position in the bucket.
-	h.buckets[uint(h.num[key]&h6b8BlockMask)+uint(key)<<h6b8BlockBits] = uint32(cur)
+	bucket[h.num[key]&h6b8BlockMask] = uint32(cur)
 	h.num[key]++
 
 	// Phase 3: static dictionary fallback when no hash match was found.
@@ -1017,15 +1032,15 @@ func (h *h6b8) findLongestMatchNoWrap(
 	bestScore := out.score
 	bestLen := out.len
 	key := h.hash(data, cur)
-	bucket := h.buckets[uint(key)<<h6b8BlockBits:]
+	bucket := h.bucketAt(key)
 
 	// Speculatively load from the next position's bucket to warm the cache.
 	nextKey := h.hash(data, cur+1)
-	nextBase := uint(nextKey) << h6b8BlockBits
+	nextBucket := h.bucketAt(nextKey)
 	nextN := h.num[nextKey]
-	h.nextBucket = h.buckets[nextBase]
+	h.nextBucket = nextBucket[0]
 	if nextN > 0 {
-		p := uint(h.buckets[nextBase+uint((nextN-1)&h6b8BlockMask)])
+		p := uint(nextBucket[(nextN-1)&h6b8BlockMask])
 		h.nextBucket = uint32(data[p])
 	}
 
@@ -1400,7 +1415,7 @@ func (h *h6b8) findLongestMatchNoWrap(
 	}
 
 	// Store current position in the bucket.
-	h.buckets[uint(h.num[key]&h6b8BlockMask)+uint(key)<<h6b8BlockBits] = uint32(cur)
+	bucket[h.num[key]&h6b8BlockMask] = uint32(cur)
 	h.num[key]++
 
 	// Phase 3: static dictionary fallback when no hash match was found.

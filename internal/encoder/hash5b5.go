@@ -5,7 +5,11 @@
 
 package encoder
 
-import "github.com/molecule-man/go-brrr/internal/core"
+import (
+	"unsafe"
+
+	"github.com/molecule-man/go-brrr/internal/core"
+)
 
 // H5b5 configuration constants for quality 6.
 const (
@@ -40,6 +44,17 @@ type h5b5 struct {
 }
 
 func (h *h5b5) common() *hasherCommon { return &h.hasherCommon }
+
+// bucketAt returns a pointer to the h5b5BlockSize-entry ring buffer for key.
+//
+// hash() shifts its product right by h5b5HashShift, so key is always <
+// h5b5BucketSize and key<<h5b5BlockBits addresses a whole block inside buckets.
+// Handing the scan loops a fixed-size array pointer instead of a slice lets
+// the compiler prove `i & h5b5BlockMask` is in range, dropping a bounds check
+// from every probe iteration of the match search.
+func (h *h5b5) bucketAt(key uint32) *[h5b5BlockSize]uint32 {
+	return (*[h5b5BlockSize]uint32)(unsafe.Add(unsafe.Pointer(&h.buckets), uintptr(key)<<(h5b5BlockBits+2)))
+}
 
 // hash computes a 14-bit bucket index from 4 bytes at data[0:4].
 func (h *h5b5) hash(data []byte, i uint) uint32 {
@@ -137,11 +152,11 @@ func (h *h5b5) findLongestMatch(
 	bestScore := out.score
 	bestLen := out.len
 	key := h.hash(data, curMasked)
-	bucket := h.buckets[uint(key)<<h5b5BlockBits:]
+	bucket := h.bucketAt(key)
 
 	// Speculatively touch the next position's bucket.
 	nextKey := h.hash(data, (cur+1)&ringBufferMask)
-	h.nextBucket = h.buckets[uint(nextKey)<<h5b5BlockBits]
+	h.nextBucket = h.bucketAt(nextKey)[0]
 
 	out.len = 0
 	out.lenCodeDelta = 0
@@ -230,7 +245,7 @@ func (h *h5b5) findLongestMatch(
 	}
 
 	// Store current position in the bucket.
-	h.buckets[uint(h.num[key]&h5b5BlockMask)+uint(key)<<h5b5BlockBits] = uint32(cur)
+	bucket[h.num[key]&h5b5BlockMask] = uint32(cur)
 	h.num[key]++
 
 	// Phase 3: static dictionary fallback when no hash match was found.
@@ -253,10 +268,10 @@ func (h *h5b5) findLongestMatchSmallBuf(
 	bestScore := out.score
 	bestLen := out.len
 	key := h.hash(data, curMasked)
-	bucket := h.buckets[uint(key)<<h5b5BlockBits:]
+	bucket := h.bucketAt(key)
 
 	nextKey := h.hash(data, (cur+1)&ringBufferMask)
-	h.nextBucket = h.buckets[uint(nextKey)<<h5b5BlockBits]
+	h.nextBucket = h.bucketAt(nextKey)[0]
 
 	out.len = 0
 	out.lenCodeDelta = 0
@@ -339,7 +354,7 @@ func (h *h5b5) findLongestMatchSmallBuf(
 		}
 	}
 
-	h.buckets[uint(h.num[key]&h5b5BlockMask)+uint(key)<<h5b5BlockBits] = uint32(cur)
+	bucket[h.num[key]&h5b5BlockMask] = uint32(cur)
 	h.num[key]++
 
 	if bestScore == minScore {
@@ -659,11 +674,11 @@ func (h *h5b5) findLongestMatchNoWrap(
 	bestScore := out.score
 	bestLen := out.len
 	key := h.hash(data, cur)
-	bucket := h.buckets[uint(key)<<h5b5BlockBits:]
+	bucket := h.bucketAt(key)
 
 	// Speculatively touch the next position's bucket.
 	nextKey := h.hash(data, cur+1)
-	h.nextBucket = h.buckets[uint(nextKey)<<h5b5BlockBits]
+	h.nextBucket = h.bucketAt(nextKey)[0]
 
 	out.len = 0
 	out.lenCodeDelta = 0
@@ -737,7 +752,7 @@ func (h *h5b5) findLongestMatchNoWrap(
 	}
 
 	// Store current position in the bucket.
-	h.buckets[uint(h.num[key]&h5b5BlockMask)+uint(key)<<h5b5BlockBits] = uint32(cur)
+	bucket[h.num[key]&h5b5BlockMask] = uint32(cur)
 	h.num[key]++
 
 	// Phase 3: static dictionary fallback when no hash match was found.

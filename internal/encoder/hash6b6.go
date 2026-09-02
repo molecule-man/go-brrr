@@ -8,7 +8,11 @@
 
 package encoder
 
-import "github.com/molecule-man/go-brrr/internal/core"
+import (
+	"unsafe"
+
+	"github.com/molecule-man/go-brrr/internal/core"
+)
 
 // h6b6 configuration constants for quality 7.
 const (
@@ -42,6 +46,17 @@ type h6b6 struct {
 }
 
 func (h *h6b6) common() *hasherCommon { return &h.hasherCommon }
+
+// bucketAt returns a pointer to the h6b6BlockSize-entry ring buffer for key.
+//
+// hash() shifts its product right by h6b6HashShift, so key is always <
+// h6b6BucketSize and key<<h6b6BlockBits addresses a whole block inside buckets.
+// Handing the scan loops a fixed-size array pointer instead of a slice lets
+// the compiler prove `i & h6b6BlockMask` is in range, dropping a bounds check
+// from every probe iteration of the match search.
+func (h *h6b6) bucketAt(key uint32) *[h6b6BlockSize]uint32 {
+	return (*[h6b6BlockSize]uint32)(unsafe.Add(unsafe.Pointer(&h.buckets), uintptr(key)<<(h6b6BlockBits+2)))
+}
 
 // hash computes a 15-bit bucket index from 8 bytes at data[i:i+8].
 func (h *h6b6) hash(data []byte, i uint) uint32 {
@@ -124,15 +139,15 @@ func (h *h6b6) findLongestMatch(
 	bestScore := out.score
 	bestLen := out.len
 	key := h.hash(data, curMasked)
-	bucket := h.buckets[uint(key)<<h6b6BlockBits:]
+	bucket := h.bucketAt(key)
 
 	// Speculatively load from the next position's bucket to warm the cache.
 	nextKey := h.hash(data, (cur+1)&ringBufferMask)
-	nextBase := uint(nextKey) << h6b6BlockBits
+	nextBucket := h.bucketAt(nextKey)
 	nextN := h.num[nextKey]
-	h.nextBucket = h.buckets[nextBase]
+	h.nextBucket = nextBucket[0]
 	if nextN > 0 {
-		p := uint(h.buckets[nextBase+uint((nextN-1)&h6b6BlockMask)]) & ringBufferMask
+		p := uint(nextBucket[(nextN-1)&h6b6BlockMask]) & ringBufferMask
 		h.nextBucket = uint32(data[p])
 	}
 
@@ -261,7 +276,7 @@ func (h *h6b6) findLongestMatch(
 	}
 
 	// Store current position in the bucket.
-	h.buckets[uint(h.num[key]&h6b6BlockMask)+uint(key)<<h6b6BlockBits] = uint32(cur)
+	bucket[h.num[key]&h6b6BlockMask] = uint32(cur)
 	h.num[key]++
 
 	// Phase 3: static dictionary fallback when no hash match was found.
@@ -284,15 +299,15 @@ func (h *h6b6) findLongestMatchSmallBuf(
 	bestScore := out.score
 	bestLen := out.len
 	key := h.hash(data, curMasked)
-	bucket := h.buckets[uint(key)<<h6b6BlockBits:]
+	bucket := h.bucketAt(key)
 
 	// Speculatively load from the next position's bucket to warm the cache.
 	nextKey := h.hash(data, (cur+1)&ringBufferMask)
-	nextBase := uint(nextKey) << h6b6BlockBits
+	nextBucket := h.bucketAt(nextKey)
 	nextN := h.num[nextKey]
-	h.nextBucket = h.buckets[nextBase]
+	h.nextBucket = nextBucket[0]
 	if nextN > 0 {
-		p := uint(h.buckets[nextBase+uint((nextN-1)&h6b6BlockMask)]) & ringBufferMask
+		p := uint(nextBucket[(nextN-1)&h6b6BlockMask]) & ringBufferMask
 		h.nextBucket = uint32(data[p])
 	}
 
@@ -426,7 +441,7 @@ func (h *h6b6) findLongestMatchSmallBuf(
 	}
 
 	// Store current position in the bucket.
-	h.buckets[uint(h.num[key]&h6b6BlockMask)+uint(key)<<h6b6BlockBits] = uint32(cur)
+	bucket[h.num[key]&h6b6BlockMask] = uint32(cur)
 	h.num[key]++
 
 	// Phase 3: static dictionary fallback when no hash match was found.
