@@ -126,7 +126,7 @@ PADS=(${PADS:-0 4096 65536 64 256 1024 16384})
 
 run_one() {
     local bin="$1" out="$2" pad="$3"
-    BENCH_HEAP_PAD="$pad" GOGC=off setarch -R "$bin" \
+    BENCH_HEAP_PAD="$pad" GOGC=off GODEBUG=asyncpreemptoff=1 GOMAXPROCS=1 setarch -R "$bin" \
         -test.run '^$' -test.bench="$BENCH_PATTERN" -test.cpu=1 \
         -test.benchtime "$BENCHTIME" -test.count "$RUNS_PER_PROCESS" ./... >> "$out"
 }
