@@ -70,6 +70,8 @@ func putDecRingBuf(buf []byte) {
 }
 
 // Decompress decodes the brotli-compressed data and returns the original bytes.
+//
+// It returns [ErrExcessiveInput] if bytes follow the stream.
 func Decompress(data []byte) ([]byte, error) {
 	s := decodeStatePool.Get().(*decodeState)
 	s.initForReuse()

@@ -46,10 +46,11 @@ func NewReaderOptions(src io.Reader, opts ReaderOptions) (*Reader, error) {
 
 // Read decompresses data into p.
 //
-// Read returns [ErrExcessiveInput] if it buffered bytes that follow the end of
-// the brotli stream. Read never reads from src again after the stream ends, so
-// a source that supplies the trailing bytes only after the final stream byte
-// gives io.EOF instead.
+// Read returns [ErrExcessiveInput] only for a buffered tail. It does not read
+// src after the stream ends. [Decompress] checks the complete input for a tail.
+//
+// After decode success, Read serves all decoded bytes before it returns a
+// terminal error. Later calls return the same error.
 func (r *Reader) Read(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
@@ -126,13 +127,6 @@ func (r *Reader) Read(p []byte) (int, error) {
 
 		case decoderResultSuccess:
 			r.out = r.state.flushOutput(r.out)
-			if r.state.excessiveInput() {
-				r.err = ErrExcessiveInput
-				r.srcErr = nil
-				r.out = r.out[:0]
-				r.outPos = 0
-				return 0, r.err
-			}
 			r.err = r.terminalReadError()
 			if len(r.out) == 0 {
 				return 0, r.err
@@ -199,12 +193,15 @@ func (r *Reader) fill() error {
 }
 
 func (r *Reader) terminalReadError() error {
-	if r.srcErr != nil && !errors.Is(r.srcErr, io.EOF) {
-		err := r.srcErr
-		r.srcErr = nil
-		return err
-	}
+	srcErr := r.srcErr
 	r.srcErr = nil
+	// Source errors take priority over a buffered tail.
+	if srcErr != nil && !errors.Is(srcErr, io.EOF) {
+		return srcErr
+	}
+	if r.state.excessiveInput() {
+		return ErrExcessiveInput
+	}
 	return io.EOF
 }
 

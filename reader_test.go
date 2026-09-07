@@ -507,8 +507,13 @@ func TestReaderExcessiveInput(t *testing.T) {
 			src := append(append([]byte{}, compressed...), tc.tail...)
 
 			r := NewReader(bytes.NewReader(src))
-			if _, err := io.ReadAll(r); !errors.Is(err, ErrExcessiveInput) {
+			got, err := io.ReadAll(r)
+			if !errors.Is(err, ErrExcessiveInput) {
 				t.Fatalf("ReadAll = %v, want ErrExcessiveInput", err)
+			}
+			// The decoded bytes survive the error.
+			if !bytes.Equal(got, input) {
+				t.Fatalf("got %d bytes, want %d", len(got), len(input))
 			}
 
 			// The error is sticky.
@@ -524,18 +529,38 @@ func TestReaderExcessiveInput(t *testing.T) {
 	}
 }
 
-func TestReaderExcessiveInputByteAtATime(t *testing.T) {
-	input := []byte("byte at a time")
+func TestReaderExcessiveInputNeedsBufferedTail(t *testing.T) {
+	input := []byte("tail on a read boundary")
 	compressed := compress(t, input, 1)
 	src := append(append([]byte{}, compressed...), 0xde, 0xad)
 
-	r := NewReader(iotest.OneByteReader(bytes.NewReader(src)))
-	got, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
+	tests := map[string]io.Reader{
+		"byte at a time":      iotest.OneByteReader(bytes.NewReader(src)),
+		"split on stream end": &chunkedReader{data: src, chunkSize: len(compressed)},
 	}
-	if !bytes.Equal(got, input) {
-		t.Fatalf("got %q, want %q", got, input)
+
+	for name, src := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, err := io.ReadAll(NewReader(src))
+			if err != nil {
+				t.Fatalf("ReadAll: %v", err)
+			}
+			if !bytes.Equal(got, input) {
+				t.Fatalf("got %q, want %q", got, input)
+			}
+		})
+	}
+}
+
+func TestReaderSourceErrorWinsOverExcessiveInput(t *testing.T) {
+	input := []byte("source error beats the tail")
+	compressed := compress(t, input, 1)
+	src := append(append([]byte{}, compressed...), 0xde, 0xad)
+	want := errors.New("connection reset")
+
+	r := NewReader(&errReader{data: src, err: want})
+	if _, err := io.ReadAll(r); !errors.Is(err, want) {
+		t.Fatalf("ReadAll = %v, want %v", err, want)
 	}
 }
 
