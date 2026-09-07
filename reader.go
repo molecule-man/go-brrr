@@ -45,6 +45,11 @@ func NewReaderOptions(src io.Reader, opts ReaderOptions) (*Reader, error) {
 }
 
 // Read decompresses data into p.
+//
+// Read returns [ErrExcessiveInput] if it buffered bytes that follow the end of
+// the brotli stream. Read never reads from src again after the stream ends, so
+// a source that supplies the trailing bytes only after the final stream byte
+// gives io.EOF instead.
 func (r *Reader) Read(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
@@ -121,6 +126,13 @@ func (r *Reader) Read(p []byte) (int, error) {
 
 		case decoderResultSuccess:
 			r.out = r.state.flushOutput(r.out)
+			if r.state.excessiveInput() {
+				r.err = ErrExcessiveInput
+				r.srcErr = nil
+				r.out = r.out[:0]
+				r.outPos = 0
+				return 0, r.err
+			}
 			r.err = r.terminalReadError()
 			if len(r.out) == 0 {
 				return 0, r.err
