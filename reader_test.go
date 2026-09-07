@@ -488,3 +488,73 @@ func TestReaderIncrementalFlush(t *testing.T) {
 		t.Fatalf("part2 mismatch: got %d bytes, want %d", len(rest), len(part2))
 	}
 }
+
+func TestReaderExcessiveInput(t *testing.T) {
+	input := bytes.Repeat([]byte("excessive input test "), 100)
+	compressed := compress(t, input, 1)
+
+	tests := []struct {
+		name string
+		tail []byte
+	}{
+		{"garbage", []byte{0xde, 0xad, 0xbe, 0xef}},
+		{"one byte", []byte{0x00}},
+		{"second stream", compressed},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			src := append(append([]byte{}, compressed...), tc.tail...)
+
+			r := NewReader(bytes.NewReader(src))
+			if _, err := io.ReadAll(r); !errors.Is(err, ErrExcessiveInput) {
+				t.Fatalf("ReadAll = %v, want ErrExcessiveInput", err)
+			}
+
+			// The error is sticky.
+			p := make([]byte, 16)
+			if n, err := r.Read(p); n != 0 || !errors.Is(err, ErrExcessiveInput) {
+				t.Errorf("Read after error = (%d, %v), want (0, ErrExcessiveInput)", n, err)
+			}
+
+			if _, err := Decompress(src); !errors.Is(err, ErrExcessiveInput) {
+				t.Errorf("Decompress = %v, want ErrExcessiveInput", err)
+			}
+		})
+	}
+}
+
+func TestReaderExcessiveInputByteAtATime(t *testing.T) {
+	input := []byte("byte at a time")
+	compressed := compress(t, input, 1)
+	src := append(append([]byte{}, compressed...), 0xde, 0xad)
+
+	r := NewReader(iotest.OneByteReader(bytes.NewReader(src)))
+	got, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if !bytes.Equal(got, input) {
+		t.Fatalf("got %q, want %q", got, input)
+	}
+}
+
+func TestReaderResetClearsExcessiveInput(t *testing.T) {
+	input := []byte("reset after excessive input")
+	compressed := compress(t, input, 1)
+	bad := append(append([]byte{}, compressed...), 0xde, 0xad)
+
+	r := NewReader(bytes.NewReader(bad))
+	if _, err := io.ReadAll(r); !errors.Is(err, ErrExcessiveInput) {
+		t.Fatalf("ReadAll = %v, want ErrExcessiveInput", err)
+	}
+
+	r.Reset(bytes.NewReader(compressed))
+	got, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("ReadAll after Reset: %v", err)
+	}
+	if !bytes.Equal(got, input) {
+		t.Fatalf("got %q, want %q", got, input)
+	}
+}

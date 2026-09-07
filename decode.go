@@ -31,6 +31,9 @@ var codeLengthPrefixValue = [16]byte{
 	0, 4, 3, 2, 0, 4, 3, 1, 0, 4, 3, 2, 0, 4, 3, 5,
 }
 
+// ErrExcessiveInput reports bytes that follow finalized brotli stream.
+var ErrExcessiveInput = errors.New("brotli: excessive input")
+
 // Sentinel errors returned by Decompress.
 var errPadding = errors.New("brotli: non-zero padding bits")
 
@@ -76,6 +79,10 @@ func Decompress(data []byte) ([]byte, error) {
 	for {
 		switch s.decompressStream(&output) {
 		case decoderResultSuccess:
+			if s.excessiveInput() {
+				decodeStatePool.Put(s)
+				return nil, ErrExcessiveInput
+			}
 			result := s.flushOutput(output)
 			decodeStatePool.Put(s)
 			return result, nil
@@ -2052,6 +2059,11 @@ func (s *decodeState) takeDistanceFromRingBuffer() {
 			s.distanceCode = 0x7FFFFFFF
 		}
 	}
+}
+
+func (s *decodeState) excessiveInput() bool {
+	s.br.unload()
+	return s.br.availIn() > 0
 }
 
 // decompressError formats a decode-stage error.
