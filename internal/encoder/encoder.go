@@ -997,7 +997,7 @@ func (e *encoderSplit) chooseHasher(isLast bool) {
 				e.hasher = h
 			} else {
 				releaseHasher(prev)
-				e.hasher = &h40{maxHops: 16}
+				e.hasher = newH40(16)
 			}
 		case s.sizeHint >= 1<<20 && s.lgwin >= 19:
 			if h, ok := prev.(*h6); ok {
@@ -1021,7 +1021,7 @@ func (e *encoderSplit) chooseHasher(isLast bool) {
 				e.hasher = h
 			} else {
 				releaseHasher(prev)
-				e.hasher = &h40{maxHops: 32}
+				e.hasher = newH40(32)
 			}
 		case s.sizeHint >= 1<<20 && s.lgwin >= 19:
 			if h, ok := prev.(*h6b5); ok {
@@ -1045,7 +1045,7 @@ func (e *encoderSplit) chooseHasher(isLast bool) {
 				e.hasher = h
 			} else {
 				releaseHasher(prev)
-				e.hasher = &h41{maxHops: 56}
+				e.hasher = newH41(56)
 			}
 		case s.sizeHint >= 1<<20 && s.lgwin >= 19:
 			if h, ok := prev.(*h6b6); ok {
@@ -1076,7 +1076,7 @@ func (e *encoderSplit) chooseHasher(isLast bool) {
 				e.hasher = h
 			} else {
 				releaseHasher(prev)
-				e.hasher = &h41{maxHops: 112}
+				e.hasher = newH41(112)
 			}
 		case s.sizeHint >= 1<<20 && s.lgwin >= 19:
 			if h, ok := prev.(*h6b7); ok {

@@ -29,13 +29,18 @@ const (
 	h42HashTypeLength = 4
 )
 
+type h42Slot struct {
+	delta uint16
+	next  uint16
+}
+
 // h42 is the H42 forgetful chain hasher. Each bucket maps to a linked list
 // of slots distributed across 512 banks of 512 entries each.
 type h42 struct {
 	addr        [h42BucketSize]uint32             // position at bucket head
 	head        [h42BucketSize]uint16             // index of head slot in bank
 	tinyHash    [65536]uint8                      // quick rejection for distance cache
-	banks       [h42NumBanks][h42BankSize]h40Slot // 512 banks × 512 slots
+	banks       [h42NumBanks][h42BankSize]h42Slot // 512 banks × 512 slots
 	freeSlotIdx [h42NumBanks]uint16               // per-bank monotonically increasing index
 	hasherCommon
 }

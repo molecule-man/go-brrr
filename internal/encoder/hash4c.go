@@ -1,75 +1,99 @@
-// H41 forgetful chain hasher for quality 7/8 with small windows (lgwin <= 16).
+// H40 and H41 chain hashers for qualities 5 through 8 with lgwin <= 16.
 //
-// H41 shares the same chain structure as H40 (linked-list chains with banked
-// slot storage, tiny hash for quick distance cache rejection), but expands the
-// distance cache search from 4 to 10 entries and allows deeper chain traversal.
+// Each bucket heads a chain in one bank of 64K packed slots.
+// A tiny hash rejects distance cache candidates.
+// The type argument sets the cache depth as a compile-time constant.
+// It has no methods, which prevents generic dictionary calls in hot paths.
 
 package encoder
 
-import "github.com/molecule-man/go-brrr/internal/core"
+import (
+	"unsafe"
 
-// H41 configuration constants.
-const (
-	h41BucketBits = 15
-	h41BucketSize = 1 << h41BucketBits // 32768
-	h41BankBits   = 16
-	h41BankSize   = 1 << h41BankBits   // 65536
-	h41HashShift  = 32 - h41BucketBits // 17
-
-	// h41NumLastDistances is the number of distance cache entries to check.
-	// For quality 7–8, the C reference uses 10 (the 4 base entries plus 6
-	// derived near-miss entries for dist[0]).
-	h41NumLastDistances = 10
-
-	// h41HashTypeLength is the minimum number of bytes needed to compute
-	// the hash and verify a match (StoreLookahead in C).
-	h41HashTypeLength = 4
+	"github.com/molecule-man/go-brrr/internal/core"
 )
 
-// h41 is the H41 forgetful chain hasher. Each bucket maps to a linked list
-// of slots stored in a single bank of 64K entries.
-type h41 struct {
-	maxHops     uint                  // Q7=56, Q8=112
-	addr        [h41BucketSize]uint32 // position at bucket head
-	head        [h41BucketSize]uint16 // index of head slot in bank
-	tinyHash    [65536]uint8          // quick rejection for distance cache
-	slots       [h41BankSize]h40PackedSlot
-	freeSlotIdx uint16 // monotonically increasing, wraps
+const (
+	h4cBucketBits = 15
+	h4cBucketSize = 1 << h4cBucketBits // 32768
+	h4cBankBits   = 16
+	h4cBankSize   = 1 << h4cBankBits   // 65536
+	h4cHashShift  = 32 - h4cBucketBits // 17
+
+	// h4cHashTypeLength is the minimum number of bytes needed to compute
+	// the hash and verify a match (StoreLookahead in C).
+	h4cHashTypeLength = 4
+
+	// Distance cache depths: four for qualities 5 and 6, and ten for qualities 7 and 8.
+	h40NumLastDistances = 4
+	h41NumLastDistances = 10
+
+	// Partial reset limits affect speed only.
+	// The partial path clears every bucket that the input can query.
+	// A zero addr value stops traversal before code reads a stale head entry.
+	h40PartialResetMax = h4cBucketSize >> 6
+	h41PartialResetMax = h4cBucketSize >> 3
+)
+
+type h4cDistances interface {
+	~[h40NumLastDistances]byte | ~[h41NumLastDistances]byte
+}
+
+// h4cPackedSlot stores a 16-bit delta and a 16-bit next-slot index.
+type h4cPackedSlot uint32
+
+// h4c uses D as the distance cache depth.
+type h4c[D h4cDistances] struct {
+	_               [0]D
+	maxHops         uint                  // Q5=16, Q6=32, Q7=56, Q8=112
+	partialResetMax uint                  // largest input for the partial reset
+	addr            [h4cBucketSize]uint32 // position at bucket head
+	head            [h4cBucketSize]uint16 // index of head slot in bank
+	tinyHash        [65536]uint8          // quick rejection for distance cache
+	slots           [h4cBankSize]h4cPackedSlot
+	freeSlotIdx     uint16 // monotonically increasing, wraps
 	hasherCommon
 }
 
-func (h *h41) common() *hasherCommon { return &h.hasherCommon }
+// h40 serves qualities 5 and 6.
+type h40 = h4c[[h40NumLastDistances]byte]
 
-// hash computes a 15-bit bucket index from 4 bytes at data[i:i+4].
-func (h *h41) hash(data []byte, i uint) uint32 {
-	return (loadU32LE(data, i) * hashMul32) >> h41HashShift
+// h41 serves qualities 7 and 8.
+type h41 = h4c[[h41NumLastDistances]byte]
+
+func newH40(maxHops uint) *h40 {
+	return &h40{maxHops: maxHops, partialResetMax: h40PartialResetMax}
 }
 
-// reset prepares the hasher for use. addr stores positions as one's complement
-// (^uint32(pos)) so a zeroed slot decodes to 0xFFFFFFFF — far enough in the
-// "future" that `cur - decoded` always exceeds maxBackward. That lets the
-// full-sweep path use clear()/memclr instead of a scalar fill of 0xCCCCCCCC,
-// which dominated reset on the q=7/8 small-window benchmarks.
-func (h *h41) reset(oneShot bool, inputSize uint, data []byte) {
-	partialPrepareThreshold := h41BucketSize >> 3
-	if oneShot && inputSize <= uint(partialPrepareThreshold) {
+func newH41(maxHops uint) *h41 {
+	return &h41{maxHops: maxHops, partialResetMax: h41PartialResetMax}
+}
+
+func (h *h4c[D]) common() *hasherCommon { return &h.hasherCommon }
+
+func (h *h4c[D]) hash(data []byte, i uint) uint32 {
+	return (loadU32LE(data, i) * hashMul32) >> h4cHashShift
+}
+
+// addr stores complemented positions, so zero decodes to the 0xFFFFFFFF sentinel.
+// The sentinel lets a full reset use memclr.
+func (h *h4c[D]) reset(oneShot bool, inputSize uint, data []byte) {
+	if oneShot && inputSize <= h.partialResetMax {
 		for i := range inputSize {
 			bucket := h.hash(data, i)
 			h.addr[bucket] = 0
 		}
 	} else {
 		clear(h.addr[:])
-		h.head = [h41BucketSize]uint16{}
+		h.head = [h4cBucketSize]uint16{}
 	}
 	h.tinyHash = [65536]uint8{}
 	h.freeSlotIdx = 0
 	h.ready = true
 }
 
-// store records position ix in the chain for the 4-byte sequence at
-// data[ix & mask]. Positions are stored as one's complement (^uint32(ix))
-// so the cleared/zero-init state decodes as a sentinel — see reset.
-func (h *h41) store(data []byte, mask, ix uint) {
+// store adds ix to the chain. Complemented positions preserve the zero sentinel.
+func (h *h4c[D]) store(data []byte, mask, ix uint) {
 	key := h.hash(data, ix&mask)
 	idx := h.freeSlotIdx
 	h.freeSlotIdx++
@@ -78,16 +102,13 @@ func (h *h41) store(data []byte, mask, ix uint) {
 	if delta > 0xFFFF {
 		delta = 0xFFFF
 	}
-	h.slots[idx] = h40PackedSlot(uint32(delta) | uint32(h.head[key])<<16)
+	h.slots[idx] = h4cPackedSlot(uint32(delta) | uint32(h.head[key])<<16)
 	h.addr[key] = ^uint32(ix)
 	h.head[key] = idx
 }
 
-// storeRange records positions [start, end) in the hash table.
-// There is a single bank and h41BankSize == 1<<16 == cap(h.slots), so the
-// bank/slotBase indirection and the idx mask in store() are dead here; dropping
-// them, plus a single packed 32-bit slot write, keeps the loop call-free.
-func (h *h41) storeRange(data []byte, mask, start, end uint) {
+// Keep this loop local to avoid a store call.
+func (h *h4c[D]) storeRange(data []byte, mask, start, end uint) {
 	for i := start; i < end; i++ {
 		key := h.hash(data, i&mask)
 		idx := h.freeSlotIdx
@@ -97,7 +118,7 @@ func (h *h41) storeRange(data []byte, mask, start, end uint) {
 		if delta > 0xFFFF {
 			delta = 0xFFFF
 		}
-		h.slots[idx] = h40PackedSlot(uint32(delta) | uint32(h.head[key])<<16)
+		h.slots[idx] = h4cPackedSlot(uint32(delta) | uint32(h.head[key])<<16)
 		h.addr[key] = ^uint32(i)
 		h.head[key] = idx
 	}
@@ -105,24 +126,17 @@ func (h *h41) storeRange(data []byte, mask, start, end uint) {
 
 // stitchToPreviousBlock seeds the hash table with the last 3 positions of
 // the previous block so that cross-block matches can be found.
-func (h *h41) stitchToPreviousBlock(numBytes, position uint, ringBuffer []byte, ringBufferMask uint) {
-	if numBytes >= h41HashTypeLength-1 && position >= 3 {
+func (h *h4c[D]) stitchToPreviousBlock(numBytes, position uint, ringBuffer []byte, ringBufferMask uint) {
+	if numBytes >= h4cHashTypeLength-1 && position >= 3 {
 		h.store(ringBuffer, ringBufferMask, position-3)
 		h.store(ringBuffer, ringBufferMask, position-2)
 		h.store(ringBuffer, ringBufferMask, position-1)
 	}
 }
 
-// findLongestMatch searches for the best backward reference at position cur
-// in the ring buffer, then stores cur in the hash table.
-//
-// The search has three phases:
-//  1. Distance cache: try 10 entries (4 base + 6 derived near-miss), use
-//     tinyHash for i>0 rejection, accept length >= 2 for all entries.
-//  2. Chain walk: traverse slot chain up to maxHops, 4-byte quick reject,
-//     accept length >= 4.
-//  3. Static dictionary fallback.
-func (h *h41) findLongestMatch(
+// findLongestMatch checks cached distances, the chain, and the static dictionary.
+// It stores cur before the chain walk.
+func (h *h4c[D]) findLongestMatch(
 	data []byte, ringBufferMask uint,
 	distCache []int,
 	cur, maxLength, maxBackward, dictDistance uint,
@@ -148,11 +162,116 @@ func (h *h41) findLongestMatch(
 	out.len = 0
 	out.lenCodeDelta = 0
 
-	// Phase 1: try cached distances.
-	for i := range uint(h41NumLastDistances) {
+	// Check four distances directly. The loop for other distances compiles away for h40.
+	// The first distance skips tinyHash because it is hot.
+	{
+		backward := uint(distCache[0])
+		prevIx := cur - backward
+		if prevIx < cur && backward <= maxBackward {
+			prevIx &= ringBufferMask
+			if loadByte(data, prevIx) == loadByte(data, curMasked) &&
+				loadByte(data, prevIx+1) == loadByte(data, curMasked+1) {
+				ml := uint(matchLenAtNoInline(data, prevIx, curMasked, int(maxLength)))
+				if ml >= 2 {
+					score := backwardReferenceScoreUsingLastDistance(ml)
+					if bestScore < score {
+						bestScore = score
+						bestLen = ml
+						out.len = bestLen
+						out.distance = backward
+						out.score = bestScore
+					}
+				}
+			}
+		}
+	}
+
+	{
+		backward := uint(distCache[1])
+		prevIx := cur - backward
+		if h.tinyHash[uint16(prevIx)] == tinyHash {
+			if prevIx < cur && backward <= maxBackward {
+				prevIx &= ringBufferMask
+				if loadByte(data, prevIx) == loadByte(data, curMasked) &&
+					loadByte(data, prevIx+1) == loadByte(data, curMasked+1) {
+					ml := uint(matchLenAtNoInline(data, prevIx, curMasked, int(maxLength)))
+					if ml >= 2 {
+						score := backwardReferenceScoreUsingLastDistance(ml)
+						if bestScore < score {
+							score -= backwardReferencePenaltyUsingLastDistance(1)
+							if bestScore < score {
+								bestScore = score
+								bestLen = ml
+								out.len = bestLen
+								out.distance = backward
+								out.score = bestScore
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	{
+		backward := uint(distCache[2])
+		prevIx := cur - backward
+		if h.tinyHash[uint16(prevIx)] == tinyHash {
+			if prevIx < cur && backward <= maxBackward {
+				prevIx &= ringBufferMask
+				if loadByte(data, prevIx) == loadByte(data, curMasked) &&
+					loadByte(data, prevIx+1) == loadByte(data, curMasked+1) {
+					ml := uint(matchLenAtNoInline(data, prevIx, curMasked, int(maxLength)))
+					if ml >= 2 {
+						score := backwardReferenceScoreUsingLastDistance(ml)
+						if bestScore < score {
+							score -= backwardReferencePenaltyUsingLastDistance(2)
+							if bestScore < score {
+								bestScore = score
+								bestLen = ml
+								out.len = bestLen
+								out.distance = backward
+								out.score = bestScore
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	{
+		backward := uint(distCache[3])
+		prevIx := cur - backward
+		if h.tinyHash[uint16(prevIx)] == tinyHash {
+			if prevIx < cur && backward <= maxBackward {
+				prevIx &= ringBufferMask
+				if loadByte(data, prevIx) == loadByte(data, curMasked) &&
+					loadByte(data, prevIx+1) == loadByte(data, curMasked+1) {
+					ml := uint(matchLenAtNoInline(data, prevIx, curMasked, int(maxLength)))
+					if ml >= 2 {
+						score := backwardReferenceScoreUsingLastDistance(ml)
+						if bestScore < score {
+							score -= backwardReferencePenaltyUsingLastDistance(3)
+							if bestScore < score {
+								bestScore = score
+								bestLen = ml
+								out.len = bestLen
+								out.distance = backward
+								out.score = bestScore
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// unsafe.Sizeof does not evaluate its operand and yields a constant depth for each type.
+	//nolint:govet // nilness: Sizeof does not evaluate its operand
+	numLastDistances := uint(unsafe.Sizeof(*(*D)(nil)))
+	for i := uint(h40NumLastDistances); i < numLastDistances; i++ {
 		backward := uint(distCache[i])
 		prevIx := cur - backward
-		if i > 0 && h.tinyHash[uint16(prevIx)] != tinyHash {
+		if h.tinyHash[uint16(prevIx)] != tinyHash {
 			continue
 		}
 		if prevIx >= cur || backward > maxBackward {
@@ -168,9 +287,7 @@ func (h *h41) findLongestMatch(
 		if ml >= 2 {
 			score := backwardReferenceScoreUsingLastDistance(ml)
 			if bestScore < score {
-				if i != 0 {
-					score -= backwardReferencePenaltyUsingLastDistance(i)
-				}
+				score -= backwardReferencePenaltyUsingLastDistance(i)
 				if bestScore < score {
 					bestScore = score
 					bestLen = ml
@@ -188,11 +305,8 @@ func (h *h41) findLongestMatch(
 	}
 
 	// Phase 2: walk the chain.
-	//
-	// There is a single bank, so bank is always 0 and slotBase is always 0.
-	// Capture the old chain head/addr, then store cur before the walk so
-	// the store's writes pipeline against the serial slot loads. The walk
-	// still traverses the old chain because it uses oldHead below.
+	// Store cur first so writes overlap serial slot reads.
+	// oldHead keeps the prior chain reachable.
 	{
 		oldAddr := uint(^h.addr[key])
 		oldHead := h.head[key]
@@ -204,7 +318,7 @@ func (h *h41) findLongestMatch(
 		if storeDelta > 0xFFFF {
 			storeDelta = 0xFFFF
 		}
-		h.slots[newIdx] = h40PackedSlot(uint32(storeDelta) | uint32(oldHead)<<16)
+		h.slots[newIdx] = h4cPackedSlot(uint32(storeDelta) | uint32(oldHead)<<16)
 		h.addr[key] = ^uint32(cur)
 		h.head[key] = newIdx
 
@@ -249,11 +363,9 @@ func (h *h41) findLongestMatch(
 	}
 }
 
-// findLongestMatchSmallBuf is the generic version of findLongestMatch used
-// when the ring buffer backing array is smaller than ringBufferMask+1 (i.e.
-// the first small write hasn't triggered a full allocation yet). It keeps
-// all runtime bounds checks and is only called for small initial payloads.
-func (h *h41) findLongestMatchSmallBuf(
+// findLongestMatchSmallBuf handles initial arrays smaller than ringBufferMask+1.
+// It retains runtime bounds checks.
+func (h *h4c[D]) findLongestMatchSmallBuf(
 	data []byte, ringBufferMask uint,
 	distCache []int,
 	cur, maxLength, maxBackward, dictDistance uint,
@@ -270,7 +382,10 @@ func (h *h41) findLongestMatchSmallBuf(
 	out.lenCodeDelta = 0
 
 	// Phase 1: try cached distances.
-	for i := range uint(h41NumLastDistances) {
+	// unsafe.Sizeof does not evaluate its operand and yields a constant depth for each type.
+	//nolint:govet // nilness: Sizeof does not evaluate its operand
+	numLastDistances := uint(unsafe.Sizeof(*(*D)(nil)))
+	for i := range numLastDistances {
 		backward := uint(distCache[i])
 		prevIx := cur - backward
 		if i > 0 && h.tinyHash[uint16(prevIx)] != tinyHash {
@@ -316,7 +431,7 @@ func (h *h41) findLongestMatchSmallBuf(
 		if storeDelta > 0xFFFF {
 			storeDelta = 0xFFFF
 		}
-		h.slots[newIdx] = h40PackedSlot(uint32(storeDelta) | uint32(oldHead)<<16)
+		h.slots[newIdx] = h4cPackedSlot(uint32(storeDelta) | uint32(oldHead)<<16)
 		h.addr[key] = ^uint32(cur)
 		h.head[key] = newIdx
 
@@ -361,10 +476,8 @@ func (h *h41) findLongestMatchSmallBuf(
 	}
 }
 
-// createBackwardReferences finds backward reference matches using this hasher
-// and populates s.commands. The hot findLongestMatch/store/storeRange calls
-// are direct (non-virtual) since the receiver is concrete.
-func (h *h41) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) {
+// createBackwardReferences adds matches to s.commands.
+func (h *h4c[D]) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) {
 	data := s.data
 	mask := uint(s.mask)
 	maxBackwardLimit := (uint(1) << s.lgwin) - core.WindowGap
@@ -376,8 +489,8 @@ func (h *h41) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32)
 	posEnd := position + uint(bytes)
 
 	storeEnd := position
-	if uint(bytes) >= h41HashTypeLength {
-		storeEnd = posEnd - h41HashTypeLength + 1
+	if uint(bytes) >= h4cHashTypeLength {
+		storeEnd = posEnd - h4cHashTypeLength + 1
 	}
 
 	const randomHeuristicsWindowSize = 64
@@ -392,7 +505,7 @@ func (h *h41) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32)
 	}
 	prepareDistanceCache(distCache[:])
 
-	for position+h41HashTypeLength < posEnd {
+	for position+h4cHashTypeLength < posEnd {
 		maxLength := posEnd - position
 		maxDistance := min(position, maxBackwardLimit)
 
@@ -432,7 +545,7 @@ func (h *h41) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32)
 					sr = sr2
 					delayedBackwardReferencesInRow++
 					if delayedBackwardReferencesInRow < 4 &&
-						position+h41HashTypeLength < posEnd {
+						position+h4cHashTypeLength < posEnd {
 						maxLength--
 						continue
 					}
@@ -476,14 +589,14 @@ func (h *h41) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32)
 
 			if position > applyRandomHeuristics {
 				if position > applyRandomHeuristics+4*randomHeuristicsWindowSize {
-					posJump := min(position+16, posEnd-max(h41HashTypeLength-1, 4))
+					posJump := min(position+16, posEnd-max(h4cHashTypeLength-1, 4))
 					for position < posJump {
 						h.store(data, mask, position)
 						insertLength += 4
 						position += 4
 					}
 				} else {
-					posJump := min(position+8, posEnd-(h41HashTypeLength-1))
+					posJump := min(position+8, posEnd-(h4cHashTypeLength-1))
 					for position < posJump {
 						h.store(data, mask, position)
 						insertLength += 2
