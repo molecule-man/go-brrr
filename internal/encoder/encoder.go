@@ -257,7 +257,7 @@ func (c *encoderCore) maybePromoteHasher() {
 		if h.ready {
 			n.num = h.num
 			for i := range &h.buckets {
-				n.buckets[i] = uint32(h.buckets[i])
+				n.buckets[i/h5b6BlockSize][i%h5b6BlockSize] = uint32(h.buckets[i])
 			}
 			n.everWrapped = false
 			n.ready = true
