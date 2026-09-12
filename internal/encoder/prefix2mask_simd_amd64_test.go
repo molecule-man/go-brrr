@@ -74,7 +74,7 @@ func BenchmarkPrefix2Mask64(b *testing.B) {
 			prefix2MaskSink = prefix2Mask64(&data[0], c0, c1)
 		}
 	})
-	b.Run("impl=NEW_sse2_mask_plus_walk", func(b *testing.B) {
+	b.Run("impl=sse2_mask_plus_walk", func(b *testing.B) {
 		b.ReportAllocs()
 		for range b.N {
 			m := prefix2Mask64(&data[0], c0, c1)
