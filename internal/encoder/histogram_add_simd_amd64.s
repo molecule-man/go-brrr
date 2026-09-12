@@ -1,7 +1,3 @@
-// Assembly for histogramAdd.go. SSE2 only: baseline on amd64, no CPU check
-// needed. Go assembly cannot live inside a .go file, which is why this is a
-// separate file rather than inlined with the rest.
-
 //go:build amd64 && !purego
 
 #include "textflag.h"
