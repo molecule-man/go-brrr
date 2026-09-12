@@ -62,7 +62,7 @@ func TestPrefix2Mask64AllOnesAndAllZeroes(t *testing.T) {
 func BenchmarkPrefix2Mask64(b *testing.B) {
 	data := prefix2MaskFixture(b, 11)
 	c0, c1 := data[64], data[65]
-	b.Run("impl=OLD_scalar_scan", func(b *testing.B) {
+	b.Run("impl=scalar_scan", func(b *testing.B) {
 		b.ReportAllocs()
 		for range b.N {
 			prefix2MaskSink = prefix2Mask64Scalar(data, 0, c0, c1)
