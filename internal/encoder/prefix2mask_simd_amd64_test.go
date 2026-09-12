@@ -34,8 +34,8 @@ func TestPrefix2Mask64MatchesScalarForEveryBytePair(t *testing.T) {
 	for _, seed := range []int{1, 3, 11, 97} {
 		data := prefix2MaskFixture(t, seed)
 		for _, off := range []int{0, 1, 7, 64, 100} {
-			for c0 := byte(0); c0 < 8; c0++ {
-				for c1 := byte(0); c1 < 8; c1++ {
+			for c0 := range byte(8) {
+				for c1 := range byte(8) {
 					got := prefix2Mask64(&data[off], c0, c1)
 					want := prefix2Mask64Scalar(data, off, c0, c1)
 					if got != want {

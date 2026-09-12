@@ -14,9 +14,11 @@
 
 package encoder
 
-import "math/bits"
+import (
+	"math/bits"
 
-import "github.com/molecule-man/go-brrr/internal/core"
+	"github.com/molecule-man/go-brrr/internal/core"
+)
 
 // H10 configuration constants.
 const (
