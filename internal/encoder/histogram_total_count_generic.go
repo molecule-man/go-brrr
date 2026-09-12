@@ -1,7 +1,3 @@
-// Scalar histogramTotalCount for every target the SSE version does not cover:
-// non-amd64 and purego builds. Byte-for-byte identical results; this is the
-// original loop unchanged.
-
 //go:build !amd64 || purego
 
 package encoder

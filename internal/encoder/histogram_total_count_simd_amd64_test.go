@@ -1,7 +1,3 @@
-// Parity and benchmarks for the SSE2 histogramTotalCount kernel. The kernel and
-// the scalar reference live in one binary so the comparison carries no
-// run-to-run drift.
-
 //go:build amd64 && !purego
 
 package encoder
