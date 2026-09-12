@@ -69,7 +69,7 @@ func TestFindBlocksClampAVX512LeavesSignalBytesPastTheRangeUntouched(t *testing.
 func BenchmarkFindBlocksClamp100Histograms(b *testing.B) {
 	const minCost, switchCost = 3.5, 20.0
 
-	b.Run("impl=scalar", func(b *testing.B) {
+	b.Run("impl=OLD_scalar", func(b *testing.B) {
 		cost := findBlocksClampFixture(b, 100)
 		sig := make([]byte, 100/8+4)
 		b.ReportAllocs()
@@ -77,7 +77,7 @@ func BenchmarkFindBlocksClamp100Histograms(b *testing.B) {
 			findBlocksClampOriginal(cost, sig, minCost, switchCost)
 		}
 	})
-	b.Run("impl=avx512_v4", func(b *testing.B) {
+	b.Run("impl=NEW_avx512_masked", func(b *testing.B) {
 		if !findBlocksHasAVX512 {
 			b.Skip("AVX-512 not available on this CPU")
 		}
