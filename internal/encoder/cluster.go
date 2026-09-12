@@ -184,11 +184,7 @@ func histogramCombine(
 		clusterSize[bestIdx1] += clusterSize[bestIdx2]
 
 		// Redirect symbols from idx2 to idx1.
-		for i := range symbolsSize {
-			if symbols[i] == bestIdx2 {
-				symbols[i] = bestIdx1
-			}
-		}
+		histogramCombineRedirect(symbols[:symbolsSize], bestIdx2, bestIdx1)
 
 		// Remove bestIdx2 from clusters list.
 		for i := 0; i < numClusters; i++ {
