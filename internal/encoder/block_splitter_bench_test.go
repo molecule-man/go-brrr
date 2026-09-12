@@ -5,6 +5,10 @@ import "testing"
 // findBlocksSink keeps the benchmarked calls from being elided.
 var findBlocksSink int
 
+// findBlocksNoMinCost mirrors the sentinel so the replica below stays
+// self-contained and compiles against a tree that has no noMinCost const.
+const findBlocksNoMinCost = 1e99
+
 // findBlocksBefore is findBlocks with the two inner loops as they were
 // before the SSE2 kernels replaced them, so both run in one binary.
 func findBlocksBefore(
@@ -60,7 +64,7 @@ func findBlocksBefore(
 		insertCostIx := symbol * numHistograms
 		switchCost := blockSwitchBitcost
 
-		minCost := noMinCost
+		minCost := findBlocksNoMinCost
 		for k := range numHistograms {
 			cost[k] += insertCost[insertCostIx+k]
 			if cost[k] < minCost {
