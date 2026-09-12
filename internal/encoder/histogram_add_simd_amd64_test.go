@@ -47,10 +47,10 @@ func TestHistogramAddSSE2LeavesEntriesPastAlphabetSizeUntouched(t *testing.T) {
 		src[i] = 7
 	}
 	histogramAddAsm(dst, src, n)
-	for i := range len(dst) {
-		if dst[i] != 0 {
+	for i, got := range dst[n:] {
+		if got != 0 {
 			t.Fatalf("index %d past alphabetSize was modified to %d; the histogram arena is "+
-				"contiguous, so writing past n corrupts the next histogram", i, dst[i])
+				"contiguous, so writing past n corrupts the next histogram", n+i, got)
 		}
 	}
 }
