@@ -41,13 +41,6 @@ func histogramSlice(data []uint32, idx, alphabetSize int) []uint32 {
 	return data[off : off+alphabetSize]
 }
 
-// histogramAdd adds src histogram into dst histogram element-wise.
-func histogramAdd(dst, src []uint32, alphabetSize int) {
-	for i := range alphabetSize {
-		dst[i] += src[i]
-	}
-}
-
 // histogramClear zeroes a histogram.
 func histogramClear(h []uint32, alphabetSize int) {
 	clear(h[:alphabetSize])
