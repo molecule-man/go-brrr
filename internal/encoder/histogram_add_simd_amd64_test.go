@@ -63,7 +63,7 @@ func BenchmarkHistogramAdd704Symbols(b *testing.B) {
 			histogramAddScalarReference(dst, src, 704)
 		}
 	})
-	b.Run("impl=NEW_sse2_asm", func(b *testing.B) {
+	b.Run("impl=sse2_asm", func(b *testing.B) {
 		dst, src := histogramAddFixture(b, 704)
 		b.ReportAllocs()
 		for range b.N {
