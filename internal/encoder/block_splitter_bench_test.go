@@ -9,6 +9,9 @@ var findBlocksSink int
 // self-contained and compiles against a tree that has no noMinCost const.
 const findBlocksNoMinCost = 1e99
 
+// findBlocksBenchAlphabet is the alphabet size both findBlocks benchmarks use.
+const findBlocksBenchAlphabet = 256
+
 // findBlocksBefore is findBlocks with the two inner loops as they were
 // before the SSE2 kernels replaced them, so both run in one binary.
 func findBlocksBefore(
@@ -107,10 +110,11 @@ func findBlocksBefore(
 	return numBlocks
 }
 
-func findBlocksFixture(tb testing.TB, length, numHistograms, alphabetSize int) (
+func findBlocksFixture(tb testing.TB, length, numHistograms int) (
 	data []uint16, histograms []uint32, insertCost, cost []float64, sig, blockID []byte,
 ) {
 	tb.Helper()
+	const alphabetSize = findBlocksBenchAlphabet
 	data = make([]uint16, length)
 	for i := range data {
 		data[i] = uint16((i * 7919) % alphabetSize)
@@ -127,10 +131,10 @@ func findBlocksFixture(tb testing.TB, length, numHistograms, alphabetSize int) (
 }
 
 func benchmarkFindBlocks(b *testing.B, length, numHistograms int) {
-	const alphabetSize = 256
+	const alphabetSize = findBlocksBenchAlphabet
 
 	b.Run("impl=before_scalar_loops", func(b *testing.B) {
-		data, hist, ins, cost, sig, id := findBlocksFixture(b, length, numHistograms, alphabetSize)
+		data, hist, ins, cost, sig, id := findBlocksFixture(b, length, numHistograms)
 		b.ReportAllocs()
 		for range b.N {
 			findBlocksSink = findBlocksBefore(data, hist, ins, cost, sig, id,
@@ -138,7 +142,7 @@ func benchmarkFindBlocks(b *testing.B, length, numHistograms int) {
 		}
 	})
 	b.Run("impl=after_sse2_kernels", func(b *testing.B) {
-		data, hist, ins, cost, sig, id := findBlocksFixture(b, length, numHistograms, alphabetSize)
+		data, hist, ins, cost, sig, id := findBlocksFixture(b, length, numHistograms)
 		b.ReportAllocs()
 		for range b.N {
 			findBlocksSink = findBlocks(data, hist, ins, cost, sig, id,

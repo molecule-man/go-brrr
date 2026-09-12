@@ -3,6 +3,9 @@ package encoder
 import "testing"
 
 // literalCostSink keeps the benchmarked calls from being elided.
+// literalCostBenchBytes is the payload size both literal-cost benchmarks use.
+const literalCostBenchBytes = 256 << 10
+
 var literalCostSink float32
 
 // The *Before functions recompute fastLog2 of the window count on every
@@ -115,8 +118,9 @@ func estimateBitCostsForLiteralsUTF8Before(data []byte, pos, length, mask uint, 
 	}
 }
 
-func literalCostFixture(tb testing.TB, n int, text bool) (data []byte, histogram []uint, cost []float32) {
+func literalCostFixture(tb testing.TB, text bool) (data []byte, histogram []uint, cost []float32) {
 	tb.Helper()
+	const n = literalCostBenchBytes
 	data = make([]byte, n)
 	for i := range data {
 		if text {
@@ -131,8 +135,8 @@ func literalCostFixture(tb testing.TB, n int, text bool) (data []byte, histogram
 }
 
 func BenchmarkEstimateBitCostsForLiteralsRaw256KiB(b *testing.B) {
-	const n = 256 << 10
-	data, histogram, cost := literalCostFixture(b, n, false)
+	const n = literalCostBenchBytes
+	data, histogram, cost := literalCostFixture(b, false)
 	b.Run("impl=before_recompute_log", func(b *testing.B) {
 		b.ReportAllocs()
 		b.SetBytes(int64(n))
@@ -152,8 +156,8 @@ func BenchmarkEstimateBitCostsForLiteralsRaw256KiB(b *testing.B) {
 }
 
 func BenchmarkEstimateBitCostsForLiteralsUTF8256KiB(b *testing.B) {
-	const n = 256 << 10
-	data, histogram, cost := literalCostFixture(b, n, true)
+	const n = literalCostBenchBytes
+	data, histogram, cost := literalCostFixture(b, true)
 	b.Run("impl=before_recompute_log", func(b *testing.B) {
 		b.ReportAllocs()
 		b.SetBytes(int64(n))

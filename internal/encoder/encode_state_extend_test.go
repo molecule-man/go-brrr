@@ -35,9 +35,9 @@ func extendMatchAfter(data []byte, length, wrappedPos, mask, cmdDist uint32) uin
 	return copyLen
 }
 
-func extendMatchFixture(tb testing.TB, sizeLog, period int) (data []byte, mask uint32) {
+func extendMatchFixture(tb testing.TB, period int) (data []byte, mask uint32) {
 	tb.Helper()
-	n := 1 << sizeLog
+	const n = 1 << 16
 	data = make([]byte, n)
 	for i := range data {
 		data[i] = byte(i % period)
@@ -47,10 +47,10 @@ func extendMatchFixture(tb testing.TB, sizeLog, period int) (data []byte, mask u
 
 func TestExtendMatchWideCompareAgreesWithTheByteLoop(t *testing.T) {
 	for _, period := range []int{1, 2, 3, 7, 16, 61, 256} {
-		data, mask := extendMatchFixture(t, 16, period)
+		data, mask := extendMatchFixture(t, period)
 		for _, dist := range []uint32{1, 2, 3, 8, 16, 17, 64, 1000} {
 			for _, length := range []uint32{0, 1, 2, 7, 8, 9, 31, 32, 33, 1000, 5000} {
-				for _, pos := range []uint32{1024, 40000, uint32(mask) - 100} {
+				for _, pos := range []uint32{1024, 40000, mask - 100} {
 					want := extendMatchBefore(data, length, pos, mask, dist)
 					got := extendMatchAfter(data, length, pos, mask, dist)
 					if got != want {
@@ -65,7 +65,7 @@ func TestExtendMatchWideCompareAgreesWithTheByteLoop(t *testing.T) {
 }
 
 func benchmarkExtendMatch(b *testing.B, period int, dist, length uint32) {
-	data, mask := extendMatchFixture(b, 16, period)
+	data, mask := extendMatchFixture(b, period)
 	const pos = 1024
 	b.Run("impl=before_byte_loop", func(b *testing.B) {
 		b.ReportAllocs()
