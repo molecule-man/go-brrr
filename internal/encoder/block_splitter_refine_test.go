@@ -59,14 +59,14 @@ func BenchmarkRefineEntropyCodes(b *testing.B) {
 		if alphabetSize == 704 {
 			name = "alphabet=704"
 		}
-		b.Run(name+"/impl=scratch_histogram", func(b *testing.B) {
+		b.Run(name+"/impl=OLD_scratch_histogram", func(b *testing.B) {
 			data, h := refineFixture(b, length, numHistograms, alphabetSize)
 			b.ReportAllocs()
 			for range b.N {
 				refineEntropyCodesScratchReference(data, h, length, stride, numHistograms, alphabetSize)
 			}
 		})
-		b.Run(name+"/impl=direct_sample", func(b *testing.B) {
+		b.Run(name+"/impl=NEW_direct_sample", func(b *testing.B) {
 			data, h := refineFixture(b, length, numHistograms, alphabetSize)
 			b.ReportAllocs()
 			for range b.N {
