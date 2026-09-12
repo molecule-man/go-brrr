@@ -61,7 +61,7 @@ func BenchmarkRefineEntropyCodes(b *testing.B) {
 		if alphabetSize == 704 {
 			name = "alphabet=704"
 		}
-		b.Run(name+"/impl=OLD_scratch_histogram", func(b *testing.B) {
+		b.Run(name+"/impl=scratch_histogram", func(b *testing.B) {
 			data, h := refineFixture(b, numHistograms, alphabetSize)
 			b.ReportAllocs()
 			for range b.N {
