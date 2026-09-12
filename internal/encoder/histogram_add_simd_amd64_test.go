@@ -1,6 +1,3 @@
-// Parity and benchmarks for the SSE2 histogramAdd kernel. Vector and scalar
-// live in one binary so the comparison carries no run-to-run drift.
-
 //go:build amd64 && !purego
 
 package encoder
