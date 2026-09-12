@@ -4,9 +4,9 @@
 
 #include "textflag.h"
 
-// func histogramTotalCountSSE2FourAccum(h []uint32, n int) uint32
+// func histogramTotalCountAsm(h []uint32, n int) uint32
 // Four independent accumulators so the sum is not serialised on one PADDD.
-TEXT ·histogramTotalCountSSE2FourAccum(SB), NOSPLIT|NOFRAME, $0-36
+TEXT ·histogramTotalCountAsm(SB), NOSPLIT|NOFRAME, $0-36
 	MOVQ h_base+0(FP), SI
 	MOVQ n+24(FP), CX
 	XORQ AX, AX

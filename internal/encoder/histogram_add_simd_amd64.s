@@ -2,10 +2,10 @@
 
 #include "textflag.h"
 
-// func histogramAddSSE2Unrolled8x(dst, src []uint32, n int)
+// func histogramAddAsm(dst, src []uint32, n int)
 // Thirty-two uint32 per iteration. Deeper unrolling than the alphabet sizes
 // usually justify, included to show where the returns stop.
-TEXT ·histogramAddSSE2Unrolled8x(SB), NOSPLIT|NOFRAME, $0-56
+TEXT ·histogramAddAsm(SB), NOSPLIT|NOFRAME, $0-56
 	MOVQ dst_base+0(FP), DI
 	MOVQ src_base+24(FP), SI
 	MOVQ n+48(FP), CX
