@@ -10,6 +10,11 @@ import (
 	"testing"
 )
 
+var (
+	findBlocksMinSink  float64
+	findBlocksBestSink int
+)
+
 func findBlocksKernelFixture(tb testing.TB, numHistograms int) (cost, insertCost []float64) {
 	tb.Helper()
 	cost = make([]float64, numHistograms)
@@ -84,11 +89,6 @@ func TestFindBlocksClampVectorMatchesScalarAndSetsIdenticalSignalBits(t *testing
 		}
 	}
 }
-
-var (
-	findBlocksMinSink  float64
-	findBlocksBestSink int
-)
 
 func BenchmarkFindBlocksDPStep100Histograms(b *testing.B) {
 	b.Run("impl=scalar", func(b *testing.B) {

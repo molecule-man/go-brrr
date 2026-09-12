@@ -47,6 +47,9 @@ const (
 // Quality threshold: qualities below this use 3 iterations, at or above use 10.
 const hqZopflificationQuality = 11
 
+// noMinCost is findBlocks' sentinel starting cost, larger than any real one.
+const noMinCost = 1e99
+
 // splitVecParams holds per-category tuning constants for splitByteVector.
 type splitVecParams struct {
 	symbolsPerHistogram int
@@ -150,9 +153,6 @@ func refineEntropyCodes(
 // may be poor.
 //
 // Returns the number of blocks (1 + number of block switches).
-// noMinCost is findBlocks' sentinel starting cost, larger than any real one.
-const noMinCost = 1e99
-
 func findBlocks(
 	data []uint16,
 	histograms []uint32,
