@@ -48,6 +48,20 @@ func histogramCombineRedirect(s []uint32, old, replacement uint32) {
 func histogramCombineRedirectAVX2MaskedTail(s []uint32, old, replacement uint32) {
 	o := archsimd.BroadcastUint32x8(old)
 	r := archsimd.BroadcastUint32x8(replacement)
+	// Four vectors per iteration. The loop is issue-bound rather than
+	// memory-bound, so amortizing the reslice bookkeeping is most of the win;
+	// eight per iteration measured slower.
+	for len(s) >= 32 {
+		v0 := archsimd.LoadUint32x8(s)
+		v1 := archsimd.LoadUint32x8(s[8:])
+		v2 := archsimd.LoadUint32x8(s[16:])
+		v3 := archsimd.LoadUint32x8(s[24:])
+		r.IfElse(v0.Equal(o), v0).Store(s)
+		r.IfElse(v1.Equal(o), v1).Store(s[8:])
+		r.IfElse(v2.Equal(o), v2).Store(s[16:])
+		r.IfElse(v3.Equal(o), v3).Store(s[24:])
+		s = s[32:]
+	}
 	for len(s) >= 8 {
 		v := archsimd.LoadUint32x8(s)
 		r.IfElse(v.Equal(o), v).Store(s)
