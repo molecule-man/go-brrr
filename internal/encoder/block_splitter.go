@@ -47,6 +47,9 @@ const (
 // Quality threshold: qualities below this use 3 iterations, at or above use 10.
 const hqZopflificationQuality = 11
 
+// noMinCost is findBlocks' sentinel starting cost, larger than any real one.
+const noMinCost = 1e99
+
 // splitVecParams holds per-category tuning constants for splitByteVector.
 type splitVecParams struct {
 	symbolsPerHistogram int
@@ -197,15 +200,13 @@ func findBlocks(
 		ix := byteIx * bitmapLen
 		symbol := int(data[byteIx])
 		insertCostIx := symbol * numHistograms
-		minCost := 1e99
 		switchCost := blockSwitchBitcost
 
-		for k := range numHistograms {
-			cost[k] += insertCost[insertCostIx+k]
-			if cost[k] < minCost {
-				minCost = cost[k]
-				blockID[byteIx] = byte(k)
-			}
+		minCost, best := findBlocksDPStep(
+			cost[:numHistograms],
+			insertCost[insertCostIx:insertCostIx+numHistograms])
+		if minCost < noMinCost {
+			blockID[byteIx] = byte(best)
 		}
 
 		// Reduce switch cost in the prologue to encourage early splits.
@@ -213,13 +214,7 @@ func findBlocks(
 			switchCost *= 0.77 + prologueMultiplier*float64(byteIx)
 		}
 
-		for k := range numHistograms {
-			cost[k] -= minCost
-			if cost[k] >= switchCost {
-				cost[k] = switchCost
-				switchSignal[ix+(k>>3)] |= 1 << (k & 7)
-			}
-		}
+		findBlocksClamp(cost[:numHistograms], switchSignal[ix:], minCost, switchCost)
 	}
 
 	// Backtrace from the last position to determine block boundaries.
