@@ -4,6 +4,7 @@ package encoder
 
 // histogramTotalCount sums all entries in a histogram.
 func histogramTotalCount(h []uint32, alphabetSize int) uint32 {
+	h = h[:alphabetSize]
 	return histogramTotalCountSSE2FourAccum(h, alphabetSize)
 }
 
