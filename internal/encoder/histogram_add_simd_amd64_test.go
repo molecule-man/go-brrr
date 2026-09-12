@@ -56,7 +56,7 @@ func TestHistogramAddSSE2LeavesEntriesPastAlphabetSizeUntouched(t *testing.T) {
 }
 
 func BenchmarkHistogramAdd704Symbols(b *testing.B) {
-	b.Run("impl=OLD_scalar_loop", func(b *testing.B) {
+	b.Run("impl=scalar_loop", func(b *testing.B) {
 		dst, src := histogramAddFixture(b, 704)
 		b.ReportAllocs()
 		for range b.N {
