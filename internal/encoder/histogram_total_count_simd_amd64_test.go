@@ -8,6 +8,8 @@ package encoder
 
 import "testing"
 
+var histogramTotalCountSink uint32
+
 func histogramTotalCountScalarReference(h []uint32, alphabetSize int) uint32 {
 	var total uint32
 	for i := range alphabetSize {
@@ -52,8 +54,6 @@ func TestHistogramTotalCountCPUIDProbeAgreesWithPHADDDBeingUsable(t *testing.T) 
 			"correct sum, so the probe is selecting an unsupported instruction")
 	}
 }
-
-var histogramTotalCountSink uint32
 
 func BenchmarkHistogramTotalCount704Symbols(b *testing.B) {
 	h := histogramTotalCountFixture(b, 704)
