@@ -2,6 +2,8 @@ package encoder
 
 import "testing"
 
+const refineBenchLength = 40000
+
 func refineEntropyCodesScratchReference(
 	data []uint16, histograms []uint32,
 	length, stride, numHistograms, alphabetSize int,
@@ -21,9 +23,9 @@ func refineEntropyCodesScratchReference(
 	}
 }
 
-func refineFixture(tb testing.TB, length, numHistograms, alphabetSize int) ([]uint16, []uint32) {
+func refineFixture(tb testing.TB, numHistograms, alphabetSize int) ([]uint16, []uint32) {
 	tb.Helper()
-	data := make([]uint16, length)
+	data := make([]uint16, refineBenchLength)
 	for i := range data {
 		data[i] = uint16((i * 2654435761) % alphabetSize)
 	}
@@ -33,12 +35,12 @@ func refineFixture(tb testing.TB, length, numHistograms, alphabetSize int) ([]ui
 func TestRefineEntropyCodesMatchesScratchReference(t *testing.T) {
 	for _, alphabetSize := range []int{256, 704} {
 		for _, numHistograms := range []int{1, 4, 16} {
-			const length, stride = 40000, 70
-			data, got := refineFixture(t, length, numHistograms, alphabetSize)
-			_, want := refineFixture(t, length, numHistograms, alphabetSize)
+			const stride = 70
+			data, got := refineFixture(t, numHistograms, alphabetSize)
+			_, want := refineFixture(t, numHistograms, alphabetSize)
 
-			refineEntropyCodes(data, got, length, stride, numHistograms, alphabetSize)
-			refineEntropyCodesScratchReference(data, want, length, stride, numHistograms, alphabetSize)
+			refineEntropyCodes(data, got, refineBenchLength, stride, numHistograms, alphabetSize)
+			refineEntropyCodesScratchReference(data, want, refineBenchLength, stride, numHistograms, alphabetSize)
 
 			for i := range numHistograms * alphabetSize {
 				if got[i] != want[i] {
@@ -53,24 +55,24 @@ func TestRefineEntropyCodesMatchesScratchReference(t *testing.T) {
 }
 
 func BenchmarkRefineEntropyCodes(b *testing.B) {
-	const length, stride, numHistograms = 40000, 70, 16
+	const stride, numHistograms = 70, 16
 	for _, alphabetSize := range []int{256, 704} {
 		name := "alphabet=256"
 		if alphabetSize == 704 {
 			name = "alphabet=704"
 		}
 		b.Run(name+"/impl=OLD_scratch_histogram", func(b *testing.B) {
-			data, h := refineFixture(b, length, numHistograms, alphabetSize)
+			data, h := refineFixture(b, numHistograms, alphabetSize)
 			b.ReportAllocs()
 			for range b.N {
-				refineEntropyCodesScratchReference(data, h, length, stride, numHistograms, alphabetSize)
+				refineEntropyCodesScratchReference(data, h, refineBenchLength, stride, numHistograms, alphabetSize)
 			}
 		})
 		b.Run(name+"/impl=NEW_direct_sample", func(b *testing.B) {
-			data, h := refineFixture(b, length, numHistograms, alphabetSize)
+			data, h := refineFixture(b, numHistograms, alphabetSize)
 			b.ReportAllocs()
 			for range b.N {
-				refineEntropyCodes(data, h, length, stride, numHistograms, alphabetSize)
+				refineEntropyCodes(data, h, refineBenchLength, stride, numHistograms, alphabetSize)
 			}
 		})
 	}
