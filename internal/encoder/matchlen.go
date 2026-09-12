@@ -7,6 +7,11 @@ import (
 
 // Byte-level prefix matching for LZ77.
 
+// matchLenLongBlock is the block compared per bytes.Equal call, and the span
+// below which matchLenAt is the better choice: this function is not inlinable,
+// so a short span would pay a call to reach the same scalar loop.
+const matchLenLongBlock = 4096
+
 // matchLen returns the number of bytes common to the start of a and b,
 // examining at most limit bytes. Both slices must be at least limit bytes long.
 func matchLen(a, b []byte, limit int) int {
@@ -63,11 +68,6 @@ func matchLenAtNoInline(data []byte, a, b uint, limit int) int {
 
 	return i
 }
-
-// matchLenLongBlock is the block compared per bytes.Equal call, and the span
-// below which matchLenAt is the better choice: this function is not inlinable,
-// so a short span would pay a call to reach the same scalar loop.
-const matchLenLongBlock = 4096
 
 // matchLenAtLong returns the number of bytes common to data[a:] and data[b:],
 // examining at most limit bytes, for spans long enough that a full match is the
