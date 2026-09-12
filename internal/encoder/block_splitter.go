@@ -128,7 +128,8 @@ func refineEntropyCodes(
 	// randomSample only increments, so sampling straight into the target
 	// histogram is identical to sampling into scratch and adding it in.
 	for iter := range iters {
-		hist := histograms[(iter%numHistograms)*alphabetSize:]
+		k := iter % numHistograms
+		hist := histograms[k*alphabetSize : (k+1)*alphabetSize]
 		randomSample(data, hist, &seed, length, stride, alphabetSize)
 	}
 }
