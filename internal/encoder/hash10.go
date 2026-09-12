@@ -14,7 +14,11 @@
 
 package encoder
 
-import "github.com/molecule-man/go-brrr/internal/core"
+import (
+	"math/bits"
+
+	"github.com/molecule-man/go-brrr/internal/core"
+)
 
 // H10 configuration constants.
 const (
@@ -211,21 +215,43 @@ func (h *h10) findAllMatches(
 		stop = curIx - shortMatchMaxBackward
 	}
 
-	for i := curIx - 1; i > stop && bestLen <= 2; i-- {
-		backward := curIx - i
-		if backward > maxBackward {
-			break
+	// The window is contiguous and fully in range, so one vector pass can test
+	// all 63 two-byte prefixes at once and the scan walks only the survivors.
+	if prefix2Mask64Available && shortMatchMaxBackward == 64 &&
+		curIxMasked >= 64 && curIx > 64 && maxBackward >= 63 {
+		mask := prefix2Mask64(&data[curIxMasked-64], data[curIxMasked], data[curIxMasked+1])
+		// Bit j sits at masked position curIxMasked-64+j, i.e. backward 64-j.
+		// Bit 0 would be backward 64, which the scalar loop never reaches.
+		mask &^= 1
+		for mask != 0 && bestLen <= 2 {
+			j := uint(63 - bits.LeadingZeros64(mask))
+			mask &^= 1 << j
+			backward := 64 - j
+			prevIxMasked := curIxMasked - backward
+			length := uint(matchLenAt(data, prevIxMasked, curIxMasked, int(maxLength)))
+			if length > bestLen {
+				bestLen = length
+				matches[nMatches] = newBackwardMatch(backward, length)
+				nMatches++
+			}
 		}
-		prevIxMasked := i & ringBufferMask
-		if data[curIxMasked] != data[prevIxMasked] ||
-			data[curIxMasked+1] != data[prevIxMasked+1] {
-			continue
-		}
-		length := uint(matchLenAt(data, prevIxMasked, curIxMasked, int(maxLength)))
-		if length > bestLen {
-			bestLen = length
-			matches[nMatches] = newBackwardMatch(backward, length)
-			nMatches++
+	} else {
+		for i := curIx - 1; i > stop && bestLen <= 2; i-- {
+			backward := curIx - i
+			if backward > maxBackward {
+				break
+			}
+			prevIxMasked := i & ringBufferMask
+			if data[curIxMasked] != data[prevIxMasked] ||
+				data[curIxMasked+1] != data[prevIxMasked+1] {
+				continue
+			}
+			length := uint(matchLenAt(data, prevIxMasked, curIxMasked, int(maxLength)))
+			if length > bestLen {
+				bestLen = length
+				matches[nMatches] = newBackwardMatch(backward, length)
+				nMatches++
+			}
 		}
 	}
 

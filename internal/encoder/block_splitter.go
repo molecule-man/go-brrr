@@ -125,16 +125,12 @@ func refineEntropyCodes(
 	// Round up to a multiple of numHistograms so each histogram gets equal samples.
 	iters = ((iters + numHistograms - 1) / numHistograms) * numHistograms
 
-	// Use the scratch slot at index numHistograms (allocated by the caller).
-	tmp := histograms[numHistograms*alphabetSize : (numHistograms+1)*alphabetSize]
+	// randomSample only increments, so sampling straight into the target
+	// histogram is identical to sampling into scratch and adding it in.
 	for iter := range iters {
-		clear(tmp)
-		randomSample(data, tmp, &seed, length, stride, alphabetSize)
-		// Add the sample to the next histogram in round-robin order.
-		hist := histograms[(iter%numHistograms)*alphabetSize:]
-		for j := range alphabetSize {
-			hist[j] += tmp[j]
-		}
+		k := iter % numHistograms
+		hist := histograms[k*alphabetSize : (k+1)*alphabetSize]
+		randomSample(data, hist, &seed, length, stride, alphabetSize)
 	}
 }
 
@@ -173,7 +169,8 @@ func findBlocks(
 	//   insertCost[i * numHistograms + j] = log2(totalCount_j) - symbolBitCost(count_j_i)
 	//
 	// This represents the cost in bits to encode symbol i using histogram j.
-	clear(insertCost[:alphabetSize*numHistograms])
+	// The reverse loop below writes every element before any read, so no
+	// pre-zeroing is needed.
 	for j := range numHistograms {
 		hist := histograms[j*alphabetSize:]
 		var totalCount uint32
@@ -556,9 +553,9 @@ func splitByteVector(
 		return
 	}
 
-	// Allocate histograms (plus one scratch slot for refineEntropyCodes).
-	bufs.svHistograms = growUint32Clear(bufs.svHistograms, (numHistograms+1)*p.alphabetSize)
-	histograms := bufs.svHistograms[:(numHistograms+1)*p.alphabetSize]
+	// Allocate histograms.
+	bufs.svHistograms = growUint32Clear(bufs.svHistograms, numHistograms*p.alphabetSize)
+	histograms := bufs.svHistograms[:numHistograms*p.alphabetSize]
 
 	// Seed and refine entropy codes.
 	initialEntropyCodes(data, histograms, length, p.samplingStride, numHistograms, p.alphabetSize)
