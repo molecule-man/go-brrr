@@ -27,7 +27,7 @@ func TestHistogramTotalCountSSE2MatchesScalarAtEveryTailLength(t *testing.T) {
 	for _, n := range []int{0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 63, 64, 256, 704} {
 		h := histogramTotalCountFixture(t, n)
 		want := histogramTotalCountScalarReference(h, n)
-		if got := histogramTotalCountSSE2FourAccum(h, n); got != want {
+		if got := histogramTotalCountAsm(h, n); got != want {
 			t.Errorf("n=%d: PSHUFD fold summed to %d but the scalar loop gives %d; "+
 				"a wrong tail here silently corrupts every cost estimate", n, got, want)
 		}
@@ -50,7 +50,7 @@ func BenchmarkHistogramTotalCount704Symbols(b *testing.B) {
 	b.Run("impl=sse2_pshufd", func(b *testing.B) {
 		b.ReportAllocs()
 		for range b.N {
-			histogramTotalCountSink = histogramTotalCountSSE2FourAccum(h, 704)
+			histogramTotalCountSink = histogramTotalCountAsm(h, 704)
 		}
 	})
 }

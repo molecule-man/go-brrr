@@ -26,7 +26,7 @@ func TestHistogramAddSSE2MatchesScalarAtEveryTailLength(t *testing.T) {
 		dstV, src := histogramAddFixture(t, n)
 		dstS := append([]uint32(nil), dstV...)
 
-		histogramAddSSE2Unrolled8x(dstV, src, n)
+		histogramAddAsm(dstV, src, n)
 		histogramAddScalarReference(dstS, src, n)
 
 		for i := range dstS {
@@ -46,8 +46,8 @@ func TestHistogramAddSSE2LeavesEntriesPastAlphabetSizeUntouched(t *testing.T) {
 	for i := range src {
 		src[i] = 7
 	}
-	histogramAddSSE2Unrolled8x(dst, src, n)
-	for i := n; i < len(dst); i++ {
+	histogramAddAsm(dst, src, n)
+	for i := range len(dst) {
 		if dst[i] != 0 {
 			t.Fatalf("index %d past alphabetSize was modified to %d; the histogram arena is "+
 				"contiguous, so writing past n corrupts the next histogram", i, dst[i])
@@ -67,7 +67,7 @@ func BenchmarkHistogramAdd704Symbols(b *testing.B) {
 		dst, src := histogramAddFixture(b, 704)
 		b.ReportAllocs()
 		for range b.N {
-			histogramAddSSE2Unrolled8x(dst, src, 704)
+			histogramAddAsm(dst, src, 704)
 		}
 	})
 }
