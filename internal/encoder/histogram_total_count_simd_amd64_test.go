@@ -41,7 +41,7 @@ func TestHistogramTotalCountSSE2MatchesScalarAtEveryTailLength(t *testing.T) {
 func BenchmarkHistogramTotalCount704Symbols(b *testing.B) {
 	h := histogramTotalCountFixture(b, 704)
 
-	b.Run("impl=OLD_scalar_loop", func(b *testing.B) {
+	b.Run("impl=scalar_loop", func(b *testing.B) {
 		b.ReportAllocs()
 		for range b.N {
 			histogramTotalCountSink = histogramTotalCountScalarReference(h, 704)
