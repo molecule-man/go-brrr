@@ -68,7 +68,7 @@ func BenchmarkRefineEntropyCodes(b *testing.B) {
 				refineEntropyCodesScratchReference(data, h, refineBenchLength, stride, numHistograms, alphabetSize)
 			}
 		})
-		b.Run(name+"/impl=NEW_direct_sample", func(b *testing.B) {
+		b.Run(name+"/impl=direct_sample", func(b *testing.B) {
 			data, h := refineFixture(b, numHistograms, alphabetSize)
 			b.ReportAllocs()
 			for range b.N {
