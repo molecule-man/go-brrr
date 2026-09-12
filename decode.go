@@ -1473,7 +1473,27 @@ func (s *decodeState) calculateDistanceLut() {
 	b.cachedValid = true
 }
 
-// --- Command processing (the hot loop) ---
+// copyOverlappingPattern fills n bytes at pos by repeating the dist-byte pattern
+// that ends there, for dist < n.
+//
+// The first loop doubles the usable gap: after storing dist correct bytes the
+// valid run behind p is twice as long, so once it reaches 16 every 16-byte load
+// lies entirely inside already-final data and the second loop can run flat out.
+// Both loops store 16 bytes at a time and so may write up to 15 bytes past
+// pos+n, which the ring buffer's 542 bytes of slack absorb — the same contract
+// the eager 16-byte store in processCommands already relies on.
+func copyOverlappingPattern(base unsafe.Pointer, pos, dist, n int) {
+	p, end := pos, pos+n
+	for dist < 16 && p < end {
+		*(*[16]byte)(unsafe.Add(base, p)) = *(*[16]byte)(unsafe.Add(base, p-dist))
+		p += dist
+		dist += dist
+	}
+	for p < end {
+		*(*[16]byte)(unsafe.Add(base, p)) = *(*[16]byte)(unsafe.Add(base, p-dist))
+		p += 16
+	}
+}
 
 func (s *decodeState) processCommands() decoderResult {
 	br := &s.br
@@ -1932,9 +1952,19 @@ commandPostDecodeLiterals:
 		base := unsafe.Pointer(unsafe.SliceData(s.ringbuffer))
 		*(*[16]byte)(unsafe.Add(base, pos)) = *(*[16]byte)(unsafe.Add(base, srcStart))
 
-		if (srcEnd > pos && dstEnd > srcStart) ||
-			dstEnd >= s.ringbufferSize || srcEnd >= s.ringbufferSize {
-			// Overlapping or wrapping — fall back to byte-by-byte.
+		if dstEnd >= s.ringbufferSize || srcEnd >= s.ringbufferSize {
+			// Wrapping — the byte loop is what yields to the state machine.
+			goto commandPostWrapCopy
+		}
+		if srcEnd > pos && dstEnd > srcStart {
+			// Overlapping but not wrapping. Only a source behind pos can be
+			// pattern-replicated; when the ring-buffer subtraction wrapped,
+			// srcStart is ahead of pos and the masked byte loop is still needed.
+			if dist := pos - srcStart; dist > 0 {
+				copyOverlappingPattern(base, pos, dist, i)
+				pos += i
+				goto postCopy
+			}
 			goto commandPostWrapCopy
 		}
 
@@ -1967,9 +1997,29 @@ commandPostDecodeLiterals:
 
 commandPostWrapCopy:
 	for i > 0 {
-		s.ringbuffer[pos] = s.ringbuffer[(pos-s.distanceCode)&s.ringbufferMask]
-		pos++
-		i--
+		srcStart := (pos - s.distanceCode) & s.ringbufferMask
+		// Take the copy in chunks that stop at the ring-buffer end, so neither
+		// cursor wraps inside one. ringbufferMask is ringbufferSize-1, so both
+		// remainders are at least 1 and the loop always advances.
+		n := min(i, s.ringbufferSize-pos, s.ringbufferSize-srcStart)
+		if dist := pos - srcStart; dist > 0 {
+			if dist >= n {
+				copy(s.ringbuffer[pos:pos+n], s.ringbuffer[srcStart:srcStart+n])
+			} else {
+				// Stores up to 15 bytes past pos+n, which cannot exceed
+				// ringbufferSize+15 and so stays inside the 542 bytes of slack.
+				copyOverlappingPattern(unsafe.Pointer(unsafe.SliceData(s.ringbuffer)),
+					pos, dist, n)
+			}
+			pos += n
+			i -= n
+		} else {
+			// The ring-buffer subtraction wrapped, putting the source ahead of
+			// pos; that has no contiguous run to copy, so step one byte.
+			s.ringbuffer[pos] = s.ringbuffer[srcStart]
+			pos++
+			i--
+		}
 		if pos == s.ringbufferSize {
 			s.state = decoderStateCommandPostWrite2
 			s.pos = pos

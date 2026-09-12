@@ -178,10 +178,20 @@ func (s *encodeState) extendLastCommand(length, wrappedPos uint32) (remainingLen
 	if distanceCode < core.NumDistanceShortCodes ||
 		uint64(distanceCode-(core.NumDistanceShortCodes-1)) == cmdDist {
 		if cmdDist <= maxDistance {
-			for length != 0 && data[wrappedPos&mask] == data[(wrappedPos-uint32(cmdDist))&mask] {
-				cmd.copyLen++
-				length--
-				wrappedPos++
+			for length != 0 {
+				dst := wrappedPos & mask
+				src := (wrappedPos - uint32(cmdDist)) & mask
+				// Chunk to the ring-buffer end so neither cursor wraps inside a
+				// compare, which is what lets matchLenAt read eight bytes at a
+				// time instead of one.
+				n := min(length, mask+1-dst, mask+1-src)
+				m := uint32(matchLenAt(data, uint(src), uint(dst), int(n)))
+				cmd.copyLen += m
+				length -= m
+				wrappedPos += m
+				if m != n {
+					break
+				}
 			}
 		}
 		// Compound dictionary extension: extend copy into dictionary data

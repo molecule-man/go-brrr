@@ -85,6 +85,16 @@ func estimateBitCostsForLiteralsUTF8(data []byte, pos, length, mask uint, histog
 		lastC = c
 	}
 
+	// inWindowUTF8 changes at most once per byte and is far above the 256-entry
+	// fastLog2 table, so recomputing it every iteration means a math.Log2 call
+	// per byte. Cache one logarithm per UTF-8 position instead.
+	var cachedUTF8Count [3]uint
+	var cachedUTF8Log [3]float64
+	for k := range cachedUTF8Count {
+		cachedUTF8Count[k] = inWindowUTF8[k]
+		cachedUTF8Log[k] = fastLog2(int(inWindowUTF8[k]))
+	}
+
 	// Compute bit costs with sliding window.
 	for i := range length {
 		if i >= windowHalf {
@@ -123,7 +133,11 @@ func estimateBitCostsForLiteralsUTF8(data []byte, pos, length, mask uint, histog
 		if histo == 0 {
 			histo = 1
 		}
-		litCost := fastLog2(int(inWindowUTF8[curUTF8Pos])) - fastLog2(int(histo))
+		if cachedUTF8Count[curUTF8Pos] != inWindowUTF8[curUTF8Pos] {
+			cachedUTF8Count[curUTF8Pos] = inWindowUTF8[curUTF8Pos]
+			cachedUTF8Log[curUTF8Pos] = fastLog2(int(inWindowUTF8[curUTF8Pos]))
+		}
+		litCost := cachedUTF8Log[curUTF8Pos] - fastLog2(int(histo))
 		litCost += 0.02905
 		if litCost < 1.0 {
 			litCost = litCost*0.5 + 0.5
@@ -152,6 +166,12 @@ func estimateBitCostsForLiteralsRaw(data []byte, pos, length, mask uint, histogr
 		histogram[data[(pos+i)&mask]]++
 	}
 
+	// inWindow is invariant once the window is full, and is far above the
+	// 256-entry fastLog2 table, so recomputing it every iteration means a
+	// math.Log2 call per byte.
+	cachedInWindow := inWindow
+	cachedLog := fastLog2(int(inWindow))
+
 	// Compute bit costs with sliding window.
 	for i := range length {
 		if i >= windowHalf {
@@ -166,7 +186,11 @@ func estimateBitCostsForLiteralsRaw(data []byte, pos, length, mask uint, histogr
 		if histo == 0 {
 			histo = 1
 		}
-		litCost := fastLog2(int(inWindow)) - fastLog2(int(histo))
+		if inWindow != cachedInWindow {
+			cachedInWindow = inWindow
+			cachedLog = fastLog2(int(inWindow))
+		}
+		litCost := cachedLog - fastLog2(int(histo))
 		litCost += 0.029
 		if litCost < 1.0 {
 			litCost = litCost*0.5 + 0.5
