@@ -216,13 +216,10 @@ func findBlocks(
 			switchCost *= 0.77 + prologueMultiplier*float64(byteIx)
 		}
 
-		for k := range numHistograms {
-			cost[k] -= minCost
-			if cost[k] >= switchCost {
-				cost[k] = switchCost
-				switchSignal[ix+(k>>3)] |= 1 << (k & 7)
-			}
-		}
+		// switchSignal[ix:] hands the kernel this position's bitmap row, so its
+		// sig[k>>3] is the same byte as switchSignal[ix+(k>>3)].
+		findBlocksClamp(
+			cost[:numHistograms], switchSignal[ix:], minCost, switchCost)
 	}
 
 	// Backtrace from the last position to determine block boundaries.
