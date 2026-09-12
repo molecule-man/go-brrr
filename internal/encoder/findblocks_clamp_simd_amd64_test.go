@@ -1,6 +1,3 @@
-// Parity and benchmarks for the AVX-512 clamp kernel. Vector and scalar live in
-// one binary so the comparison carries no run-to-run drift.
-
 //go:build go1.27 && amd64 && !purego
 
 package encoder

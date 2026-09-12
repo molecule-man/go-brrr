@@ -1,7 +1,3 @@
-// Scalar clamp kernel for every target the AVX-512 version does not cover:
-// non-amd64, purego builds, and Go before 1.27. This is the original inline
-// loop from findBlocks, unchanged.
-
 //go:build !(go1.27 && amd64) || purego
 
 package encoder
