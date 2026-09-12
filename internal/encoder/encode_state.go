@@ -185,7 +185,12 @@ func (s *encodeState) extendLastCommand(length, wrappedPos uint32) (remainingLen
 				// compare, which is what lets matchLenAt read eight bytes at a
 				// time instead of one.
 				n := min(length, mask+1-dst, mask+1-src)
-				m := uint32(matchLenAt(data, uint(src), uint(dst), int(n)))
+				var m uint32
+				if n >= matchLenLongBlock {
+					m = uint32(matchLenAtLong(data, uint(src), uint(dst), int(n)))
+				} else {
+					m = uint32(matchLenAt(data, uint(src), uint(dst), int(n)))
+				}
 				cmd.copyLen += m
 				length -= m
 				wrappedPos += m
