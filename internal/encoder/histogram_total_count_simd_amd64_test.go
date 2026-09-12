@@ -47,7 +47,7 @@ func BenchmarkHistogramTotalCount704Symbols(b *testing.B) {
 			histogramTotalCountSink = histogramTotalCountScalarReference(h, 704)
 		}
 	})
-	b.Run("impl=NEW_sse2_pshufd", func(b *testing.B) {
+	b.Run("impl=sse2_pshufd", func(b *testing.B) {
 		b.ReportAllocs()
 		for range b.N {
 			histogramTotalCountSink = histogramTotalCountSSE2FourAccum(h, 704)
