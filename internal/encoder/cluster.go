@@ -58,15 +58,6 @@ func histogramCopy(dst, src []uint32, alphabetSize int) {
 	copy(dst[:alphabetSize], src[:alphabetSize])
 }
 
-// histogramTotalCount sums all entries in a histogram.
-func histogramTotalCount(h []uint32, alphabetSize int) uint32 {
-	var total uint32
-	for i := range alphabetSize {
-		total += h[i]
-	}
-	return total
-}
-
 // compareAndPushToQueue evaluates merging two histograms and conditionally adds
 // the pair to the priority queue.
 //
