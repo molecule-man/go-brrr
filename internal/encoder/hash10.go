@@ -485,13 +485,3 @@ func (h *h10) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32)
 func (h *h10) hash(data []byte, i uint) uint32 {
 	return (loadU32LE(data, i) * hashMul32) >> h10HashShift
 }
-
-// leftChild returns the forest index of the left child for the given position.
-func (h *h10) leftChild(pos uint) uint {
-	return 2 * (pos & uint(h.windowMask))
-}
-
-// rightChild returns the forest index of the right child for the given position.
-func (h *h10) rightChild(pos uint) uint {
-	return 2*(pos&uint(h.windowMask)) + 1
-}
