@@ -109,6 +109,8 @@ type q10Bufs struct {
 	// Q11 HQ Zopfli scratch.
 	hqNumMatchesArr []uint32
 	hqMatches       []backwardMatch
+	hqFeed          matchFeed
+	hqWG            sync.WaitGroup
 
 	zCostModel zopfliCostModel // large value type; keep last to minimize pointer bytes
 }

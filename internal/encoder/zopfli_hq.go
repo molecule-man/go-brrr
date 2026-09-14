@@ -14,7 +14,6 @@ package encoder
 
 import (
 	"runtime"
-	"sync"
 	"sync/atomic"
 
 	"github.com/molecule-man/go-brrr/internal/core"
@@ -24,27 +23,40 @@ import (
 // tests lower it to force the reallocation that aborts the feed.
 var hqMatchesPerByte uint = 8
 
+const (
+	feedPublishBatch    = 512
+	feedSpinBeforeYield = 128
+)
+
 // matchFeed publishes how many positions of the match buffer are final, so the
 // first DP pass can consume matches while collection is still producing them.
 // aborted is raised when the producer had to reallocate the buffer: positions
 // past that point live only in the new array, so the watermark stops and the
 // consumer restarts on the reallocated buffer once the producer is done.
 type matchFeed struct {
+	_       [64]byte
 	ready   atomic.Uint64
 	aborted atomic.Bool
+	_       [64]byte
 }
 
 func (f *matchFeed) wait(i uint) bool {
-	if f == nil {
-		return true
-	}
-	for f.ready.Load() <= uint64(i) {
+	return f == nil || f.ready.Load() > uint64(i) || f.waitSlow(i)
+}
+
+func (f *matchFeed) waitSlow(i uint) bool {
+	for spin := 0; ; spin++ {
+		if f.ready.Load() > uint64(i) {
+			return true
+		}
 		if f.aborted.Load() {
 			return false
 		}
-		runtime.Gosched()
+		if spin >= feedSpinBeforeYield {
+			runtime.Gosched()
+			spin = 0
+		}
 	}
-	return true
 }
 
 // createHqZopfliBackwardReferences is the Q11 top-level entry point.
@@ -89,13 +101,16 @@ func createHqZopfliBackwardReferences(numBytes, position uint, ringbuffer []byte
 	model := &bufs.zCostModel
 	model.init(64, numBytes) // distAlphabetSize=64 for NPOSTFIX=0, NDIRECT=0
 
-	var feed matchFeed
-	var wg sync.WaitGroup
+	feed := &bufs.hqFeed
+	feed.ready.Store(0)
+	feed.aborted.Store(false)
+	wg := &bufs.hqWG
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		matches := bufs.hqMatches
 		curMatchPos := uint(0)
+		nextPublish := uint(0)
 		aborted := false
 		// Phase 1: Collect all matches.
 		for i := uint(0); i+h10HashTypeLength-1 < numBytes; i++ {
@@ -164,8 +179,9 @@ func createHqZopfliBackwardReferences(numBytes, position uint, ringbuffer []byte
 					curMatchPos = curMatchEnd
 				}
 			}
-			if !aborted {
+			if !aborted && i+1 >= nextPublish {
 				feed.ready.Store(uint64(i + 1))
+				nextPublish = i + 1 + feedPublishBatch
 			}
 		}
 		if !aborted {
@@ -196,7 +212,7 @@ func createHqZopfliBackwardReferences(numBytes, position uint, ringbuffer []byte
 		var f *matchFeed
 		if pass == 0 {
 			model.setFromLiteralCosts(position, ringbuffer, ringBufferMask)
-			f = &feed
+			f = feed
 		} else {
 			wg.Wait()
 			passCommands := (*commands)[origNumCommands:]

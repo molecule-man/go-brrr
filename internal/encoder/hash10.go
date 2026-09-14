@@ -383,20 +383,22 @@ func (h *h10) findAllMatches(
 	// Search the RFC 7932 static dictionary for matches at all lengths
 	// longer than the best LZ77 match found so far. Each length's best
 	// dictionary match is converted to a backwardMatch.
-	var dictMatches [maxStaticDictMatchLen + 1]uint32
-	for i := range dictMatches {
-		dictMatches[i] = invalidMatch
-	}
 	minLen := max(uint(4), bestLen+1)
-	if findAllStaticDictionaryMatches(data[curIxMasked:], minLen, maxLength, dictMatches[:]) {
-		maxLen := min(uint(maxStaticDictMatchLen), maxLength)
-		for l := minLen; l <= maxLen; l++ {
-			dictID := dictMatches[l]
-			if dictID < invalidMatch {
-				distance := dictionaryDistance + uint(dictID>>5) + 1
-				if distance <= maxBackwardDistance {
-					matches[nMatches] = newDictionaryBackwardMatch(distance, l, uint(dictID&31))
-					nMatches++
+	maxLen := min(uint(maxStaticDictMatchLen), maxLength)
+	if minLen <= maxLen {
+		var dictMatches [maxStaticDictMatchLen + 1]uint32
+		for i := range dictMatches {
+			dictMatches[i] = invalidMatch
+		}
+		if findAllStaticDictionaryMatches(data[curIxMasked:], minLen, maxLength, dictMatches[:]) {
+			for l := minLen; l <= maxLen; l++ {
+				dictID := dictMatches[l]
+				if dictID < invalidMatch {
+					distance := dictionaryDistance + uint(dictID>>5) + 1
+					if distance <= maxBackwardDistance {
+						matches[nMatches] = newDictionaryBackwardMatch(distance, l, uint(dictID&31))
+						nMatches++
+					}
 				}
 			}
 		}

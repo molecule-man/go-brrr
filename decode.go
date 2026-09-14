@@ -96,6 +96,11 @@ func Decompress(data []byte) ([]byte, error) {
 			decodeStatePool.Put(s)
 			return nil, decompressError("truncated input")
 		case decoderResultNeedsMoreOutput:
+			if cap(output)-len(output) < 2*s.ringbufferSize {
+				grown := make([]byte, len(output), max(len(output)+2*s.ringbufferSize, 2*cap(output)))
+				copy(grown, output)
+				output = grown
+			}
 			output = s.flushOutput(output)
 		}
 	}

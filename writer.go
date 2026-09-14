@@ -82,7 +82,11 @@ func Compress(data []byte, level int) ([]byte, error) {
 	if err := w.Close(); err != nil {
 		return nil, err
 	}
-	return buf.Bytes(), nil
+	out := buf.Bytes()
+	if cap(out)-len(out) > len(out)/8 {
+		out = append(make([]byte, 0, len(out)), out...)
+	}
+	return out, nil
 }
 
 // Write compresses p and writes it to the underlying writer.
