@@ -19,14 +19,14 @@ import (
 	"github.com/molecule-man/go-brrr/internal/core"
 )
 
-// hqMatchesPerByte sizes the match buffer per input byte, matching preallocQ10;
-// tests lower it to force the reallocation that aborts the feed.
-var hqMatchesPerByte uint = 8
-
 const (
 	feedPublishBatch    = 512
 	feedSpinBeforeYield = 128
 )
+
+// hqMatchesPerByte sizes the match buffer per input byte, matching preallocQ10;
+// tests lower it to force the reallocation that aborts the feed.
+var hqMatchesPerByte uint = 8
 
 // matchFeed publishes how many positions of the match buffer are final, so the
 // first DP pass can consume matches while collection is still producing them.
