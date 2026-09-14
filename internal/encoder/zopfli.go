@@ -12,7 +12,8 @@ import "github.com/molecule-man/go-brrr/internal/core"
 // Zopfli quality parameters.
 const (
 	// zopfliIterateAborted is returned when the match feed was aborted mid-pass.
-	zopfliIterateAborted = ^uint(0)
+	zopfliIterateAborted  = ^uint(0)
+	zopfliIterateDiverged = ^uint(0) - 1
 
 	// maxZopfliLenQ10 is the maximum copy length for which Q10 evaluates
 	// all individual lengths (beyond this, only the maximum match length
@@ -362,6 +363,9 @@ func zopfliIterate(nodes []zopfliNode, ringbuffer []byte, distCache []int, model
 			numBytes, position, i, ringBufferMask, maxBackwardLimit, gap, compound, uint(numMatches[i]), quality)
 		if skip < longCopyQuickStep {
 			skip = 0
+		} else if quality < hqZopflificationQuality &&
+			(numMatches[i] != 1 || matches[curMatchPos].matchLength() < skip) {
+			return zopfliIterateDiverged
 		}
 		curMatchPos += uint(numMatches[i])
 		if numMatches[i] == 1 && matches[curMatchPos-1].matchLength() > maxZopfli {

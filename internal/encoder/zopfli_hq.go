@@ -100,6 +100,23 @@ func createHqZopfliBackwardReferences(numBytes, position uint, ringbuffer []byte
 	nodes := bufs.zNodes
 	model := &bufs.zCostModel
 	model.init(64, numBytes) // distAlphabetSize=64 for NPOSTFIX=0, NDIRECT=0
+	maxZopfli := maxZopfliLen(quality)
+
+	passes := 2
+	forestUsed := 0
+	if quality < hqZopflificationQuality {
+		passes = 1
+		if numBytes >= longCopyQuickStep {
+			forestUsed = min(len(hasher.forest), 2*int(position+numBytes))
+			n := forestUsed + len(hasher.buckets)
+			if cap(bufs.hqHasherSnap) < n {
+				bufs.hqHasherSnap = make([]uint32, n)
+			}
+			bufs.hqHasherSnap = bufs.hqHasherSnap[:n]
+			copy(bufs.hqHasherSnap, hasher.forest[:forestUsed])
+			copy(bufs.hqHasherSnap[forestUsed:], hasher.buckets[:])
+		}
+	}
 
 	feed := &bufs.hqFeed
 	feed.ready.Store(0)
@@ -161,7 +178,7 @@ func createHqZopfliBackwardReferences(numBytes, position uint, ringbuffer []byte
 
 			if numFound > 0 {
 				matchLen := matches[curMatchEnd-1].matchLength()
-				if matchLen > maxZopfliLenQ11 {
+				if matchLen > maxZopfli {
 					skip := matchLen - 1
 					matches[curMatchPos] = matches[curMatchEnd-1]
 					curMatchPos++
@@ -207,7 +224,7 @@ func createHqZopfliBackwardReferences(numBytes, position uint, ringbuffer []byte
 
 	// Phase 2 & 3: Two DP passes. Pass 1 overlaps match collection through the
 	// feed; pass 2 needs every match and the pass-1 commands, so it waits.
-	for pass := range 2 {
+	for pass := range passes {
 		initZopfliNodes(nodes)
 		var f *matchFeed
 		if pass == 0 {
@@ -221,16 +238,26 @@ func createHqZopfliBackwardReferences(numBytes, position uint, ringbuffer []byte
 		}
 		restore()
 
-		if zopfliIterate(nodes, ringbuffer, distCache, model, numMatchesArr, matches,
-			numBytes, position, ringBufferMask, gap, compound, quality, lgwin, f) == zopfliIterateAborted {
+		result := zopfliIterate(nodes, ringbuffer, distCache, model, numMatchesArr, matches,
+			numBytes, position, ringBufferMask, gap, compound, quality, lgwin, f)
+		if result == zopfliIterateAborted {
 			wg.Wait()
 			matches = bufs.hqMatches
 			initZopfliNodes(nodes)
 			restore()
-			zopfliIterate(nodes, ringbuffer, distCache, model, numMatchesArr, matches,
+			result = zopfliIterate(nodes, ringbuffer, distCache, model, numMatchesArr, matches,
 				numBytes, position, ringBufferMask, gap, compound, quality, lgwin, nil)
+		}
+		if result == zopfliIterateDiverged {
+			wg.Wait()
+			copy(hasher.forest[:forestUsed], bufs.hqHasherSnap)
+			copy(hasher.buckets[:], bufs.hqHasherSnap[forestUsed:])
+			restore()
+			createZopfliBackwardReferences(numBytes, position, ringbuffer, ringBufferMask, quality, lgwin, gap, compound, distCache, hasher, lastInsertLen, commands, numLiterals, bufs)
+			return
 		}
 
 		zopfliCreateCommands(nodes, numBytes, position, maxBackwardLimit, gap, distCache, lastInsertLen, commands, numLiterals)
 	}
+	wg.Wait()
 }
