@@ -104,24 +104,25 @@ func (h *h10) storeAndFindMatches(
 	bestLen *uint, matches []backwardMatch,
 ) int {
 	curIxMasked := curIx & ringBufferMask
-	maxCompLen := min(maxLength, h10MaxTreeCompLength)
-	shouldReroot := maxLength >= h10MaxTreeCompLength
 
 	key := h.hash(data, curIxMasked)
 	prevIx := uint(h.buckets[key])
+	h.buckets[key] = uint32(curIx)
+
+	// Hoisted so the loop keeps the forest header and mask in registers:
+	// without restrict, Go re-loads them from h after every forest store.
+	forest := h.forest
+	mask := uint(h.windowMask)
+	invalidPos := h.invalidPos
 
 	// nodeLeft/nodeRight track where to attach subtrees as the tree is
 	// re-rooted. They are forest indices, not positions.
-	nodeLeft := h.leftChild(curIx)
-	nodeRight := h.rightChild(curIx)
+	nodeLeft := 2 * (curIx & mask)
+	nodeRight := nodeLeft + 1
 
 	// bestLenLeft/bestLenRight are the known match lengths of the
 	// boundary nodes of the left and right subtrees being built.
 	var bestLenLeft, bestLenRight uint
-
-	if shouldReroot {
-		h.buckets[key] = uint32(curIx)
-	}
 
 	nMatches := 0
 
@@ -130,10 +131,8 @@ func (h *h10) storeAndFindMatches(
 		prevIxMasked := prevIx & ringBufferMask
 
 		if backward == 0 || backward > maxBackward || depth == 0 {
-			if shouldReroot {
-				h.forest[nodeLeft] = h.invalidPos
-				h.forest[nodeRight] = h.invalidPos
-			}
+			forest[nodeLeft] = invalidPos
+			forest[nodeRight] = invalidPos
 			break
 		}
 
@@ -145,36 +144,146 @@ func (h *h10) storeAndFindMatches(
 			int(maxLength-curLen),
 		))
 
-		if matches != nil && length > *bestLen {
+		if length > *bestLen {
 			*bestLen = length
 			matches[nMatches] = newBackwardMatch(backward, length)
 			nMatches++
 		}
 
-		if length >= maxCompLen {
+		if length >= h10MaxTreeCompLength {
 			// Full match up to comparison limit: steal the old node's children.
-			if shouldReroot {
-				h.forest[nodeLeft] = h.forest[h.leftChild(prevIx)]
-				h.forest[nodeRight] = h.forest[h.rightChild(prevIx)]
-			}
+			forest[nodeLeft] = forest[2*(prevIx&mask)]
+			forest[nodeRight] = forest[2*(prevIx&mask)+1]
 			break
 		}
 
 		// Lexicographic comparison determines left vs right subtree placement.
 		if data[curIxMasked+length] > data[prevIxMasked+length] {
 			bestLenLeft = length
-			if shouldReroot {
-				h.forest[nodeLeft] = uint32(prevIx)
-			}
-			nodeLeft = h.rightChild(prevIx)
-			prevIx = uint(h.forest[nodeLeft])
+			forest[nodeLeft] = uint32(prevIx)
+			nodeLeft = 2*(prevIx&mask) + 1
+			prevIx = uint(forest[nodeLeft])
 		} else {
 			bestLenRight = length
-			if shouldReroot {
-				h.forest[nodeRight] = uint32(prevIx)
-			}
-			nodeRight = h.leftChild(prevIx)
-			prevIx = uint(h.forest[nodeRight])
+			forest[nodeRight] = uint32(prevIx)
+			nodeRight = 2 * (prevIx & mask)
+			prevIx = uint(forest[nodeRight])
+		}
+	}
+
+	return nMatches
+}
+
+// storeOnly is the match-free twin of storeAndFindMatches for store and
+// stitchToPreviousBlock, which re-root the tree at ix without reporting
+// matches. Dropping the match bookkeeping keeps four fewer values live in
+// the tree walk.
+func (h *h10) storeOnly(data []byte, curIx, ringBufferMask, maxBackward uint) {
+	curIxMasked := curIx & ringBufferMask
+
+	key := h.hash(data, curIxMasked)
+	prevIx := uint(h.buckets[key])
+	h.buckets[key] = uint32(curIx)
+
+	forest := h.forest
+	mask := uint(h.windowMask)
+	invalidPos := h.invalidPos
+
+	nodeLeft := 2 * (curIx & mask)
+	nodeRight := nodeLeft + 1
+
+	var bestLenLeft, bestLenRight uint
+
+	for depth := h10MaxTreeSearchDepth; ; depth-- {
+		backward := curIx - prevIx
+		prevIxMasked := prevIx & ringBufferMask
+
+		if backward == 0 || backward > maxBackward || depth == 0 {
+			forest[nodeLeft] = invalidPos
+			forest[nodeRight] = invalidPos
+			break
+		}
+
+		curLen := min(bestLenLeft, bestLenRight)
+		length := curLen + uint(matchLenAt(
+			data,
+			curIxMasked+curLen,
+			prevIxMasked+curLen,
+			h10MaxTreeCompLength-int(curLen),
+		))
+
+		if length >= h10MaxTreeCompLength {
+			forest[nodeLeft] = forest[2*(prevIx&mask)]
+			forest[nodeRight] = forest[2*(prevIx&mask)+1]
+			break
+		}
+
+		if data[curIxMasked+length] > data[prevIxMasked+length] {
+			bestLenLeft = length
+			forest[nodeLeft] = uint32(prevIx)
+			nodeLeft = 2*(prevIx&mask) + 1
+			prevIx = uint(forest[nodeLeft])
+		} else {
+			bestLenRight = length
+			forest[nodeRight] = uint32(prevIx)
+			nodeRight = 2 * (prevIx & mask)
+			prevIx = uint(forest[nodeRight])
+		}
+	}
+}
+
+// findMatchesNoStore is the search-only twin of storeAndFindMatches for the
+// last positions of a block, where fewer than h10MaxTreeCompLength bytes
+// remain: the sequence cannot be ordered, so the tree is read but never
+// re-rooted, and the comparison limit is the remaining length itself.
+func (h *h10) findMatchesNoStore(
+	data []byte, curIx, ringBufferMask, maxLength, maxBackward uint,
+	bestLen *uint, matches []backwardMatch,
+) int {
+	curIxMasked := curIx & ringBufferMask
+
+	key := h.hash(data, curIxMasked)
+	prevIx := uint(h.buckets[key])
+
+	forest := h.forest
+	mask := uint(h.windowMask)
+
+	var bestLenLeft, bestLenRight uint
+
+	nMatches := 0
+
+	for depth := h10MaxTreeSearchDepth; ; depth-- {
+		backward := curIx - prevIx
+		prevIxMasked := prevIx & ringBufferMask
+
+		if backward == 0 || backward > maxBackward || depth == 0 {
+			break
+		}
+
+		curLen := min(bestLenLeft, bestLenRight)
+		length := curLen + uint(matchLenAt(
+			data,
+			curIxMasked+curLen,
+			prevIxMasked+curLen,
+			int(maxLength-curLen),
+		))
+
+		if length > *bestLen {
+			*bestLen = length
+			matches[nMatches] = newBackwardMatch(backward, length)
+			nMatches++
+		}
+
+		if length >= maxLength {
+			break
+		}
+
+		if data[curIxMasked+length] > data[prevIxMasked+length] {
+			bestLenLeft = length
+			prevIx = uint(forest[2*(prevIx&mask)+1])
+		} else {
+			bestLenRight = length
+			prevIx = uint(forest[2*(prevIx&mask)])
 		}
 	}
 
@@ -257,30 +366,39 @@ func (h *h10) findAllMatches(
 
 	// Phase 2: Tree search for longer matches.
 	if bestLen < maxLength {
-		nMatches += h.storeAndFindMatches(
-			data, curIx, ringBufferMask, maxLength, maxBackward,
-			&bestLen, matches[nMatches:],
-		)
+		if maxLength >= h10MaxTreeCompLength {
+			nMatches += h.storeAndFindMatches(
+				data, curIx, ringBufferMask, maxLength, maxBackward,
+				&bestLen, matches[nMatches:],
+			)
+		} else {
+			nMatches += h.findMatchesNoStore(
+				data, curIx, ringBufferMask, maxLength, maxBackward,
+				&bestLen, matches[nMatches:],
+			)
+		}
 	}
 
 	// Phase 3: Static dictionary search.
 	// Search the RFC 7932 static dictionary for matches at all lengths
 	// longer than the best LZ77 match found so far. Each length's best
 	// dictionary match is converted to a backwardMatch.
-	var dictMatches [maxStaticDictMatchLen + 1]uint32
-	for i := range dictMatches {
-		dictMatches[i] = invalidMatch
-	}
 	minLen := max(uint(4), bestLen+1)
-	if findAllStaticDictionaryMatches(data[curIxMasked:], minLen, maxLength, dictMatches[:]) {
-		maxLen := min(uint(maxStaticDictMatchLen), maxLength)
-		for l := minLen; l <= maxLen; l++ {
-			dictID := dictMatches[l]
-			if dictID < invalidMatch {
-				distance := dictionaryDistance + uint(dictID>>5) + 1
-				if distance <= maxBackwardDistance {
-					matches[nMatches] = newDictionaryBackwardMatch(distance, l, uint(dictID&31))
-					nMatches++
+	maxLen := min(uint(maxStaticDictMatchLen), maxLength)
+	if minLen <= maxLen {
+		var dictMatches [maxStaticDictMatchLen + 1]uint32
+		for i := range dictMatches {
+			dictMatches[i] = invalidMatch
+		}
+		if findAllStaticDictionaryMatches(data[curIxMasked:], minLen, maxLength, dictMatches[:]) {
+			for l := minLen; l <= maxLen; l++ {
+				dictID := dictMatches[l]
+				if dictID < invalidMatch {
+					distance := dictionaryDistance + uint(dictID>>5) + 1
+					if distance <= maxBackwardDistance {
+						matches[nMatches] = newDictionaryBackwardMatch(distance, l, uint(dictID&31))
+						nMatches++
+					}
 				}
 			}
 		}
@@ -294,7 +412,7 @@ func (h *h10) findAllMatches(
 func (h *h10) store(data []byte, mask, ix uint) {
 	// Maximum distance is window size - 16 (RFC 7932 Section 9.1).
 	maxBackward := uint(h.windowMask) - core.WindowGap + 1
-	h.storeAndFindMatches(data, ix, mask, h10MaxTreeCompLength, maxBackward, nil, nil)
+	h.storeOnly(data, ix, mask, maxBackward)
 }
 
 // storeRange stores positions ixStart..ixEnd-1 in the binary tree.
@@ -338,8 +456,7 @@ func (h *h10) stitchToPreviousBlock(numBytes, position uint, ringBuffer []byte, 
 		// Also ensure we don't look further back than the start of the
 		// current block to avoid reading overwritten ring buffer data.
 		maxBackward := uint(h.windowMask) - max(core.WindowGap-1, position-i)
-		h.storeAndFindMatches(ringBuffer, i, ringBufferMask,
-			h10MaxTreeCompLength, maxBackward, nil, nil)
+		h.storeOnly(ringBuffer, i, ringBufferMask, maxBackward)
 	}
 }
 
@@ -369,14 +486,4 @@ func (h *h10) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32)
 // hash computes a 17-bit bucket index from 4 bytes at data[i:i+4].
 func (h *h10) hash(data []byte, i uint) uint32 {
 	return (loadU32LE(data, i) * hashMul32) >> h10HashShift
-}
-
-// leftChild returns the forest index of the left child for the given position.
-func (h *h10) leftChild(pos uint) uint {
-	return 2 * (pos & uint(h.windowMask))
-}
-
-// rightChild returns the forest index of the right child for the given position.
-func (h *h10) rightChild(pos uint) uint {
-	return 2*(pos&uint(h.windowMask)) + 1
 }
