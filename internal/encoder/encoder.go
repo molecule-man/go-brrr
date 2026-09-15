@@ -109,8 +109,11 @@ type q10Bufs struct {
 	// Q11 HQ Zopfli scratch.
 	hqNumMatchesArr []uint32
 	hqMatches       []backwardMatch
+	hqHasherSnap    []uint32
 
-	zCostModel zopfliCostModel // large value type; keep last to minimize pointer bytes
+	hqCollector hqCollector
+	zCostModel  zopfliCostModel // large value type; keep last to minimize pointer bytes
+	hqFeed      matchFeed
 }
 
 // encoderSplit is the Q4–Q10 streaming encoder. It uses greedy block splitting,
@@ -136,6 +139,7 @@ type encoderSplit struct {
 // releaseBuffers extends encoderCore.releaseBuffers to also return the stashed
 // prevHasher to its pool.
 func (e *encoderSplit) releaseBuffers() {
+	e.q10.hqCollector.stop()
 	releaseHasher(e.prevHasher)
 	e.prevHasher = nil
 	e.encoderCore.releaseBuffers()
@@ -892,7 +896,7 @@ func (e *encoderSplit) reset(quality, lgwin int, sizeHint uint) {
 	// HasherSetup, which calls ChooseHasher after UpdateSizeHint has
 	// auto-calculated the size hint from the first Write call.
 	// Q10+ always uses h10 regardless of sizeHint, so keep eagerly.
-	if quality < 10 && sizeHint == 0 {
+	if quality < 10 {
 		// Must re-choose hasher after auto-sizeHint is calculated.
 		// chooseHasher will reuse the existing hasher when the type matches.
 		if e.hasher != nil {

@@ -26,6 +26,8 @@ type Compressor interface {
 	// Reset discards per-stream state for reuse with the same parameters.
 	Reset()
 
+	ResetSizeHint(sizeHint uint)
+
 	// AttachDictionary attaches a compound dictionary to the encoder.
 	AttachDictionary(pd *PreparedDictionary) error
 
