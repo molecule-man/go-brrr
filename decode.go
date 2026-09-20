@@ -90,6 +90,11 @@ func Decompress(data []byte) ([]byte, error) {
 	return out, nil
 }
 
+// AppendDecompress decodes the brotli-compressed data and appends the original
+// bytes to dst, returning the extended slice. Reusing dst across calls lets a
+// decode run without allocating.
+//
+// It returns [ErrExcessiveInput] if bytes follow the stream.
 func AppendDecompress(dst, data []byte) ([]byte, error) {
 	s := decodeStatePool.Get().(*decodeState)
 	s.initForReuse()

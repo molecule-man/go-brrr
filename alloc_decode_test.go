@@ -2,6 +2,7 @@ package brrr
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"testing"
@@ -24,7 +25,7 @@ func TestReusedReaderDecodesAStreamWithoutAllocating(t *testing.T) {
 				if _, err := io.ReadFull(r, out); err != nil {
 					t.Fatal(err)
 				}
-				if n, err := r.Read(out[:1]); n != 0 || err != io.EOF {
+				if n, err := r.Read(out[:1]); n != 0 || !errors.Is(err, io.EOF) {
 					t.Fatalf("trailing read = %d, %v; want 0, EOF", n, err)
 				}
 			})

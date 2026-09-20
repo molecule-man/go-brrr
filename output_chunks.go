@@ -3,12 +3,10 @@ package brrr
 import "sync"
 
 const (
-	encodeChunkSize = 64 << 10
 	decodeChunkSize = 272 << 10
 )
 
 var (
-	encodeChunkPool = sync.Pool{New: func() any { b := make([]byte, encodeChunkSize); return &b }}
 	decodeChunkPool = sync.Pool{New: func() any { b := make([]byte, decodeChunkSize); return &b }}
 )
 
