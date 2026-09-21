@@ -2,6 +2,9 @@
 
 package encoder
 
+// Function call overhead dominates below nine histograms.
+const minHistogramsForKernel = 9
+
 // findBlocksDPStep adds insertCost into cost and returns the minimum together
 // with the index of its first occurrence.
 //

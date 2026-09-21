@@ -202,6 +202,31 @@ func findBlocks(
 		insertCostIx := symbol * numHistograms
 		switchCost := blockSwitchBitcost
 
+		if numHistograms < minHistogramsForKernel {
+			minCost := noMinCost
+			for k := range numHistograms {
+				cost[k] += insertCost[insertCostIx+k]
+				if cost[k] < minCost {
+					minCost = cost[k]
+					blockID[byteIx] = byte(k)
+				}
+			}
+
+			if byteIx < prologueLength {
+				switchCost *= 0.77 + prologueMultiplier*float64(byteIx)
+			}
+
+			for k := range numHistograms {
+				cost[k] -= minCost
+				if cost[k] >= switchCost {
+					cost[k] = switchCost
+					switchSignal[ix+(k>>3)] |= 1 << (k & 7)
+				}
+			}
+
+			continue
+		}
+
 		// Reduce switch cost in the prologue to encourage early splits.
 		if byteIx < prologueLength {
 			switchCost *= 0.77 + prologueMultiplier*float64(byteIx)

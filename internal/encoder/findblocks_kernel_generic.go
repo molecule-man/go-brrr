@@ -2,6 +2,8 @@
 
 package encoder
 
+const minHistogramsForKernel = 0
+
 // findBlocksDPStep adds insertCost into cost and returns the minimum together
 // with the index of its first occurrence.
 func findBlocksDPStep(cost, insertCost []float64) (minCost float64, best int) {
