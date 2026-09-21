@@ -380,16 +380,28 @@ func (s *decodeState) decompressStream(output *[]byte) decoderResult {
 	}
 }
 
-// flushOutput appends any unwritten ring buffer content to output. Bytes
-// beyond ringbufferSize (in the slack region after a dictionary word write)
-// are left for writeRingBuffer to wrap.
-func (s *decodeState) flushOutput(output []byte) []byte {
+// pendingOutput aliases unread ring-buffer bytes until decoding resumes.
+// writeRingBuffer handles bytes in the write-ahead slack.
+func (s *decodeState) pendingOutput() []byte {
 	pos := min(s.pos, s.ringbufferSize)
 	flushed := int(s.partialPosOut) - int(s.rbRoundtrips)*s.ringbufferSize
-	if pos > flushed {
-		output = append(output, s.ringbuffer[flushed:pos]...)
-		s.partialPosOut += uint(pos - flushed)
+	if pos <= flushed {
+		return nil
 	}
+	return s.ringbuffer[flushed:pos]
+}
+
+func (s *decodeState) consumeOutput(n int) {
+	s.partialPosOut += uint(n)
+}
+
+func (s *decodeState) flushOutput(output []byte) []byte {
+	pending := s.pendingOutput()
+	if len(pending) == 0 {
+		return output
+	}
+	output = append(output, pending...)
+	s.consumeOutput(len(pending))
 	return output
 }
 
