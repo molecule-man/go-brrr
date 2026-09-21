@@ -132,10 +132,12 @@ static int crefCompressDict(
     return 1;
 }
 
-// crefDecompress decompresses brotli-encoded data.
+// crefDecompress optionally attaches a raw dictionary. Reporting consumed
+// bytes lets tests distinguish trailing data from a malformed stream.
 static int crefDecompress(
     const uint8_t *src, size_t src_len,
-    uint8_t **out, size_t *out_len) {
+    const uint8_t *dict, size_t dict_len,
+    uint8_t **out, size_t *out_len, size_t *consumed) {
 
     size_t cap = src_len * 4;
     if (cap < 1024) cap = 1024;
@@ -144,6 +146,12 @@ static int crefDecompress(
 
     BrotliDecoderState *s = BrotliDecoderCreateInstance(NULL, NULL, NULL);
     if (!s) { free(buf); return 0; }
+
+    if (dict_len > 0 && !BrotliDecoderAttachDictionary(s, BROTLI_SHARED_DICTIONARY_RAW, dict_len, dict)) {
+        free(buf);
+        BrotliDecoderDestroyInstance(s);
+        return 0;
+    }
 
     size_t total = 0;
     const uint8_t *next_in = src;
@@ -178,6 +186,7 @@ static int crefDecompress(
     BrotliDecoderDestroyInstance(s);
     *out = buf;
     *out_len = total;
+    *consumed = src_len - avail_in;
     return 1;
 }
 */
@@ -225,23 +234,48 @@ func Encode(input []byte, quality, lgwin int, sizeHint uint) ([]byte, error) {
 	return goBytesLarge(unsafe.Pointer(out), outLen), nil
 }
 
-// Decode decompresses brotli data using the C reference decoder.
+// Decode decompresses brotli data using the C reference decoder. Like the
+// reference decoder itself, it ignores bytes after the final meta-block.
 func Decode(compressed []byte) ([]byte, error) {
+	out, _, err := decode(compressed, nil)
+	return out, err
+}
+
+// DecodeConsumed is like Decode but also reports how many input bytes the
+// decoder read. consumed < len(compressed) means trailing bytes were ignored.
+func DecodeConsumed(compressed []byte) (out []byte, consumed int, err error) {
+	return decode(compressed, nil)
+}
+
+// DecodeDict decompresses brotli data that was encoded against a raw prefix
+// compound dictionary.
+func DecodeDict(compressed, dict []byte) ([]byte, error) {
+	out, _, err := decode(compressed, dict)
+	return out, err
+}
+
+func decode(compressed, dict []byte) (out []byte, consumed int, err error) {
 	var inPtr *C.uint8_t
 	if len(compressed) > 0 {
 		inPtr = (*C.uint8_t)(unsafe.Pointer(&compressed[0]))
 	}
-
-	var out *C.uint8_t
-	var outLen C.size_t
-	//nolint:gocritic // false positive on cgo call
-	ok := C.crefDecompress(inPtr, C.size_t(len(compressed)), &out, &outLen)
-	if ok == 0 {
-		return nil, errDecode
+	var dictPtr *C.uint8_t
+	if len(dict) > 0 {
+		dictPtr = (*C.uint8_t)(unsafe.Pointer(&dict[0]))
 	}
-	defer C.free(unsafe.Pointer(out))
 
-	return goBytesLarge(unsafe.Pointer(out), outLen), nil
+	var cOut *C.uint8_t
+	var outLen, cConsumed C.size_t
+	//nolint:gocritic // false positive on multi-line cgo call
+	ok := C.crefDecompress(inPtr, C.size_t(len(compressed)),
+		dictPtr, C.size_t(len(dict)),
+		&cOut, &outLen, &cConsumed)
+	if ok == 0 {
+		return nil, 0, errDecode
+	}
+	defer C.free(unsafe.Pointer(cOut))
+
+	return goBytesLarge(unsafe.Pointer(cOut), outLen), int(cConsumed), nil
 }
 
 // EncodeDict compresses input with a raw prefix compound dictionary using

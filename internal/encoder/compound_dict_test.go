@@ -207,6 +207,32 @@ func TestFindCompoundDictionaryMatch_CacheHit(t *testing.T) {
 	}
 }
 
+func TestFindCompoundDictionaryMatch_ShortDictionaryCacheHit(t *testing.T) {
+	for size := 1; size < 8; size++ {
+		for cacheIndex := range 4 {
+			dict := []byte("uickxyz")[:size]
+			pd := newPreparedDictionary(dict)
+			ring := make([]byte, 32)
+			copy(ring, dict)
+			var distCache [4]uint
+			distCache[cacheIndex] = uint(size)
+			sr := hasherSearchResult{score: minScore}
+			var sink uint16
+			pd.findCompoundMatch(ring, 31, &distCache, 0, uint(size), uint(size), &sr, &sink)
+			if size == 1 {
+				if sr.score != minScore {
+					t.Errorf("size %d, cache %d: unexpected one-byte match", size, cacheIndex)
+				}
+				continue
+			}
+			if sr.len != uint(size) || sr.distance != uint(size) || sr.score <= minScore {
+				t.Errorf("size %d, cache %d: got length %d, distance %d, score %v",
+					size, cacheIndex, sr.len, sr.distance, sr.score)
+			}
+		}
+	}
+}
+
 func TestFindCompoundDictionaryMatch_NoMatch(t *testing.T) {
 	dictBytes := make([]byte, 128)
 	for i := range dictBytes {

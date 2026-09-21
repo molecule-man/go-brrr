@@ -108,6 +108,52 @@ implementation, byte for byte. They need `lib/libbrotli_cref.a`.
 Test output must be clean. If a test expects an error, it must assert that
 error.
 
+### Differential fuzzing
+
+The targets in `fuzz_cref_test.go` compare Go with Google's C reference:
+
+- `FuzzEncodeCRef` checks encoder equivalence and cross-decoding, including
+  chunked writes, flushes, and streaming reads.
+- `FuzzDecodeCRef` compares acceptance and decoded bytes. It accounts for
+  trailing bytes: C ignores them, while Go returns `ErrExcessiveInput`.
+- `FuzzCompoundDictCRef` checks encoding and decoding with a raw compound
+  dictionary.
+
+Encoder equivalence checks use a single write on both sides. Chunked writes
+and flushes are checked by decoding with both implementations, since write
+boundaries can change valid compressed output.
+
+At quality 10–11, small rounding differences between Go's `math.Log2` and
+the C math library's `log2` can change the encoder's estimated costs and
+command choices. These differences can affect multiple commands, so a small
+byte or percentage allowance is not a correctness guarantee for arbitrary
+inputs. Without a compound dictionary, quality 5–9 with windows above 16
+can also choose different matches in Go and C.
+
+For these settings, fuzzing requires exact decoded bytes from both decoders
+but imposes no compressed-size limit. Other settings retain byte-for-byte
+encoder comparisons. Compression-size limits in the fixed-corpus tests are
+regression budgets for those workloads, not correctness rules for arbitrary
+fuzz inputs.
+
+Build the pinned Google reference implementation, then explicitly enable
+mutation fuzzing (ordinary `go test` only replays the seed corpus):
+
+```sh
+git submodule update --init
+make lib/libbrotli_cref.a
+go test -run='^$' -fuzz='^FuzzDecodeCRef$' -fuzztime=5m -parallel=4 .
+go test -tags=purego -run='^$' -fuzz='^FuzzEncodeCRef$' -fuzztime=5m -parallel=4 .
+```
+
+Use `-fuzz='^FuzzCompoundDictCRef$'` to run the dictionary target. Fuzzing
+requires cgo and a C compiler, including with `-tags=purego`. Plaintext and
+dictionary inputs are capped at 64 KiB, compressed inputs at 8 KiB; these
+limits do not cap decoded output. Go saves failing inputs under
+`testdata/fuzz/<target>/`. Minimize and commit them only when they add coverage
+that is not already captured by a focused regression test or an intentional
+seed. CI runs the seed corpus, not mutation fuzzing.
+
 ## Code style
 
 - Match the style of the file that you edit.

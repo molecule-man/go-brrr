@@ -4,17 +4,43 @@ package brrr
 
 import (
 	"bytes"
+	"io"
 	"testing"
+	"testing/iotest"
 
 	"github.com/molecule-man/go-brrr/internal/core"
 )
 
-func TestProcessCommandsRejectsZeroLengthStaticDictionaryTransform(t *testing.T) {
-	const transformIdx = 54
-	if got := core.TransformTriplets[transformIdx*3+1]; got != core.TransformOmitFirst9 {
-		t.Fatalf("transform %d = %d, want omitFirst9", transformIdx, got)
+func TestDecompressZeroLengthStaticDictionaryTransform(t *testing.T) {
+	// Transform 64 (OmitLast9) turns "links" into an empty string, then
+	// a literal command emits "A". Verified with Google's C decoder.
+	compressed := []byte{
+		0x02, 0x00, 0x00, 0x00, 0x44, 0x50, 0x0d,
+		0xa2, 0x48, 0xb0, 0xae, 0x00, 0x01,
 	}
+	t.Run("Decompress", func(t *testing.T) {
+		got, err := Decompress(compressed)
+		if err != nil {
+			t.Fatalf("Decompress: %v", err)
+		}
+		if string(got) != "A" {
+			t.Fatalf("Decompress = %q, want %q", got, "A")
+		}
+	})
+	t.Run("Reader", func(t *testing.T) {
+		r := NewReader(iotest.OneByteReader(bytes.NewReader(compressed)))
+		got, err := io.ReadAll(r)
+		if err != nil {
+			t.Fatalf("ReadAll: %v", err)
+		}
+		if string(got) != "A" {
+			t.Fatalf("ReadAll = %q, want %q", got, "A")
+		}
+	})
+}
 
+func TestProcessCommandsRejectsInvalidStaticDictionaryTransform(t *testing.T) {
+	const transformIdx = core.NumTransforms
 	var s decodeState
 	s.state = decoderStateCommandPostDecodeLiterals
 	s.ringbufferSize = 64
@@ -32,6 +58,9 @@ func TestProcessCommandsRejectsZeroLengthStaticDictionaryTransform(t *testing.T)
 	result := s.processCommands()
 	if result != decoderResultError {
 		t.Fatalf("processCommands() result = %v, want decoderResultError", result)
+	}
+	if s.err == nil {
+		t.Fatal("processCommands() returned no error")
 	}
 	if got, want := s.err.Error(), "brotli: invalid dictionary transform"; got != want {
 		t.Fatalf("processCommands() err = %q, want %q", got, want)

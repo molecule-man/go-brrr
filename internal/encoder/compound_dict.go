@@ -213,20 +213,18 @@ func (d *PreparedDictionary) findCompoundMatch(
 	prefetchSink *uint16,
 ) {
 	sourceSize := uint(len(d.source))
-	if sourceSize < 8 {
-		return
-	}
-
 	hashMask := ^uint64(0) >> (64 - dictHashBits)
 
 	// Speculatively load from the next position's heads entry to warm the cache.
 	// By the time the next call arrives, the cache line will be in L1.
 	// prefetchSink points at a per-encoder slot so concurrent Writers sharing
 	// the same dict do not race on this write.
-	nextCurMasked := (cur + 1) & ringBufferMask
-	nh := (loadU64LE(data, nextCurMasked) & hashMask) * hashMul64
-	nextKey := uint32(nh >> d.hashShift)
-	*prefetchSink = d.heads[nextKey]
+	if sourceSize >= 8 {
+		nextCurMasked := (cur + 1) & ringBufferMask
+		nh := (loadU64LE(data, nextCurMasked) & hashMask) * hashMul64
+		nextKey := uint32(nh >> d.hashShift)
+		*prefetchSink = d.heads[nextKey]
+	}
 
 	boundary := distanceOffset - sourceSize
 
@@ -279,6 +277,11 @@ func (d *PreparedDictionary) findCompoundMatch(
 				}
 			}
 		}
+	}
+
+	// Short dictionaries have no hash table but can match cached distances.
+	if sourceSize < 8 {
+		return
 	}
 
 	// Raise bestLen floor to 3 so hash chain only accepts length >= 4.
