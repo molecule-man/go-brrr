@@ -389,20 +389,32 @@ func (s *decodeState) decompressStream(output *[]byte) decoderResult {
 	}
 }
 
-// flushOutput appends any unwritten ring buffer content to output. Bytes
-// beyond ringbufferSize (in the slack region after a dictionary word write)
-// are left for writeRingBuffer to wrap.
-func (s *decodeState) flushOutput(output []byte) []byte {
+// pendingOutput aliases unread ring-buffer bytes until decoding resumes.
+// writeRingBuffer handles bytes in the write-ahead slack.
+func (s *decodeState) pendingOutput() []byte {
 	pos := min(s.pos, s.ringbufferSize)
 	flushed := int(s.partialPosOut) - int(s.rbRoundtrips)*s.ringbufferSize
-	if pos > flushed {
-		if s.sink != nil {
-			s.sink.write(s.ringbuffer[flushed:pos])
-		} else {
-			output = append(output, s.ringbuffer[flushed:pos]...)
-		}
-		s.partialPosOut += uint(pos - flushed)
+	if pos <= flushed {
+		return nil
 	}
+	return s.ringbuffer[flushed:pos]
+}
+
+func (s *decodeState) consumeOutput(n int) {
+	s.partialPosOut += uint(n)
+}
+
+func (s *decodeState) flushOutput(output []byte) []byte {
+	pending := s.pendingOutput()
+	if len(pending) == 0 {
+		return output
+	}
+	if s.sink != nil {
+		s.sink.write(pending)
+	} else {
+		output = append(output, pending...)
+	}
+	s.consumeOutput(len(pending))
 	return output
 }
 
@@ -1674,9 +1686,10 @@ commandInner:
 			// and block length, decode multiple literals without per-symbol checks.
 			n := min(i, int(s.blockLength[0]), s.ringbufferSize-pos, (br.availIn()-8)/2)
 			if n == 1 {
-				// Inline single-symbol decode to avoid decodeLiteralsBatch
-				// function-call overhead (register save/restore) for the common
-				// case of insert_len=1. Safe because n=1 implies availIn>=6>4.
+				// Decode one symbol here. The call overhead of
+				// decodeLiteralsBatch costs more than one symbol saves.
+				// n == 1 implies availIn >= 10, so the 4-byte load in
+				// fillBitWindow stays in bounds.
 				br.fillBitWindow(16)
 				s.ringbuffer[pos] = byte(decodeSymbol(br.val, s.literalHTree, br))
 				pos++

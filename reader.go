@@ -56,14 +56,7 @@ func (r *Reader) Read(p []byte) (int, error) {
 		return 0, nil
 	}
 
-	// Serve buffered output first.
-	if r.outPos < len(r.out) {
-		n := copy(p, r.out[r.outPos:])
-		r.outPos += n
-		if r.outPos == len(r.out) {
-			r.out = r.out[:0]
-			r.outPos = 0
-		}
+	if n := r.serve(p); n > 0 {
 		return n, nil
 	}
 
@@ -93,13 +86,7 @@ func (r *Reader) Read(p []byte) (int, error) {
 		switch result {
 		case decoderResultNeedsMoreInput:
 			// Surface output decoded so far before blocking for more input.
-			if r.out = r.state.flushOutput(r.out); len(r.out) > 0 {
-				n := copy(p, r.out)
-				r.outPos = n
-				if r.outPos == len(r.out) {
-					r.out = r.out[:0]
-					r.outPos = 0
-				}
+			if n := r.serve(p); n > 0 {
 				return n, nil
 			}
 			if r.srcErr != nil {
@@ -113,32 +100,16 @@ func (r *Reader) Read(p []byte) (int, error) {
 			}
 
 		case decoderResultNeedsMoreOutput:
-			r.out = r.state.flushOutput(r.out)
-			if len(r.out) > 0 {
-				r.outPos = 0
-				n := copy(p, r.out)
-				r.outPos = n
-				if r.outPos == len(r.out) {
-					r.out = r.out[:0]
-					r.outPos = 0
-				}
+			if n := r.serve(p); n > 0 {
 				return n, nil
 			}
 
 		case decoderResultSuccess:
-			r.out = r.state.flushOutput(r.out)
 			r.err = r.terminalReadError()
-			if len(r.out) == 0 {
-				return 0, r.err
+			if n := r.serve(p); n > 0 {
+				return n, nil
 			}
-			r.outPos = 0
-			n := copy(p, r.out)
-			r.outPos = n
-			if r.outPos == len(r.out) {
-				r.out = r.out[:0]
-				r.outPos = 0
-			}
-			return n, nil
+			return 0, r.err
 
 		case decoderResultError:
 			r.err = r.state.err
@@ -170,6 +141,32 @@ func (r *Reader) Close() error {
 	r.err = errReaderClosed
 	r.started = true
 	return nil
+}
+
+// serve copies pending decoded bytes into p.
+func (r *Reader) serve(p []byte) int {
+	if r.outPos < len(r.out) {
+		n := copy(p, r.out[r.outPos:])
+		r.outPos += n
+		if r.outPos == len(r.out) {
+			r.out = r.out[:0]
+			r.outPos = 0
+		}
+		return n
+	}
+
+	// Reset leaves stale ring counters until the first Read.
+	if !r.started {
+		return 0
+	}
+
+	pending := r.state.pendingOutput()
+	if len(pending) == 0 {
+		return 0
+	}
+	n := copy(p, pending)
+	r.state.consumeOutput(n)
+	return n
 }
 
 // fill saves unconsumed input bytes and reads more from src.
