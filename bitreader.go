@@ -5,8 +5,8 @@ package brrr
 import "unsafe"
 
 // fastInputSlack is the minimum bytes of unconsumed input required for
-// fast-path bit reading (162 bits + 7 bytes of margin).
-const fastInputSlack = 28
+// fast-path bit reading (162 bits + 11 bytes of margin for the 8-byte refill).
+const fastInputSlack = 32
 
 // bitReaderState is a snapshot of a bitReader, used to save and restore
 // position for speculative reads that may need to be rolled back.
