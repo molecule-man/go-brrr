@@ -247,6 +247,8 @@ type decodeState struct {
 	insertCopyHGroup huffmanTreeGroup
 	distanceHGroup   huffmanTreeGroup
 	compoundDict     *decoderCompoundDictionary
+	sink             *chunkWriter
+	outChunks        chunkWriter
 
 	// literalCodesPtrs caches a precomputed unsafe.Pointer for each of the
 	// 64 literal contexts. Each entry is codesBase + literalCodesOffsets[ctx]*4,
