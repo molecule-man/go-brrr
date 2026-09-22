@@ -78,7 +78,7 @@ func Decompress(data []byte) ([]byte, error) {
 	s.initForReuse()
 	s.br.setInput(data)
 	s.sink = &s.outChunks
-	_, err := s.decodeAll(nil)
+	err := s.decodeAll()
 	s.sink = nil
 	if err != nil {
 		s.outChunks.discard()
@@ -90,35 +90,20 @@ func Decompress(data []byte) ([]byte, error) {
 	return out, nil
 }
 
-// AppendDecompress decodes the brotli-compressed data and appends the original
-// bytes to dst, returning the extended slice. Reusing dst across calls lets a
-// decode run without allocating.
-//
-// It returns [ErrExcessiveInput] if bytes follow the stream.
-func AppendDecompress(dst, data []byte) ([]byte, error) {
-	s := decodeStatePool.Get().(*decodeState)
-	s.initForReuse()
-	s.br.setInput(data)
-	out, err := s.decodeAll(dst)
-	decodeStatePool.Put(s)
-	if err != nil {
-		return dst, err
-	}
-	return out, nil
-}
-
-func (s *decodeState) decodeAll(output []byte) ([]byte, error) {
+func (s *decodeState) decodeAll() error {
+	var output []byte
 	for {
 		switch s.decompressStream(&output) {
 		case decoderResultSuccess:
 			if s.excessiveInput() {
-				return output, ErrExcessiveInput
+				return ErrExcessiveInput
 			}
-			return s.flushOutput(output), nil
+			s.flushOutput(output)
+			return nil
 		case decoderResultError:
-			return output, s.err
+			return s.err
 		case decoderResultNeedsMoreInput:
-			return output, decompressError("truncated input")
+			return decompressError("truncated input")
 		case decoderResultNeedsMoreOutput:
 			output = s.flushOutput(output)
 		}

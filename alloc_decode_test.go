@@ -42,7 +42,6 @@ func TestReusedReaderDecodesAStreamWithoutAllocating(t *testing.T) {
 
 func TestOneshotDecompressionMatchesTheInputAndOnlyAllocatesTheResult(t *testing.T) {
 	in := allocTestPayload(t)
-	prefix := []byte("kept-prefix")
 	for _, level := range []int{1, 5, 11} {
 		t.Run(fmt.Sprintf("q%d", level), func(t *testing.T) {
 			comp, err := Compress(in, level)
@@ -59,25 +58,8 @@ func TestOneshotDecompressionMatchesTheInputAndOnlyAllocatesTheResult(t *testing
 					"input in one exact-size slice", len(got), cap(got), len(in))
 			}
 
-			dst := append(make([]byte, 0, len(prefix)+len(in)), prefix...)
-			appended, err := AppendDecompress(dst, comp)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !bytes.Equal(appended[:len(prefix)], prefix) || !bytes.Equal(appended[len(prefix):], in) {
-				t.Fatal("AppendDecompress must keep dst's existing bytes and append exactly the decoded input")
-			}
-
 			if raceDetectorEnabled {
 				return
-			}
-			if allocs := allocsBetweenCollections(3, func() {
-				if _, err := AppendDecompress(dst[:len(prefix)], comp); err != nil {
-					t.Fatal(err)
-				}
-			}); allocs != 0 {
-				t.Errorf("AppendDecompress into a destination with enough room allocated %.1f times; decoding "+
-					"must write straight into dst using the pooled decoder state", allocs)
 			}
 			if allocs := allocsBetweenCollections(3, func() {
 				if _, err := Decompress(comp); err != nil {
@@ -86,26 +68,6 @@ func TestOneshotDecompressionMatchesTheInputAndOnlyAllocatesTheResult(t *testing
 			}); allocs != 1 {
 				t.Errorf("Decompress allocated %.1f times; it must allocate only the exact-size result and "+
 					"collect output in pooled chunks instead of doubling a buffer", allocs)
-			}
-		})
-	}
-}
-
-func BenchmarkAppendDecompress(b *testing.B) {
-	in := allocTestPayload(b)
-	for _, level := range []int{1, 5, 11} {
-		b.Run(fmt.Sprintf("q=%d", level), func(b *testing.B) {
-			comp, err := Compress(in, level)
-			if err != nil {
-				b.Fatal(err)
-			}
-			dst := make([]byte, 0, len(in))
-			b.ReportAllocs()
-			b.SetBytes(int64(len(in)))
-			for range b.N {
-				if dst, err = AppendDecompress(dst[:0], comp); err != nil {
-					b.Fatal(err)
-				}
 			}
 		})
 	}
