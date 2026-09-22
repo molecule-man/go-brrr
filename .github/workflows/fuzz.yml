@@ -1,0 +1,95 @@
+name: Fuzz
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: "Fuzz time per target"
+        default: "10m"
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+
+concurrency:
+  group: fuzz
+  cancel-in-progress: false
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GOTOOLCHAIN: local
+      FUZZTIME: ${{ inputs.fuzztime || '10m' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [FuzzEncodeCRef, FuzzDecodeCRef, FuzzCompoundDictCRef]
+    name: fuzz (${{ matrix.target }})
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build C reference static library
+        run: make lib/libbrotli_cref.a
+
+      - name: Locate the corpus
+        run: echo "FUZZ_CORPUS=$(go env GOCACHE)/fuzz" >> "$GITHUB_ENV"
+
+      # The corpus grows across runs. Do not commit it. Keep one cache lane per
+      # target, keyed by run id so every save is a new key.
+      - name: Restore the corpus
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.FUZZ_CORPUS }}
+          key: fuzz-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-${{ matrix.target }}-
+
+      - name: Fuzz
+        run: >
+          go test -run='^$' -fuzz='^${{ matrix.target }}$'
+          -fuzztime="$FUZZTIME" -parallel=4 .
+
+      - name: Save the corpus
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.FUZZ_CORPUS }}
+          key: fuzz-${{ matrix.target }}-${{ github.run_id }}
+
+      - name: Prune the older corpus caches
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ matrix.target }}
+          REPO: ${{ github.repository }}
+        run: .github/scripts/prune-fuzz-caches.sh
+
+      - name: Upload the failing inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crashers-${{ matrix.target }}
+          path: testdata/fuzz/**
+          if-no-files-found: ignore
+          retention-days: 90
+
+      - name: Report the failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ matrix.target }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: .github/scripts/report-fuzz-failure.sh
