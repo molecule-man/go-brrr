@@ -98,7 +98,7 @@ Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before you st
 The most important rules:
 
 - **One pull request is one logical change.** Independent optimizations go into separate pull requests, so each one can be benchmarked, reverted, and bisected on its own.
-- **Explain the expected effect and its cause.** 
+- **Explain the expected effect and its cause.**
 
 The maintainer measures every performance change against a file corpus on dedicated hardware.
 

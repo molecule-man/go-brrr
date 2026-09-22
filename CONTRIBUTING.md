@@ -152,7 +152,10 @@ dictionary inputs are capped at 64 KiB, compressed inputs at 8 KiB; these
 limits do not cap decoded output. Go saves failing inputs under
 `testdata/fuzz/<target>/`. Minimize and commit them only when they add coverage
 that is not already captured by a focused regression test or an intentional
-seed. CI runs the seed corpus, not mutation fuzzing.
+seed. CI runs the seed corpus on every push.
+
+The `Fuzz` workflow runs mutation fuzzing every night. On a failure it uploads
+the failing inputs as an artifact and opens an issue.
 
 ## Code style
 
