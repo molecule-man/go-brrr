@@ -126,6 +126,10 @@ func (e *encoderArena) Reset() {
 	e.reset(e.quality, e.lgwin, e.originalSizeHint())
 }
 
+func (e *encoderArena) ResetSizeHint(sizeHint uint) {
+	e.reset(e.quality, e.lgwin, sizeHint)
+}
+
 // Release returns the encoder to its pool. The encoder must not be used
 // after Release.
 func (e *encoderArena) Release() {
@@ -149,6 +153,10 @@ func (e *encoderSplit) Close(dst io.Writer) error {
 
 func (e *encoderSplit) Reset() {
 	e.reset(e.quality, e.lgwin, e.originalSizeHint())
+}
+
+func (e *encoderSplit) ResetSizeHint(sizeHint uint) {
+	e.reset(e.quality, e.lgwin, sizeHint)
 }
 
 // Release returns the encoder to its pool. The encoder must not be used

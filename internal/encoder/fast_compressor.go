@@ -123,6 +123,10 @@ func (c *fastCompressor) Close(dst io.Writer) error {
 	return nil
 }
 
+func (c *fastCompressor) ResetSizeHint(uint) {
+	c.Reset()
+}
+
 // Reset clears per-stream state for reuse with the same quality/lgwin.
 // The arena is preserved (not returned to pool) and re-initialized.
 func (c *fastCompressor) Reset() {
