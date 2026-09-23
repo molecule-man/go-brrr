@@ -36,6 +36,7 @@ type Writer struct {
 	sizeHint uint // from WriterOptions, preserved across Reset
 	closed   bool
 	reused   bool // true after first Reset; suppresses pool release on Close
+	parallel bool
 }
 
 // NewWriter returns a new Writer compressing data to dst at the given
@@ -69,13 +70,24 @@ func NewWriterOptions(dst io.Writer, level int, opts WriterOptions) (*Writer, er
 	if len(opts.Dictionaries) > 0 && level < 2 {
 		return nil, encoder.ErrQualityTooLow
 	}
+	if opts.Parallelism < 0 {
+		return nil, errors.New("brrr: invalid parallelism: " + strconv.Itoa(opts.Parallelism))
+	}
 
-	w := &Writer{dst: dst, quality: level, lgwin: lgwin, sizeHint: opts.SizeHint, dicts: opts.Dictionaries}
-	w.c = encoder.NewCompressor(w.quality, w.lgwin, w.sizeHint)
+	w := &Writer{
+		dst:      dst,
+		quality:  level,
+		lgwin:    lgwin,
+		sizeHint: opts.SizeHint,
+		dicts:    opts.Dictionaries,
+		parallel: opts.Parallelism >= 2 && level >= minWorkerLevel,
+	}
+	w.c = encoder.NewCompressor(w.quality, w.lgwin, w.sizeHint, w.parallel)
 	for _, pd := range w.dicts {
 		_ = w.c.AttachDictionary(pd.impl)
 	}
-	if level >= minWorkerLevel {
+	if w.parallel {
+		// Release the collector if the caller abandons this Writer.
 		runtime.SetFinalizer(w, (*Writer).release)
 	}
 	return w, nil
@@ -111,11 +123,8 @@ func getOneshotCompressor(level int, sizeHint uint) (*oneshotCompressor, error) 
 		return o, nil
 	}
 	o := &oneshotCompressor{
-		c:      encoder.NewCompressor(level, defaultLGWin, sizeHint),
+		c:      encoder.NewCompressor(level, defaultLGWin, sizeHint, false),
 		chunks: chunkWriter{pool: &encodeChunkPool, size: encodeChunkSize},
-	}
-	if level >= minWorkerLevel {
-		runtime.SetFinalizer(o, (*oneshotCompressor).drop)
 	}
 	return o, nil
 }
@@ -207,7 +216,7 @@ func (w *Writer) Reset(dst io.Writer) {
 
 	if w.c == nil {
 		// Compressor was released on a previous Close; re-acquire.
-		w.c = encoder.NewCompressor(w.quality, w.lgwin, w.sizeHint)
+		w.c = encoder.NewCompressor(w.quality, w.lgwin, w.sizeHint, w.parallel)
 	} else {
 		w.c.Reset()
 	}

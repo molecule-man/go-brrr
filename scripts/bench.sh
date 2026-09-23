@@ -34,6 +34,7 @@ set -euo pipefail
 BENCH_PATTERN="${1:?usage: bench.sh <bench-pattern>}"
 COUNT="${COUNT:-24}"
 BENCHTIME="${BENCHTIME:-2s}"
+PROCS="${PROCS:-1}"
 
 RUNS_PER_PROCESS=${RPP:-4}
 PROCESSES=$(( COUNT / RUNS_PER_PROCESS ))
@@ -126,8 +127,8 @@ PADS=(${PADS:-0 4096 65536 64 256 1024 16384})
 
 run_one() {
     local bin="$1" out="$2" pad="$3"
-    BENCH_HEAP_PAD="$pad" GOGC=off GODEBUG=asyncpreemptoff=1 GOMAXPROCS=1 setarch -R "$bin" \
-        -test.run '^$' -test.bench="$BENCH_PATTERN" -test.cpu=1 \
+    BENCH_HEAP_PAD="$pad" GOGC=off GODEBUG=asyncpreemptoff=1 GOMAXPROCS="$PROCS" setarch -R "$bin" \
+        -test.run '^$' -test.bench="$BENCH_PATTERN" -test.cpu="$PROCS" \
         -test.benchtime "$BENCHTIME" -test.count "$RUNS_PER_PROCESS" ./... >> "$out"
 }
 
