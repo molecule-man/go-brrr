@@ -24,8 +24,7 @@ const (
 	feedSpinBeforeYield = 128
 )
 
-// hqMatchesPerByte sizes the match buffer per input byte, matching preallocQ10;
-// tests lower it to force the reallocation that aborts the feed.
+// hqMatchesPerByte reserves match space for the parallel collector.
 var hqMatchesPerByte uint = 8
 
 // matchFeed publishes how many positions of the match buffer are final, so the
@@ -86,7 +85,11 @@ func createHqZopfliBackwardReferences(numBytes, position uint, ringbuffer []byte
 	if hasCompound {
 		shadowMatches = h10MaxNumMatches + 128
 	}
-	matchesSize := hqMatchesPerByte*numBytes + shadowMatches
+	matchesPerByte := uint(4)
+	if bufs.parallel {
+		matchesPerByte = hqMatchesPerByte
+	}
+	matchesSize := matchesPerByte*numBytes + shadowMatches
 	storeEnd := position
 	if numBytes >= h10MaxTreeCompLength {
 		storeEnd = position + numBytes - h10MaxTreeCompLength + 1
@@ -152,7 +155,14 @@ func createHqZopfliBackwardReferences(numBytes, position uint, ringbuffer []byte
 	col.storeEnd = storeEnd
 	col.shadowMatches = shadowMatches
 	col.quality = quality
-	col.begin()
+	var firstPassFeed *matchFeed
+	if bufs.parallel {
+		col.begin()
+		firstPassFeed = feed
+	} else {
+		col.collect()
+		matches = bufs.hqMatches
+	}
 
 	// Save original state for the two-pass loop.
 	origNumLiterals := *numLiterals
@@ -169,14 +179,15 @@ func createHqZopfliBackwardReferences(numBytes, position uint, ringbuffer []byte
 		distCache[3] = origDistCache[3]
 	}
 
-	// Phase 2 & 3: Two DP passes. Pass 1 overlaps match collection through the
-	// feed; pass 2 needs every match and the pass-1 commands, so it waits.
+	// Phase 2 & 3: Two DP passes. In parallel mode pass 1 overlaps match
+	// collection through the feed; pass 2 needs every match and the pass-1
+	// commands, so it waits.
 	for pass := range passes {
 		initZopfliNodes(nodes)
 		var f *matchFeed
 		if pass == 0 {
 			model.setFromLiteralCosts(position, ringbuffer, ringBufferMask)
-			f = feed
+			f = firstPassFeed
 		} else {
 			col.wait()
 			passCommands := (*commands)[origNumCommands:]

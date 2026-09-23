@@ -471,8 +471,13 @@ func (h *h10) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32)
 
 	origCmdCount := len(s.commands)
 	gap := s.compound.totalSize
-	createHqZopfliBackwardReferences(uint(bytes), uint(wrappedPos), s.data, uint(s.mask),
-		s.quality, s.lgwin, gap, &s.compound, distCache[:], h, &s.lastInsertLen, &s.commands, &s.numLiterals, h.bufs)
+	if s.quality == 11 || h.bufs.parallel {
+		createHqZopfliBackwardReferences(uint(bytes), uint(wrappedPos), s.data, uint(s.mask),
+			s.quality, s.lgwin, gap, &s.compound, distCache[:], h, &s.lastInsertLen, &s.commands, &s.numLiterals, h.bufs)
+	} else {
+		createZopfliBackwardReferences(uint(bytes), uint(wrappedPos), s.data, uint(s.mask),
+			s.quality, s.lgwin, gap, &s.compound, distCache[:], h, &s.lastInsertLen, &s.commands, &s.numLiterals, h.bufs)
+	}
 
 	s.distCache = [4]uint{uint(distCache[0]), uint(distCache[1]), uint(distCache[2]), uint(distCache[3])}
 	s.numCommands += uint(len(s.commands) - origCmdCount)

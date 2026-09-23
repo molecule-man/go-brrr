@@ -42,28 +42,30 @@ func TestQ10MatchesTheCReferenceWhenTheDPSkipsABlockTheMatchCollectorAlreadyHash
 	for _, lgwin := range []int{18, 20} {
 		in := periodicInputWhoseRingBufferWrapBlockIsSkippedByTheDPAloneThenProbed(lgwin)
 		for _, quality := range []int{10, 11} {
-			t.Run(fmt.Sprintf("lgwin%d/q%d", lgwin, quality), func(t *testing.T) {
-				t.Parallel()
+			for _, parallelism := range []int{1, 2} {
+				t.Run(fmt.Sprintf("lgwin%d/q%d/p%d", lgwin, quality, parallelism), func(t *testing.T) {
+					t.Parallel()
 
-				var got bytes.Buffer
-				w, err := NewWriterOptions(&got, quality, WriterOptions{LGWin: lgwin, SizeHint: uint(len(in))})
-				if err != nil {
-					t.Fatal(err)
-				}
-				if _, err := w.Write(in); err != nil {
-					t.Fatal(err)
-				}
-				if err := w.Close(); err != nil {
-					t.Fatal(err)
-				}
+					var got bytes.Buffer
+					w, err := NewWriterOptions(&got, quality, WriterOptions{LGWin: lgwin, SizeHint: uint(len(in)), Parallelism: parallelism})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := w.Write(in); err != nil {
+						t.Fatal(err)
+					}
+					if err := w.Close(); err != nil {
+						t.Fatal(err)
+					}
 
-				want := creftest.BrotliCompress(t, in, quality, lgwin, uint(len(in)))
-				if !bytes.Equal(got.Bytes(), want) {
-					t.Fatalf("q%d lgwin %d output differs from the C reference (%d vs %d bytes): the DP skipped a long "+
-						"copy the match collector did not, so its hasher diverged and the block must be redone serially",
-						quality, lgwin, got.Len(), len(want))
-				}
-			})
+					want := creftest.BrotliCompress(t, in, quality, lgwin, uint(len(in)))
+					if !bytes.Equal(got.Bytes(), want) {
+						t.Fatalf("q%d lgwin %d Parallelism %d output differs from the C reference (%d vs %d bytes): the DP skipped a long "+
+							"copy the match collector did not, so its hasher diverged and the block must be redone serially",
+							quality, lgwin, parallelism, got.Len(), len(want))
+					}
+				})
+			}
 		}
 	}
 }

@@ -12,7 +12,7 @@ func encodeQ11ForFeedTest(t *testing.T, in []byte, perByte uint, shrink bool) []
 	hqMatchesPerByte = perByte
 	t.Cleanup(func() { hqMatchesPerByte = saved })
 
-	c := NewCompressor(11, 22, uint(len(in))).(*encoderSplit)
+	c := NewCompressor(11, 22, uint(len(in)), true).(*encoderSplit)
 	if shrink {
 		c.q10.hqMatches = make([]backwardMatch, 0, 16)
 	}

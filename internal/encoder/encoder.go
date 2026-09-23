@@ -114,6 +114,8 @@ type q10Bufs struct {
 	hqCollector hqCollector
 	zCostModel  zopfliCostModel // large value type; keep last to minimize pointer bytes
 	hqFeed      matchFeed
+
+	parallel bool
 }
 
 // encoderSplit is the Q4–Q10 streaming encoder. It uses greedy block splitting,

@@ -42,6 +42,13 @@ type WriterOptions struct {
 	// input crosses the size-tuned threshold, preserving the bucket state
 	// that was learned under the small-hint dispatch.
 	SizeHint uint
+
+	// Parallelism limits concurrent compression work per Writer. 0 and 1 use
+	// the caller only. Levels 10 and 11 use at most 2 workers. Levels 0-9
+	// use the caller only. Values above the supported limit use that limit.
+	// Negative values are invalid. This option does not permit concurrent
+	// calls to one Writer.
+	Parallelism int
 }
 
 // ReaderOptions configures the brotli decoder.
