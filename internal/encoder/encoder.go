@@ -111,9 +111,9 @@ type q10Bufs struct {
 	hqMatches       []backwardMatch
 	hqHasherSnap    []uint32
 
+	hqFeed      matchFeed
 	hqCollector hqCollector
 	zCostModel  zopfliCostModel // large value type; keep last to minimize pointer bytes
-	hqFeed      matchFeed
 
 	parallel bool
 }

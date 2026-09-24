@@ -43,11 +43,12 @@ type WriterOptions struct {
 	// that was learned under the small-hint dispatch.
 	SizeHint uint
 
-	// Parallelism limits concurrent compression work per Writer. 0 and 1 use
-	// the caller only. Levels 10 and 11 use at most 2 workers. Levels 0-9
-	// use the caller only. Values above the supported limit use that limit.
-	// Negative values are invalid. This option does not permit concurrent
-	// calls to one Writer.
+	// Parallelism limits concurrent work per Writer. At levels 10 and 11,
+	// values of 2 or more use the caller and one worker goroutine. Other
+	// valid values use the caller only. Parallel mode can reduce latency
+	// but uses more memory. Benchmarks show similar total throughput when
+	// all CPUs are busy. Negative values are invalid. A Writer does not
+	// support concurrent calls.
 	Parallelism int
 }
 

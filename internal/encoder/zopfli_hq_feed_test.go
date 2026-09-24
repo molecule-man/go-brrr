@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"testing"
+	"time"
 )
 
 func encodeQ11ForFeedTest(t *testing.T, in []byte, perByte uint, shrink bool) []byte {
@@ -39,5 +40,87 @@ func TestQ11FeedAbortAndRestartProducesTheSameBytesAsAnUninterruptedPass(t *test
 			"reallocated buffer; the restarted pass produced %d bytes that differ from the %d-byte "+
 			"uninterrupted result, so the consumer read a stale or partial match buffer",
 			len(got), len(want))
+	}
+}
+
+func waitInBackground(f *matchFeed, i uint) <-chan bool {
+	res := make(chan bool, 1)
+	go func() { res <- f.wait(i) }()
+	return res
+}
+
+func waitUntilParked(t *testing.T, f *matchFeed) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !f.parked.Load() {
+		if time.Now().After(deadline) {
+			t.Fatal("consumer did not park")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func receiveWait(t *testing.T, res <-chan bool) bool {
+	t.Helper()
+	select {
+	case ok := <-res:
+		return ok
+	case <-time.After(5 * time.Second):
+		t.Fatal("consumer did not wake")
+		return false
+	}
+}
+
+func TestMatchFeedParkedConsumerWakesOnPublish(t *testing.T) {
+	var f matchFeed
+	f.reset()
+	res := waitInBackground(&f, 5)
+	waitUntilParked(t, &f)
+	f.publish(6)
+	if !receiveWait(t, res) {
+		t.Fatal("wait(5) returned false after publish(6)")
+	}
+}
+
+func TestMatchFeedParkedConsumerWakesOnAbort(t *testing.T) {
+	var f matchFeed
+	f.reset()
+	res := waitInBackground(&f, 5)
+	waitUntilParked(t, &f)
+	f.abort()
+	if receiveWait(t, res) {
+		t.Fatal("wait(5) returned true after abort")
+	}
+}
+
+func TestMatchFeedConsumerSeesEveryPublishWithoutLostWakeups(t *testing.T) {
+	const n = 20000
+	var f matchFeed
+	for round := range 3 {
+		f.reset()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for i := uint(1); i <= n; i++ {
+				f.publish(i)
+				if i%64 == 0 {
+					time.Sleep(time.Microsecond)
+				}
+			}
+		}()
+		res := make(chan bool, 1)
+		go func() {
+			for i := range uint(n) {
+				if !f.wait(i) {
+					res <- false
+					return
+				}
+			}
+			res <- true
+		}()
+		if !receiveWait(t, res) {
+			t.Fatalf("round %d: wait returned false without an abort", round)
+		}
+		<-done
 	}
 }
