@@ -13,25 +13,19 @@
 package encoder
 
 import (
-	"runtime"
 	"sync/atomic"
 
 	"github.com/molecule-man/go-brrr/internal/core"
 )
 
 const (
-	feedPublishBatch    = 512
-	feedSpinBeforeYield = 128
+	feedPublishBatch   = 512
+	feedSpinBeforePark = 128
 )
 
 // hqMatchesPerByte reserves match space for the parallel collector.
 var hqMatchesPerByte uint = 8
 
-// matchFeed publishes how many positions of the match buffer are final, so the
-// first DP pass can consume matches while collection is still producing them.
-// aborted is raised when the producer had to reallocate the buffer: positions
-// past that point live only in the new array, so the watermark stops and the
-// consumer restarts on the reallocated buffer once the producer is done.
 type hqCollector struct {
 	bufs             *q10Bufs
 	hasher           *h10
@@ -51,11 +45,48 @@ type hqCollector struct {
 	lzScratch        [h10MaxNumMatches]backwardMatch
 }
 
+// matchFeed shares collected matches with the first DP pass. Buffer growth
+// aborts the feed because the DP holds the prior match buffer. A parked DP
+// waits for more matches or an abort.
 type matchFeed struct {
+	wake    chan struct{}
 	_       [64]byte
 	ready   atomic.Uint64
 	aborted atomic.Bool
+	parked  atomic.Bool
 	_       [64]byte
+}
+
+func (f *matchFeed) reset() {
+	f.ready.Store(0)
+	f.aborted.Store(false)
+	f.parked.Store(false)
+	if f.wake == nil {
+		f.wake = make(chan struct{}, 1)
+	}
+	select {
+	case <-f.wake:
+	default:
+	}
+}
+
+func (f *matchFeed) publish(n uint) {
+	f.ready.Store(uint64(n))
+	f.unpark()
+}
+
+func (f *matchFeed) abort() {
+	f.aborted.Store(true)
+	f.unpark()
+}
+
+func (f *matchFeed) unpark() {
+	if f.parked.Load() && f.parked.CompareAndSwap(true, false) {
+		select {
+		case f.wake <- struct{}{}:
+		default:
+		}
+	}
 }
 
 func (f *matchFeed) wait(i uint) bool {
@@ -70,10 +101,20 @@ func (f *matchFeed) waitSlow(i uint) bool {
 		if f.aborted.Load() {
 			return false
 		}
-		if spin >= feedSpinBeforeYield {
-			runtime.Gosched()
-			spin = 0
+		if spin < feedSpinBeforePark {
+			continue
 		}
+		// Set parked before the re-check: either this goroutine sees the
+		// producer's store, or the producer sees parked and sends a wake.
+		f.parked.Store(true)
+		if f.ready.Load() > uint64(i) || f.aborted.Load() {
+			// A wake sent after this point stays buffered; the next park
+			// consumes it and re-checks.
+			f.parked.Store(false)
+			continue
+		}
+		<-f.wake
+		spin = 0
 	}
 }
 
@@ -140,8 +181,7 @@ func createHqZopfliBackwardReferences(numBytes, position uint, ringbuffer []byte
 	}
 
 	feed := &bufs.hqFeed
-	feed.ready.Store(0)
-	feed.aborted.Store(false)
+	feed.reset()
 	col := &bufs.hqCollector
 	col.bufs = bufs
 	col.hasher = hasher
@@ -290,7 +330,7 @@ func (c *hqCollector) collect() {
 			if cap(bufs.hqMatches) < int(newSize) {
 				if !aborted {
 					aborted = true
-					feed.aborted.Store(true)
+					feed.abort()
 				}
 				grown := make([]backwardMatch, newSize)
 				copy(grown, matches[:curMatchPos])
@@ -346,11 +386,11 @@ func (c *hqCollector) collect() {
 			}
 		}
 		if !aborted && i+1 >= nextPublish {
-			feed.ready.Store(uint64(i + 1))
+			feed.publish(i + 1)
 			nextPublish = i + 1 + feedPublishBatch
 		}
 	}
 	if !aborted {
-		feed.ready.Store(uint64(numBytes))
+		feed.publish(numBytes)
 	}
 }
