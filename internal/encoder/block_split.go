@@ -371,17 +371,6 @@ func (bs *blockSplitter) addHistograms(dstIdx, srcIdx int) {
 	}
 }
 
-// addSymbol adds a literal to the context-specific histogram of the current
-// candidate block type.
-func (cs *contextBlockSplitter) addSymbol(symbol, context int) {
-	idx := (cs.currHistogramIdx + context) * cs.alphabetSize
-	cs.histograms[idx+symbol]++
-	cs.blockSize++
-	if cs.blockSize == cs.targetBlockSize {
-		cs.finishBlock(false)
-	}
-}
-
 // finishBlock makes the merge/split decision for the current block.
 // The decision is based on the total entropy change summed across all
 // contexts, ensuring that splits reflect genuine improvements in the
@@ -533,15 +522,9 @@ func buildMetaBlockGreedy(
 	ringbuffer []byte, pos, mask uint,
 	prevByte, prevByte2 byte,
 	numContexts uint, staticContextMap []uint32,
-	commands []command,
+	commands []command, numLiterals int,
 	bufs *splitBufs, mb *metaBlockSplit,
 ) {
-	// Count total literals.
-	var numLiterals int
-	for i := range commands {
-		numLiterals += int(commands[i].insertLen)
-	}
-
 	// Initialize command and distance splitters (unchanged by context modeling).
 	var cmdSplitter, distSplitter blockSplitter
 	cmdSplitter, bufs.cmdHistograms, bufs.cmdTypes, bufs.cmdLengths =
@@ -562,12 +545,26 @@ func buildMetaBlockGreedy(
 			newBlockSplitter(&mb.litSplit, core.AlphabetSizeLiteral, 512, 400.0,
 				numLiterals, bufs.litHistograms, bufs.litTypes, bufs.litLengths)
 
+		histogram := (*[core.AlphabetSizeLiteral]uint32)(litSplitter.histograms[litSplitter.histOff:])
+		left := uint(litSplitter.targetBlockSize - litSplitter.blockSize)
 		for i := range commands {
 			cmd := commands[i]
 			cmdSplitter.addSymbol(int(cmd.cmdPrefix))
-			for j := cmd.insertLen; j != 0; j-- {
-				litSplitter.addSymbol(int(ringbuffer[pos&mask]))
-				pos++
+			for n := uint(cmd.insertLen); n != 0; {
+				p := pos & mask
+				k := min(n, left, mask+1-p)
+				for _, literal := range ringbuffer[p : p+k] {
+					histogram[literal]++
+				}
+				pos += k
+				n -= k
+				left -= k
+				if left == 0 {
+					litSplitter.blockSize = litSplitter.targetBlockSize
+					litSplitter.finishBlock(false)
+					histogram = (*[core.AlphabetSizeLiteral]uint32)(litSplitter.histograms[litSplitter.histOff:])
+					left = uint(litSplitter.targetBlockSize - litSplitter.blockSize)
+				}
 			}
 			copyLen := cmd.copyLength()
 			pos += uint(copyLen)
@@ -576,6 +573,7 @@ func buildMetaBlockGreedy(
 			}
 		}
 
+		litSplitter.blockSize = litSplitter.targetBlockSize - int(left)
 		litSplitter.finishBlock(true)
 		mb.litHistograms = litSplitter.histograms[:litSplitter.histogramsSize*core.AlphabetSizeLiteral]
 	} else {
@@ -584,16 +582,29 @@ func buildMetaBlockGreedy(
 			&mb.litSplit, core.AlphabetSizeLiteral, int(numContexts), 512, 400.0, numLiterals, bufs)
 		utf8LUT := uint(core.ContextUTF8) << 9
 
+		histograms := ctxSplitter.histograms[ctxSplitter.currHistogramIdx*core.AlphabetSizeLiteral:]
+		left := uint(ctxSplitter.targetBlockSize - ctxSplitter.blockSize)
 		for i := range commands {
 			cmd := commands[i]
 			cmdSplitter.addSymbol(int(cmd.cmdPrefix))
-			for j := cmd.insertLen; j != 0; j-- {
-				literal := ringbuffer[pos&mask]
-				context := staticContextMap[core.ContextLookupTable[utf8LUT+uint(prevByte)]|core.ContextLookupTable[utf8LUT+256+uint(prevByte2)]]
-				ctxSplitter.addSymbol(int(literal), int(context))
-				prevByte2 = prevByte
-				prevByte = literal
-				pos++
+			for n := uint(cmd.insertLen); n != 0; {
+				p := pos & mask
+				k := min(n, left, mask+1-p)
+				for _, literal := range ringbuffer[p : p+k] {
+					context := staticContextMap[core.ContextLookupTable[utf8LUT+uint(prevByte)]|core.ContextLookupTable[utf8LUT+256+uint(prevByte2)]]
+					histograms[uint(context)*core.AlphabetSizeLiteral+uint(literal)]++
+					prevByte2 = prevByte
+					prevByte = literal
+				}
+				pos += k
+				n -= k
+				left -= k
+				if left == 0 {
+					ctxSplitter.blockSize = ctxSplitter.targetBlockSize
+					ctxSplitter.finishBlock(false)
+					histograms = ctxSplitter.histograms[ctxSplitter.currHistogramIdx*core.AlphabetSizeLiteral:]
+					left = uint(ctxSplitter.targetBlockSize - ctxSplitter.blockSize)
+				}
 			}
 			copyLen := cmd.copyLength()
 			pos += uint(copyLen)
@@ -606,6 +617,7 @@ func buildMetaBlockGreedy(
 			}
 		}
 
+		ctxSplitter.blockSize = ctxSplitter.targetBlockSize - int(left)
 		ctxSplitter.finishBlock(true)
 		mb.litHistograms = ctxSplitter.histograms[:ctxSplitter.histogramsSize*core.AlphabetSizeLiteral]
 
