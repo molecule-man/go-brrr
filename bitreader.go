@@ -94,11 +94,11 @@ func (br *bitReader) checkInputAmount() bool {
 }
 
 // fillBitWindow ensures that at least nBits+1 bits are available in the
-// accumulator. If the accumulator has 32 or fewer valid bits, 4 bytes are
+// accumulator. If the accumulator has fewer than 32 valid bits, 4 bytes are
 // loaded from input. nBits must be in the range [1..24].
 func (br *bitReader) fillBitWindow(nBits uint) {
 	_ = nBits // used for documentation; the 64-bit path handles up to 32
-	if br.bitPos <= 32 {
+	if br.bitPos < 32 {
 		br.val |= uint64(*(*uint32)(unsafe.Add(br.inputBase, br.pos))) << br.bitPos
 		br.bitPos += 32
 		br.pos += 4
