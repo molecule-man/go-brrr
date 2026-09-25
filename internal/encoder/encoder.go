@@ -797,18 +797,15 @@ func (b *q10Bufs) preallocQ10(blockSizeArg int) {
 	blockSize := 2 * blockSizeArg
 	// Maximum histogram counts (from block_splitter constants).
 	const (
-		maxLitHist     = 100                                  // maxLiteralHistograms
-		maxCmdHist     = 50                                   // maxCommandHistograms
-		maxDistHist    = 50                                   // maxCommandHistograms (distances use same limit)
-		maxAlpha       = core.AlphabetSizeInsertAndCopyLength // 704, largest alphabet
-		litAlpha       = core.AlphabetSizeLiteral             // 256
-		distAlpha      = core.NumHistogramDistanceSymbols     // 544
-		hpb            = 64                                   // histogramsPerBatch
-		cpb            = 16                                   // clustersPerBatch
-		maxPairs       = hpb*hpb/2 + 1
-		maxBlockTypes  = maxNumberOfBlockTypes
-		litContextMul  = 64 // 1 << core.LiteralContextBits
-		distContextMul = 4  // 1 << core.DistanceContextBits
+		maxLitHist    = 100                                  // maxLiteralHistograms
+		maxCmdHist    = 50                                   // maxCommandHistograms
+		maxDistHist   = 50                                   // maxCommandHistograms (distances use same limit)
+		maxAlpha      = core.AlphabetSizeInsertAndCopyLength // 704, largest alphabet
+		hpb           = 64                                   // histogramsPerBatch
+		cpb           = 16                                   // clustersPerBatch
+		maxPairs      = hpb*hpb/2 + 1
+		maxBlockTypes = maxNumberOfBlockTypes
+		litContextMul = 64 // 1 << core.LiteralContextBits
 	)
 
 	// Upper bound for numBlocks from splitByteVector. In practice much
@@ -820,13 +817,10 @@ func (b *q10Bufs) preallocQ10(blockSizeArg int) {
 	b.svHistograms = preallocUint32(b.svHistograms, (maxLitHist+1)*maxAlpha)
 	b.svBlockIDs = preallocByte(b.svBlockIDs, blockSize)
 	b.svFloat = preallocFloat64(b.svFloat, maxAlpha*maxLitHist+maxLitHist)
-	bitmapLen := (maxLitHist + 7) >> 3
-	b.svSwitchSig = preallocByte(b.svSwitchSig, blockSize*bitmapLen)
 	b.svNewID = preallocUint16(b.svNewID, maxLitHist)
 
 	// clusterBlocks scratch.
 	b.cbHistSymbols = preallocUint32(b.cbHistSymbols, estBlocks)
-	b.cbAllHistograms = preallocUint32(b.cbAllHistograms, estClusters*maxAlpha)
 	b.cbClusterSizes = preallocUint32(b.cbClusterSizes, estClusters)
 	b.cbBatchHist = preallocUint32(b.cbBatchHist, hpb*maxAlpha)
 	b.cbPairs = preallocHistogramPairs(b.cbPairs, maxPairs)
@@ -846,11 +840,6 @@ func (b *q10Bufs) preallocQ10(blockSizeArg int) {
 	b.bmTmpHist = preallocUint32(b.bmTmpHist, maxAlpha)
 	b.bmContextModes = preallocByte(b.bmContextModes, maxBlockTypes)
 	litHistSize := maxBlockTypes * litContextMul
-	b.bmLitHist = preallocUint32(b.bmLitHist, litHistSize*litAlpha)
-	distHistSize := maxBlockTypes * distContextMul
-	b.bmDistHist = preallocUint32(b.bmDistHist, distHistSize*distAlpha)
-	b.bmLitOutHist = preallocUint32(b.bmLitOutHist, litHistSize*litAlpha)
-	b.bmDistOutHist = preallocUint32(b.bmDistOutHist, distHistSize*distAlpha)
 
 	// clusterHistograms scratch.
 	maxInSize := litHistSize // largest input to clusterHistograms
@@ -864,12 +853,11 @@ func (b *q10Bufs) preallocQ10(blockSizeArg int) {
 
 	// histogramReindex scratch.
 	b.hrNewIndex = preallocUint32(b.hrNewIndex, maxInSize)
-	b.hrTmpData = preallocUint32(b.hrTmpData, maxBlockTypes*maxAlpha)
 	b.hrTmpBitCosts = preallocFloat64(b.hrTmpBitCosts, maxBlockTypes)
 	b.hrTmpTotals = preallocUint32(b.hrTmpTotals, maxBlockTypes)
 
 	// Zopfli backward references scratch.
-	b.zNodes = preallocZopfliNodes(b.zNodes, blockSize+1)
+	b.zNodes = preallocZopfliNodes(b.zNodes, blockSizeArg+1)
 	b.zMatches = preallocBackwardMatches(b.zMatches, 2*(h10MaxNumMatches+64))
 	if cap(b.zCostModel.literalCosts) < blockSize+2 {
 		b.zCostModel.literalCosts = make([]float32, 0, blockSize+2)
@@ -879,7 +867,7 @@ func (b *q10Bufs) preallocQ10(blockSizeArg int) {
 	}
 
 	// Q11 HQ Zopfli scratch.
-	b.hqNumMatchesArr = preallocUint32(b.hqNumMatchesArr, blockSize)
+	b.hqNumMatchesArr = preallocUint32(b.hqNumMatchesArr, blockSizeArg)
 	b.hqMatches = preallocBackwardMatches(b.hqMatches, 4*blockSize)
 }
 
@@ -922,10 +910,6 @@ func (e *encoderSplit) reset(quality, lgwin int, sizeHint uint) {
 		blockSize := 1 << e.lgblock
 		e.q10.preallocQ10(blockSize)
 
-		// The h10 forest is sized in h10.reset, which knows the real input
-		// size and whether the encode is one-shot. Pre-allocating here would
-		// force the full window even for a small input.
-
 		// Pre-allocate metaBlockSplit context maps.
 		const (
 			maxTypes       = 256
@@ -934,7 +918,6 @@ func (e *encoderSplit) reset(quality, lgwin int, sizeHint uint) {
 		)
 		e.mb.literalContextMap = preallocUint32(e.mb.literalContextMap, maxTypes*litContextMul)
 		e.mb.distanceContextMap = preallocUint32(e.mb.distanceContextMap, maxTypes*distContextMul)
-		e.mb.cmdHistograms = preallocUint32(e.mb.cmdHistograms, maxTypes*core.AlphabetSizeInsertAndCopyLength)
 
 		// Pre-allocate blockSplit types/lengths for each category.
 		e.mb.litSplit.types = preallocByte(e.mb.litSplit.types, maxTypes)
@@ -944,14 +927,6 @@ func (e *encoderSplit) reset(quality, lgwin int, sizeHint uint) {
 		e.mb.distSplit.types = preallocByte(e.mb.distSplit.types, maxTypes)
 		e.mb.distSplit.lengths = preallocUint32(e.mb.distSplit.lengths, maxTypes)
 
-		// Pre-allocate encoderSplit Huffman code buffers.
-		// Sizes are numHistograms * alphabetSize; use maxTypes as a safe bound.
-		e.litDepths = preallocByte(e.litDepths, maxTypes*litContextMul*core.AlphabetSizeLiteral)
-		e.litBits = preallocUint16(e.litBits, maxTypes*litContextMul*core.AlphabetSizeLiteral)
-		e.cmdDepths = preallocByte(e.cmdDepths, maxTypes*core.AlphabetSizeInsertAndCopyLength)
-		e.cmdBits = preallocUint16(e.cmdBits, maxTypes*core.AlphabetSizeInsertAndCopyLength)
-		e.distDepths = preallocByte(e.distDepths, maxTypes*distContextMul*core.NumHistogramDistanceSymbols)
-		e.distBits = preallocUint16(e.distBits, maxTypes*distContextMul*core.NumHistogramDistanceSymbols)
 		e.rleSymBuf = preallocUint32(e.rleSymBuf, maxTypes*litContextMul)
 		if cap(e.goodForRLE) < core.AlphabetSizeInsertAndCopyLength {
 			e.goodForRLE = make([]bool, 0, core.AlphabetSizeInsertAndCopyLength)
