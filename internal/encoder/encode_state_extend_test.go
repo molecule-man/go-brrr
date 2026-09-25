@@ -75,7 +75,7 @@ func extendMatchViaEncodeState(data []byte, length, wrappedPos, mask, cmdDist ui
 		mask:             mask,
 		lgwin:            24,
 		lastProcessedPos: uint64(mask) + 1,
-		commands:         []command{newCommandSimpleDist(0, startCopyLen, 0, 0)},
+		commands:         []command{newCommand(commandConfig{copyLen: startCopyLen})},
 		numCommands:      1,
 	}
 	s.distCache[0] = uint(cmdDist)

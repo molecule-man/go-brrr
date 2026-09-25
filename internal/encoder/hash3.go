@@ -343,8 +343,6 @@ func (h *h3) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 				// H3 PrepareDistanceCache is a no-op (BUCKET_SWEEP<=2).
 			}
 
-			// Manually inlined newCommandSimpleDist to avoid non-inlineable
-			// function call overhead and struct return copy.
 			{
 				delta := uint32(uint8(int8(sr.lenCodeDelta)))
 				distPrefix, distExtra := prefixEncodeSimpleDistance(distanceCode)
@@ -352,13 +350,7 @@ func (h *h3) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 				insCode := getInsertLenCode(insertLength)
 				copyCode := getCopyLenCode(effectiveCopyLen)
 				cmdPrefix := combineLengthCodes(insCode, copyCode, (distPrefix&0x3FF) == 0)
-				s.commands = append(s.commands, command{
-					insertLen:  uint32(insertLength),
-					copyLen:    uint32(sr.len) | (delta << 25),
-					distExtra:  distExtra,
-					cmdPrefix:  cmdPrefix,
-					distPrefix: distPrefix,
-				})
+				s.appendCommand(uint32(insertLength), uint32(sr.len)|(delta<<25), distExtra, cmdPrefix, distPrefix)
 				// Inline histogram update: accumulate symbol counts while the
 				// insert-literal bytes and command fields are hot in registers,
 				// avoiding the separate tally pass in writeMetaBlockTrivial.
@@ -700,8 +692,6 @@ func (h *h3) createBackwardReferencesNoCompoundNoWrap(s *encodeState, bytes, wra
 				// H3 PrepareDistanceCache is a no-op (BUCKET_SWEEP<=2).
 			}
 
-			// Manually inlined newCommandSimpleDist to avoid non-inlineable
-			// function call overhead and struct return copy.
 			{
 				delta := uint32(uint8(int8(sr.lenCodeDelta)))
 				distPrefix, distExtra := prefixEncodeSimpleDistance(distanceCode)
@@ -709,13 +699,7 @@ func (h *h3) createBackwardReferencesNoCompoundNoWrap(s *encodeState, bytes, wra
 				insCode := getInsertLenCode(insertLength)
 				copyCode := getCopyLenCode(effectiveCopyLen)
 				cmdPrefix := combineLengthCodes(insCode, copyCode, (distPrefix&0x3FF) == 0)
-				s.commands = append(s.commands, command{
-					insertLen:  uint32(insertLength),
-					copyLen:    uint32(sr.len) | (delta << 25),
-					distExtra:  distExtra,
-					cmdPrefix:  cmdPrefix,
-					distPrefix: distPrefix,
-				})
+				s.appendCommand(uint32(insertLength), uint32(sr.len)|(delta<<25), distExtra, cmdPrefix, distPrefix)
 				// Inline histogram update: accumulate symbol counts while the
 				// insert-literal bytes and command fields are hot in registers,
 				// avoiding the separate tally pass in writeMetaBlockTrivial.

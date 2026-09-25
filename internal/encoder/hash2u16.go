@@ -286,13 +286,7 @@ func (h *h2u16) createBackwardReferences(s *encodeState, bytes, wrappedPos uint3
 			insCode := getInsertLenCode(insertLength)
 			copyCode := getCopyLenCode(effectiveCopyLen)
 			cmdPrefix := combineLengthCodes(insCode, copyCode, (distPrefix&0x3FF) == 0)
-			s.commands = append(s.commands, command{
-				insertLen:  uint32(insertLength),
-				copyLen:    uint32(sr.len) | (delta << 25),
-				distExtra:  distExtra,
-				cmdPrefix:  cmdPrefix,
-				distPrefix: distPrefix,
-			})
+			s.appendCommand(uint32(insertLength), uint32(sr.len)|(delta<<25), distExtra, cmdPrefix, distPrefix)
 			if s.cmdHisto != nil {
 				s.cmdHisto[cmdPrefix]++
 				if cmdPrefix >= 128 {
@@ -557,13 +551,7 @@ func (h *h2u16) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos
 			insCode := getInsertLenCode(insertLength)
 			copyCode := getCopyLenCode(effectiveCopyLen)
 			cmdPrefix := combineLengthCodes(insCode, copyCode, (distPrefix&0x3FF) == 0)
-			s.commands = append(s.commands, command{
-				insertLen:  uint32(insertLength),
-				copyLen:    uint32(sr.len) | (delta << 25),
-				distExtra:  distExtra,
-				cmdPrefix:  cmdPrefix,
-				distPrefix: distPrefix,
-			})
+			s.appendCommand(uint32(insertLength), uint32(sr.len)|(delta<<25), distExtra, cmdPrefix, distPrefix)
 			if s.cmdHisto != nil {
 				s.cmdHisto[cmdPrefix]++
 				if cmdPrefix >= 128 {

@@ -686,7 +686,6 @@ func (h *h5) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 				s.distCache[0] = sr.distance
 			}
 
-			// Inline newCommandSimpleDist.
 			{
 				delta := uint32(uint8(int8(sr.lenCodeDelta)))
 				distPrefix, distExtra := prefixEncodeSimpleDistance(distanceCode)
@@ -694,13 +693,7 @@ func (h *h5) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 				insCode := getInsertLenCode(insertLength)
 				copyCode := getCopyLenCode(effectiveCopyLen)
 				cmdPrefix := combineLengthCodes(insCode, copyCode, (distPrefix&0x3FF) == 0)
-				s.commands = append(s.commands, command{
-					insertLen:  uint32(insertLength),
-					copyLen:    uint32(sr.len) | (delta << 25),
-					distExtra:  distExtra,
-					cmdPrefix:  cmdPrefix,
-					distPrefix: distPrefix,
-				})
+				s.appendCommand(uint32(insertLength), uint32(sr.len)|(delta<<25), distExtra, cmdPrefix, distPrefix)
 			}
 			s.numLiterals += insertLength
 			insertLength = 0
@@ -847,7 +840,6 @@ func (h *h5) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos ui
 				s.distCache[0] = sr.distance
 			}
 
-			// Inline newCommandSimpleDist.
 			{
 				delta := uint32(uint8(int8(sr.lenCodeDelta)))
 				distPrefix, distExtra := prefixEncodeSimpleDistance(distanceCode)
@@ -855,13 +847,7 @@ func (h *h5) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos ui
 				insCode := getInsertLenCode(insertLength)
 				copyCode := getCopyLenCode(effectiveCopyLen)
 				cmdPrefix := combineLengthCodes(insCode, copyCode, (distPrefix&0x3FF) == 0)
-				s.commands = append(s.commands, command{
-					insertLen:  uint32(insertLength),
-					copyLen:    uint32(sr.len) | (delta << 25),
-					distExtra:  distExtra,
-					cmdPrefix:  cmdPrefix,
-					distPrefix: distPrefix,
-				})
+				s.appendCommand(uint32(insertLength), uint32(sr.len)|(delta<<25), distExtra, cmdPrefix, distPrefix)
 			}
 			s.numLiterals += insertLength
 			insertLength = 0
