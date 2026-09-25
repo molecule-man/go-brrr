@@ -2,12 +2,15 @@ package brrr
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/molecule-man/go-brrr/internal/creftest"
 )
 
 func TestReusedWriterCompressesAStreamWithoutAllocating(t *testing.T) {
@@ -222,5 +225,93 @@ func TestOneshotCompressionMatchesTheStreamingWriterAndOnlyAllocatesTheResult(t 
 					"collect output in pooled chunks instead of a growing buffer", allocs)
 			}
 		})
+	}
+}
+
+func TestNewFastWriterPerStreamAllocatesOnlyTheWriterBecauseReleaseKeepsEveryScratchBufferOnThePooledCompressor(t *testing.T) {
+	if raceDetectorEnabled {
+		t.Skip("the race detector drops sync.Pool items at random")
+	}
+	in := allocTestPayload(t)
+	for _, level := range []int{0, 1} {
+		t.Run(fmt.Sprintf("q%d", level), func(t *testing.T) {
+			stream := func() {
+				w, err := NewWriterOptions(io.Discard, level, WriterOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := w.Write(in); err != nil {
+					t.Fatal(err)
+				}
+				if err := w.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			allocs := allocsBetweenCollections(20, stream)
+			if allocs != 1 {
+				waitForGoroutines(t, runtime.NumGoroutine()-1)
+				allocs = allocsBetweenCollections(20, stream)
+			}
+			if allocs != 1 {
+				t.Errorf("a new q%d Writer per %d-byte stream allocated %.1f times; only the *Writer may be new, "+
+					"because Release must keep the input, output, table, command and literal buffers on the pooled "+
+					"fast compressor instead of dropping them or boxing them into side pools", level, len(in), allocs)
+			}
+		})
+	}
+}
+
+func TestFastWritersInheritingDirtyOversizedBuffersFromThePoolStillMatchTheCReference(t *testing.T) {
+	page := readTestdata(t, "testdata/gh_172KB.html")
+	large := bytes.Repeat(page, 6)
+	medium := readTestdata(t, "testdata/reactcore_187KB.js")
+	small := readTestdata(t, "testdata/github_events_2k.json")
+	steps := []struct {
+		level, lgwin int
+		in           []byte
+		failingDst   bool
+	}{
+		{1, 24, large, false},
+		{0, 10, medium, false},
+		{1, 18, medium, true},
+		{0, 22, small, false},
+		{1, 18, medium, false},
+		{0, 24, large, false},
+		{1, 10, small, false},
+		{0, 16, medium, false},
+	}
+	var errs []error
+	for i, s := range steps {
+		var out bytes.Buffer
+		var dst io.Writer = &out
+		if s.failingDst {
+			dst = &limitedWriter{err: errors.New("destination rejected the stream")}
+		}
+		w, err := NewWriterOptions(dst, s.level, WriterOptions{LGWin: s.lgwin})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write(s.in); err != nil {
+			t.Fatal(err)
+		}
+		err = w.Close()
+		if s.failingDst {
+			if err == nil {
+				errs = append(errs, fmt.Errorf("step %d: Close into a failing destination returned nil", i))
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := creftest.BrotliCompress(t, s.in, s.level, s.lgwin, 0); !bytes.Equal(out.Bytes(), want) {
+			errs = append(errs, fmt.Errorf("step %d q%d lgwin=%d: Go wrote %d bytes, C %d; a pooled compressor "+
+				"hands the next Writer the previous stream's larger, dirty buffers, so Release must drop pending input "+
+				"and every fragment must rebuild its table and scratch before reading them",
+				i, s.level, s.lgwin, out.Len(), len(want)))
+		}
+	}
+	if err := errors.Join(errs...); err != nil {
+		t.Error(err)
 	}
 }
