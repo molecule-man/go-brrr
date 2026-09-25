@@ -87,7 +87,7 @@ func populationCost(histogram []uint32, dataSize int) float64 {
 			log2p := log2total - fastLog2(int(histogram[i]))
 			// Approximate bit depth by rounding.
 			depth := int(log2p + 0.5)
-			bits += float64(histogram[i]) * log2p
+			bits += float64(float64(histogram[i]) * log2p)
 			if depth > 15 {
 				depth = 15
 			}

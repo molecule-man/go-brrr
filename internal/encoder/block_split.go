@@ -351,10 +351,10 @@ func (bs *blockSplitter) combinedBitsEntropy(aStart, bStart int) float64 {
 	for i, va := range a {
 		p := int(va) + int(b[i])
 		sum += p
-		retval -= float64(p) * fastLog2(p)
+		retval -= float64(float64(p) * fastLog2(p))
 	}
 	if sum != 0 {
-		retval += float64(sum) * fastLog2(sum)
+		retval += float64(float64(sum) * fastLog2(sum))
 	}
 	if retval < float64(sum) {
 		retval = float64(sum)
