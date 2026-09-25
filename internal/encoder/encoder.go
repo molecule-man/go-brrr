@@ -54,30 +54,10 @@ type encoderArena struct {
 // grow-and-reuse semantics: grown on demand, never shrunk. After the first
 // metablock they typically never allocate again.
 type q10Bufs struct {
-	// splitByteVector scratch (reused across 3 calls per splitBlock).
-	svHistograms []uint32
-	svBlockIDs   []byte
-	svFloat      []float64 // combined: insertCost + cost
-	svSwitchSig  []byte
-	svNewID      []uint16
-
-	// clusterBlocks scratch.
-	cbHistSymbols   []uint32
-	cbAllHistograms []uint32
-	cbClusterSizes  []uint32
-	cbBatchHist     []uint32
-	cbPairs         []histogramPair
-	cbTmpHist       []uint32
-	cbBatchU32      []uint32 // combined: sizes + newClusters + symbols + remap (4×64)
-	cbBlockLengths  []uint32
-	cbBatchFloat    []float64 // combined: batchBitCosts + allBitCosts
-	cbBatchTotals   []uint32  // combined: batchTotals + allTotals
-	cbClusters      []uint32
-	cbNewIndex      []uint32
+	splitVecBufs
 
 	// splitBlock scratch.
 	sbLiteralBytes []byte
-	sbUint16       []uint16 // shared for literals, cmdPrefixes, distPrefixes
 
 	// buildMetaBlock scratch.
 	bmTmpHist      []uint32

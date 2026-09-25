@@ -345,10 +345,11 @@ func updateNodes(nodes []zopfliNode, ringbuffer []byte, startingDistCache []int,
 }
 
 // zopfliIterate runs the DP over pre-collected matches (Q11 path).
-func zopfliIterate(nodes []zopfliNode, ringbuffer []byte, distCache []int, model *zopfliCostModel, numMatches []uint32, matches []backwardMatch, numBytes, position, ringBufferMask, gap uint, compound *compoundDictionary, quality, lgwin int, feed *matchFeed) uint {
+func zopfliIterate(nodes []zopfliNode, ringbuffer []byte, distCache []int, model *zopfliCostModel, numMatches []uint32, matches []backwardMatch, numBytes, position, ringBufferMask, gap uint, compound *compoundDictionary, quality, lgwin int, feed *matchFeed, dpDict bool) uint {
 	maxBackwardLimit := (uint(1) << lgwin) - core.WindowGap
 	maxZopfli := maxZopfliLen(quality)
 	var queue startPosQueue
+	var dictScratch [h10MaxNumMatches + maxStaticDictMatchLen + 1]backwardMatch
 	curMatchPos := uint(0)
 
 	nodes[0].length = 0
@@ -358,9 +359,24 @@ func zopfliIterate(nodes []zopfliNode, ringbuffer []byte, distCache []int, model
 		if !feed.wait(i) {
 			return zopfliIterateAborted
 		}
+		cur := matches[curMatchPos:]
+		n := uint(numMatches[i])
+		if dpDict {
+			bestLen := uint(1)
+			if n > 0 {
+				bestLen = cur[n-1].matchLength()
+			}
+			pos := position + i
+			if numDict := staticDictBackwardMatches(ringbuffer, pos&ringBufferMask, bestLen, numBytes-i,
+				min(pos, maxBackwardLimit)+gap, dictScratch[h10MaxNumMatches:]); numDict > 0 {
+				cur = dictScratch[h10MaxNumMatches-n:]
+				copy(cur, matches[curMatchPos:curMatchPos+n])
+				n += uint(numDict)
+			}
+		}
 		skip := updateNodes(nodes, ringbuffer, distCache,
-			matches[curMatchPos:], model, &queue,
-			numBytes, position, i, ringBufferMask, maxBackwardLimit, gap, compound, uint(numMatches[i]), quality)
+			cur, model, &queue,
+			numBytes, position, i, ringBufferMask, maxBackwardLimit, gap, compound, n, quality)
 		if skip < longCopyQuickStep {
 			skip = 0
 		} else if quality < hqZopflificationQuality &&

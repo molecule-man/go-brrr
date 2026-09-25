@@ -61,6 +61,7 @@ type h10 struct {
 	windowMask uint32
 	invalidPos uint32
 	buckets    [h10BucketSize]uint32
+	skipDict   bool
 }
 
 func (h *h10) common() *hasherCommon {
@@ -383,6 +384,15 @@ func (h *h10) findAllMatches(
 	// Search the RFC 7932 static dictionary for matches at all lengths
 	// longer than the best LZ77 match found so far. Each length's best
 	// dictionary match is converted to a backwardMatch.
+	if !h.skipDict {
+		nMatches += staticDictBackwardMatches(data, curIxMasked, bestLen, maxLength, dictionaryDistance, matches[nMatches:])
+	}
+
+	return uint(nMatches)
+}
+
+func staticDictBackwardMatches(data []byte, curIxMasked, bestLen, maxLength, dictionaryDistance uint, matches []backwardMatch) int {
+	nMatches := 0
 	minLen := max(uint(4), bestLen+1)
 	maxLen := min(uint(maxStaticDictMatchLen), maxLength)
 	if minLen <= maxLen {
@@ -403,8 +413,7 @@ func (h *h10) findAllMatches(
 			}
 		}
 	}
-
-	return uint(nMatches)
+	return nMatches
 }
 
 // store records position ix in the binary tree without returning matches.
