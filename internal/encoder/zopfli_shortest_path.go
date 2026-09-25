@@ -23,6 +23,7 @@ func zopfliComputeShortestPath(numBytes, position uint, ringbuffer []byte, ringB
 	maxBackwardLimit := (uint(1) << lgwin) - core.WindowGap
 	maxZopfli := maxZopfliLen(quality)
 	var queue startPosQueue
+	var sc dcScratch
 	hasCompound := compound != nil && compound.numChunks > 0
 	// When compound dictionaries are present, LZ matches are written at an
 	// offset so that compound-dictionary matches can be placed before them
@@ -82,7 +83,7 @@ func zopfliComputeShortestPath(numBytes, position uint, ringbuffer []byte, ringB
 
 		skip := updateNodes(nodes, ringbuffer, distCache,
 			matches[:numFound], model, &queue,
-			numBytes, position, i, ringBufferMask, maxBackwardLimit, gap, compound, numFound, quality)
+			numBytes, position, i, ringBufferMask, maxBackwardLimit, gap, compound, numFound, quality, &sc)
 		if skip < longCopyQuickStep {
 			skip = 0
 		}

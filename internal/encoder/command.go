@@ -23,6 +23,7 @@ var combineLengthCodesBase = [3][3]uint16{
 
 var insertLenCodeLUT = initInsertLenCodeLUT()
 var copyLenCodeLUT = initCopyLenCodeLUT()
+var cmdCodeLUT = initCmdCodeLUT()
 
 // commandConfig holds the inputs for constructing a command from a LZ77 match.
 type commandConfig struct {
@@ -94,6 +95,17 @@ func initCopyLenCodeLUT() [134]uint16 {
 	var lut [134]uint16
 	for i := uint(2); i < uint(len(lut)); i++ {
 		lut[i] = getCopyLenCodeSlow(i)
+	}
+	return lut
+}
+
+func initCmdCodeLUT() [2][24][32]uint16 {
+	var lut [2][24][32]uint16
+	for insCode := range uint16(24) {
+		for copyCode := range uint16(24) {
+			lut[0][insCode][copyCode] = combineLengthCodes(insCode, copyCode, false)
+			lut[1][insCode][copyCode] = combineLengthCodes(insCode, copyCode, true)
+		}
 	}
 	return lut
 }
