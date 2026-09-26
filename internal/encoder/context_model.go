@@ -233,8 +233,8 @@ func shouldUseComplexStaticContextMap(
 	}
 
 	invTotal := 1.0 / float64(total)
-	entropy1 *= invTotal
-	entropy2 *= invTotal
+	entropy1 = float64(entropy1 * invTotal)
+	entropy2 = float64(entropy2 * invTotal)
 
 	// Heuristic: skip complex modeling if the contextualized entropy is still
 	// above 3.0 bits per 5-bit symbol (poorly compressible) or if the per-symbol
@@ -257,7 +257,7 @@ func estimateEntropy(population []uint32) float64 {
 	var result float64
 	for _, p := range population {
 		total += p
-		result += float64(p) * fastLog2(int(p))
+		result += float64(float64(p) * fastLog2(int(p)))
 	}
-	return float64(total)*fastLog2(int(total)) - result
+	return float64(float64(total)*fastLog2(int(total))) - result
 }

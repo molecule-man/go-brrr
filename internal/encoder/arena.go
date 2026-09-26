@@ -235,9 +235,9 @@ func (s *onePassArena) shouldMergeBlock(data []byte, length int, depths []byte) 
 	}
 
 	total := (length + sampleRate - 1) / sampleRate
-	r := (fastLog2(total)+0.5)*float64(total) + 200
+	r := float64((fastLog2(total)+0.5)*float64(total)) + 200
 	for i := range 256 {
-		r -= float64(histogram[i]) * (float64(depths[i]) + fastLog2(int(histogram[i])))
+		r -= float64(float64(histogram[i]) * (float64(depths[i]) + fastLog2(int(histogram[i]))))
 	}
 	return r >= 0.0
 }

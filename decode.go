@@ -52,6 +52,17 @@ var decodeStatePool = sync.Pool{
 // decodeState (including its ring buffer).
 var decRingBufPool sync.Pool
 
+var cmdLutPacked = packCmdLut()
+
+func packCmdLut() (t [core.AlphabetSizeInsertAndCopyLength]uint64) {
+	for i := range core.CmdLut {
+		e := &core.CmdLut[i]
+		t[i] = uint64(e.InsertLenExtraBits) | uint64(e.CopyLenExtraBits)<<8 | uint64(uint8(e.DistanceCode))<<16 |
+			uint64(e.Context)<<24 | uint64(e.InsertLenOffset)<<32 | uint64(e.CopyLenOffset)<<48
+	}
+	return t
+}
+
 func getDecRingBuf(size int) []byte {
 	if v := decRingBufPool.Get(); v != nil {
 		bp := v.(*[]byte)
@@ -1314,7 +1325,7 @@ func (s *decodeState) readSymbolCodeLengths(alphabetSize uint) decoderResult {
 
 		for symbol < alphabetSize && h.space > 0 {
 			// fillBitWindow inline
-			if bitPos <= 32 {
+			if bitPos < 32 {
 				if brPos > br.fastEnd {
 					break
 				}
@@ -1536,7 +1547,6 @@ func (s *decodeState) processCommands() decoderResult {
 	i := s.loopCounter
 	var cmdCode uint
 	var ok bool
-	var v core.CmdLutElement
 	var insertLenExtra uint64
 	var literal uint
 	var p1, p2 byte
@@ -1565,8 +1575,10 @@ commandBegin:
 
 	// Read command.
 	if br.checkInputAmount() {
-		br.fillBitWindow(16)
-		val := br.val
+		val, bitPos := br.val, br.bitPos
+		val |= *(*uint64)(unsafe.Add(br.inputBase, br.pos)) << (bitPos & 63)
+		br.pos += int((63 - bitPos) >> 3)
+		bitPos |= 56
 		// Inline command symbol decode with unsafe pointer arithmetic to
 		// avoid bounds checks on every command (same pattern as distanceSymbolEntryFast).
 		cmdTableBase := unsafe.Pointer(unsafe.SliceData(s.htreeCommand))
@@ -1582,43 +1594,38 @@ commandBegin:
 			cmdCode = uint(raw >> 16)
 		}
 
-		v = *(*core.CmdLutElement)(unsafe.Add(unsafe.Pointer(&core.CmdLut[0]), uintptr(cmdCode)*unsafe.Sizeof(core.CmdLutElement{})))
-		s.distanceCode = int(v.DistanceCode)
-		s.distanceContext = int(v.Context)
+		lut := *(*uint64)(unsafe.Add(unsafe.Pointer(&cmdLutPacked[0]), uintptr(cmdCode)*8))
+		s.distanceCode = int(int8(lut >> 16))
+		s.distanceContext = int(uint8(lut >> 24))
 		s.distCodesOffset = s.distCodesCache[s.distanceContext&3]
-		i = int(v.InsertLenOffset)
+		i = int(uint16(lut >> 32))
+		insertBits := uint(uint8(lut))
+		copyBits := uint(uint8(lut >> 8))
 
 		// Combined drop + readBits for insertLenExtra + copyLenExtra:
 		// use local val/bitPos to avoid redundant stores/loads of br.val
 		// and br.bitPos across intervening struct writes.
 		val >>= cmdDrop & 63
-		bitPos := br.bitPos - cmdDrop
+		bitPos -= cmdDrop
 
 		insertLenExtra = 0
-		if v.InsertLenExtraBits != 0 {
-			if bitPos < 56 {
-				val |= *(*uint64)(unsafe.Add(br.inputBase, br.pos)) << (bitPos & 63)
-				br.pos += int((63 - bitPos) >> 3)
-				bitPos |= 56
-			}
-			insertLenExtra = val & bitMask(uint(v.InsertLenExtraBits))
-			val >>= uint(v.InsertLenExtraBits) & 63
-			bitPos -= uint(v.InsertLenExtraBits)
+		if insertBits != 0 {
+			insertLenExtra = val & bitMask(insertBits)
+			val >>= insertBits & 63
+			bitPos -= insertBits
 		}
 
-		if bitPos < 56 {
-			val |= *(*uint64)(unsafe.Add(br.inputBase, br.pos)) << (bitPos & 63)
-			br.pos += int((63 - bitPos) >> 3)
-			bitPos |= 56
-		}
-		copyExtra := val & bitMask(uint(v.CopyLenExtraBits))
-		val >>= uint(v.CopyLenExtraBits) & 63
-		bitPos -= uint(v.CopyLenExtraBits)
+		val |= *(*uint64)(unsafe.Add(br.inputBase, br.pos)) << (bitPos & 63)
+		br.pos += int((63 - bitPos) >> 3)
+		bitPos |= 56
+		copyExtra := val & bitMask(copyBits)
+		val >>= copyBits & 63
+		bitPos -= copyBits
 
 		br.val = val
 		br.bitPos = bitPos
 
-		s.copyLength = int(v.CopyLenOffset) + int(copyExtra)
+		s.copyLength = int(lut>>48) + int(copyExtra)
 	} else {
 		cmdMemento := br.saveState()
 		cmdCode, ok = safeReadSymbol(s.htreeCommand, br)
@@ -1629,7 +1636,7 @@ commandBegin:
 		}
 		s.safeCmdMemento = cmdMemento
 
-		v = core.CmdLut[cmdCode]
+		v := core.CmdLut[cmdCode]
 		s.distanceCode = int(v.DistanceCode)
 		s.distanceContext = int(v.Context)
 		s.distCodesOffset = s.distCodesCache[s.distanceContext]
@@ -1847,8 +1854,10 @@ commandPostDecodeLiterals:
 		// Inlined fast path of readDistance to avoid function call overhead
 		// (readDistance exceeds the compiler's inlining budget).
 		if br.checkInputAmount() {
-			br.fillBitWindow(16)
-			val := br.val
+			val, bitPos := br.val, br.bitPos
+			val |= *(*uint64)(unsafe.Add(br.inputBase, br.pos)) << (bitPos & 63)
+			br.pos += int((63 - bitPos) >> 3)
+			bitPos |= 56
 			raw := distanceSymbolEntryFast(val, s.distanceHGroup.codes, s.distCodesOffset)
 			drop := uint(raw & 0xFF)
 			code := uint(raw >> 16)
@@ -1858,7 +1867,7 @@ commandPostDecodeLiterals:
 			// Combined dropBits + readBits32: use locals to avoid
 			// redundant stores/loads of br.val and br.bitPos.
 			val >>= drop & 63
-			bitPos := br.bitPos - drop
+			bitPos -= drop
 			s.blockLength[2]--
 			s.distanceContext = 0
 			if code&^0xF == 0 {
@@ -1870,11 +1879,6 @@ commandPostDecodeLiterals:
 				b := &s.bodyArena
 				nExtra := uint(*(*byte)(unsafe.Add(unsafe.Pointer(&b.distExtraBits[0]), uintptr(code))))
 				offset := *(*uint)(unsafe.Add(unsafe.Pointer(&b.distOffset[0]), uintptr(code)*unsafe.Sizeof(uint(0))))
-				if bitPos < 56 {
-					val |= *(*uint64)(unsafe.Add(br.inputBase, br.pos)) << (bitPos & 63)
-					br.pos += int((63 - bitPos) >> 3)
-					bitPos |= 56
-				}
 				bits := val & bitMask(nExtra)
 				br.val = val >> (nExtra & 63)
 				br.bitPos = bitPos - nExtra
@@ -2261,6 +2265,8 @@ func decodeLiteralsContextBatch(
 	// loop counter onto the stack — on x86-64 the shift in fillBitWindow
 	// requires CX, which would otherwise evict j every iteration.
 	dstPtr := unsafe.Pointer(unsafe.SliceData(dst))
+	ptrsBase := unsafe.Pointer(ptrs)
+	c1, c2 := uint(p1), uint(p2)
 
 	for n > 0 {
 		n--
@@ -2270,10 +2276,8 @@ func decodeLiteralsContextBatch(
 			bitPos |= 56
 		}
 
-		// Context lookup inline — contextLookup has 512 entries,
-		// p1 indexes [0..255], p2 indexes [256..511].
-		ctx := *(*byte)(unsafe.Add(ctxBase, int(p1))) | *(*byte)(unsafe.Add(ctxBase, 256+int(p2)))
-		tableBase := ptrs[ctx&63]
+		ctx := uint(*(*byte)(unsafe.Add(ctxBase, c1))) | uint(*(*byte)(unsafe.Add(ctxBase, 256+c2)))
+		tableBase := *(*unsafe.Pointer)(unsafe.Add(ptrsBase, uintptr(ctx)*unsafe.Sizeof(unsafe.Pointer(nil))))
 
 		// decodeSymbol inline
 		idx := val & huffmanTableMask
@@ -2291,16 +2295,16 @@ func decodeLiteralsContextBatch(
 		bitPos -= drop
 		val >>= drop & 63
 
-		p2 = p1
-		p1 = byte(value)
-		*(*byte)(dstPtr) = p1
+		c2 = c1
+		c1 = value
+		*(*byte)(dstPtr) = byte(value)
 		dstPtr = unsafe.Add(dstPtr, 1)
 	}
 
 	br.val = val
 	br.bitPos = bitPos
 	br.pos = brPos
-	return p1, p2
+	return byte(c1), byte(c2)
 }
 
 // safeDecodeSymbol is a fallback when fewer than 15 bits may be available.

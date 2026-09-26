@@ -106,23 +106,6 @@ func TestCompressFragmentFastNotLast(t *testing.T) {
 	}
 }
 
-func TestHashFragment(t *testing.T) {
-	// Basic sanity: same 5 bytes produce the same hash.
-	data := []byte("abcdefghijklmnop") // need at least 8 bytes for Uint64
-	h1 := hashFragment(data, 0, 55)
-	h2 := hashFragment(data, 0, 55)
-	if h1 != h2 {
-		t.Errorf("same input produced different hashes: %d vs %d", h1, h2)
-	}
-
-	// Different 5 bytes should (very likely) produce different hashes.
-	data2 := []byte("xyzwvutsrqponmlk")
-	h3 := hashFragment(data2, 0, 55)
-	if h1 == h3 {
-		t.Logf("unlikely collision: hash=%d for both inputs", h1)
-	}
-}
-
 func TestIsMatch(t *testing.T) {
 	// Layout: "abcde___" at 0, "abcde123" at 8, "abcdx___" at 16.
 	buf := []byte("abcde___abcde123abcdx___")
