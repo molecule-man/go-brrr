@@ -193,53 +193,7 @@ func findBlocks(
 	clear(cost[:numHistograms])
 	clear(switchSignal[:length*bitmapLen])
 
-	const prologueLength = 2000
-	const prologueMultiplier = 0.07 / 2000
-
-	for byteIx := range length {
-		ix := byteIx * bitmapLen
-		symbol := int(data[byteIx])
-		insertCostIx := symbol * numHistograms
-		switchCost := blockSwitchBitcost
-
-		if numHistograms < minHistogramsForKernel {
-			minCost := noMinCost
-			for k := range numHistograms {
-				cost[k] += insertCost[insertCostIx+k]
-				if cost[k] < minCost {
-					minCost = cost[k]
-					blockID[byteIx] = byte(k)
-				}
-			}
-
-			if byteIx < prologueLength {
-				switchCost *= 0.77 + float64(prologueMultiplier*float64(byteIx))
-			}
-
-			for k := range numHistograms {
-				cost[k] -= minCost
-				if cost[k] >= switchCost {
-					cost[k] = switchCost
-					switchSignal[ix+(k>>3)] |= 1 << (k & 7)
-				}
-			}
-
-			continue
-		}
-
-		// Reduce switch cost in the prologue to encourage early splits.
-		if byteIx < prologueLength {
-			switchCost *= 0.77 + float64(prologueMultiplier*float64(byteIx))
-		}
-
-		minCost, best := findBlocksStep(
-			cost[:numHistograms],
-			insertCost[insertCostIx:insertCostIx+numHistograms],
-			switchSignal[ix:], switchCost)
-		if minCost < noMinCost {
-			blockID[byteIx] = byte(best)
-		}
-	}
+	findBlocksDP(data[:length], insertCost, cost[:numHistograms], switchSignal, blockID, blockSwitchBitcost)
 
 	// Backtrace from the last position to determine block boundaries.
 	byteIx := length - 1

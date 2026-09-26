@@ -2,9 +2,6 @@
 
 package encoder
 
-// Function call overhead dominates below nine histograms.
-const minHistogramsForKernel = 9
-
 // findBlocksDPStep adds insertCost into cost and returns the minimum together
 // with the index of its first occurrence.
 //
@@ -41,3 +38,6 @@ func findBlocksClamp(cost []float64, sig []byte, minCost, switchCost float64)
 //
 //go:noescape
 func findBlocksStep(cost, insertCost []float64, sig []byte, switchCost float64) (minCost float64, best int)
+
+//go:noescape
+func findBlocksDP(data []uint16, insertCost, cost []float64, switchSignal, blockID []byte, blockSwitchBitcost float64)
