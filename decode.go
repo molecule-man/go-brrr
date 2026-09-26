@@ -2277,7 +2277,7 @@ func decodeLiteralsContextBatch(
 		}
 
 		ctx := uint(*(*byte)(unsafe.Add(ctxBase, c1))) | uint(*(*byte)(unsafe.Add(ctxBase, 256+c2)))
-		tableBase := *(*unsafe.Pointer)(unsafe.Add(ptrsBase, ctx*8))
+		tableBase := *(*unsafe.Pointer)(unsafe.Add(ptrsBase, uintptr(ctx)*unsafe.Sizeof(unsafe.Pointer(nil))))
 
 		// decodeSymbol inline
 		idx := val & huffmanTableMask
