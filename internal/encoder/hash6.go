@@ -8,7 +8,11 @@
 
 package encoder
 
-import "github.com/molecule-man/go-brrr/internal/core"
+import (
+	"unsafe"
+
+	"github.com/molecule-man/go-brrr/internal/core"
+)
 
 // H6 configuration constants for quality 5.
 const (
@@ -35,9 +39,8 @@ const h6HashMul uint64 = 0x7BD3579BD3000000
 // h6 is the H6 hasher: a forgetful hash table where each bucket holds a ring
 // buffer of up to h6BlockSize (16) positions.
 type h6 struct {
-	num        [h6BucketSize]uint16               // entry count per bucket
-	buckets    [h6BucketSize * h6BlockSize]uint32 // position ring buffers
-	nextBucket uint32                             // speculative load to warm cache
+	num     [h6BucketSize]uint16               // entry count per bucket
+	buckets [h6BucketSize * h6BlockSize]uint32 // position ring buffers
 	hasherCommon
 }
 
@@ -127,16 +130,8 @@ func (h *h6) findLongestMatch(
 	key := h.hash(data, curMasked)
 	bucket := h.buckets[uint(key)<<h6BlockBits:]
 
-	// Speculatively load from the next position's bucket to warm the cache.
-	// Placed early so phases 1-3 run while the prefetched data settles.
 	nextKey := h.hash(data, (cur+1)&ringBufferMask)
-	nextBase := uint(nextKey) << h6BlockBits
-	nextN := h.num[nextKey]
-	h.nextBucket = h.buckets[nextBase]
-	if nextN > 0 {
-		p := uint(h.buckets[nextBase+uint((nextN-1)&h6BlockMask)]) & ringBufferMask
-		h.nextBucket = uint32(data[p])
-	}
+	prefetch2(unsafe.Pointer(&h.num[nextKey]), unsafe.Pointer(&h.buckets[uint(nextKey)<<h6BlockBits]))
 
 	out.len = 0
 	out.lenCodeDelta = 0
@@ -302,16 +297,8 @@ func (h *h6) findLongestMatchSmallBuf(
 	key := h.hash(data, curMasked)
 	bucket := h.buckets[uint(key)<<h6BlockBits:]
 
-	// Speculatively load from the next position's bucket to warm the cache.
-	// Placed early so phases 1-3 run while the prefetched data settles.
 	nextKey := h.hash(data, (cur+1)&ringBufferMask)
-	nextBase := uint(nextKey) << h6BlockBits
-	nextN := h.num[nextKey]
-	h.nextBucket = h.buckets[nextBase]
-	if nextN > 0 {
-		p := uint(h.buckets[nextBase+uint((nextN-1)&h6BlockMask)]) & ringBufferMask
-		h.nextBucket = uint32(data[p])
-	}
+	prefetch2(unsafe.Pointer(&h.num[nextKey]), unsafe.Pointer(&h.buckets[uint(nextKey)<<h6BlockBits]))
 
 	out.len = 0
 	out.lenCodeDelta = 0

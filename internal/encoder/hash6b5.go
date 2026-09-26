@@ -38,9 +38,8 @@ const (
 // h6b5 is the H6 hasher with blockBits=5: a forgetful hash table where each
 // bucket holds a ring buffer of up to h6b5BlockSize (32) positions.
 type h6b5 struct {
-	num        [h6b5BucketSize]uint16                 // entry count per bucket
-	buckets    [h6b5BucketSize * h6b5BlockSize]uint32 // position ring buffers
-	nextBucket uint32                                 // speculative load to warm cache
+	num     [h6b5BucketSize]uint16                 // entry count per bucket
+	buckets [h6b5BucketSize * h6b5BlockSize]uint32 // position ring buffers
 	// everWrapped is sticky: false until any createBackwardReferences call
 	// has positions reaching or exceeding mask+1, after which the no-wrap
 	// fast path is disabled because stored bucket values may then encode
@@ -164,15 +163,11 @@ func (h *h6b5) findLongestMatch(
 	key := h.hash(data, curMasked)
 	bucket := h.bucketAt(key)
 
-	// Speculatively load from the next position's bucket to warm the cache.
 	nextKey := h.hash(data, (cur+1)&ringBufferMask)
 	nextBucket := h.bucketAt(nextKey)
 	nextN := h.num[nextKey]
-	h.nextBucket = nextBucket[0]
-	if nextN > 0 {
-		p := uint(nextBucket[(nextN-1)&h6b5BlockMask]) & ringBufferMask
-		h.nextBucket = uint32(data[p])
-	}
+	prefetch2(unsafe.Pointer(&nextBucket[(nextN-1)&h6b5BlockMask]),
+		unsafe.Pointer(&nextBucket[(nextN-17)&h6b5BlockMask]))
 
 	out.len = 0
 	out.lenCodeDelta = 0
@@ -330,15 +325,11 @@ func (h *h6b5) findLongestMatchSmallBuf(
 	key := h.hash(data, curMasked)
 	bucket := h.bucketAt(key)
 
-	// Speculatively load from the next position's bucket to warm the cache.
 	nextKey := h.hash(data, (cur+1)&ringBufferMask)
 	nextBucket := h.bucketAt(nextKey)
 	nextN := h.num[nextKey]
-	h.nextBucket = nextBucket[0]
-	if nextN > 0 {
-		p := uint(nextBucket[(nextN-1)&h6b5BlockMask]) & ringBufferMask
-		h.nextBucket = uint32(data[p])
-	}
+	prefetch2(unsafe.Pointer(&nextBucket[(nextN-1)&h6b5BlockMask]),
+		unsafe.Pointer(&nextBucket[(nextN-17)&h6b5BlockMask]))
 
 	out.len = 0
 	out.lenCodeDelta = 0
@@ -716,15 +707,11 @@ func (h *h6b5) findLongestMatchNoWrap(
 	key := h.hash(data, cur)
 	bucket := h.bucketAt(key)
 
-	// Speculatively load from the next position's bucket to warm the cache.
 	nextKey := h.hash(data, cur+1)
 	nextBucket := h.bucketAt(nextKey)
 	nextN := h.num[nextKey]
-	h.nextBucket = nextBucket[0]
-	if nextN > 0 {
-		p := uint(nextBucket[(nextN-1)&h6b5BlockMask])
-		h.nextBucket = uint32(data[p])
-	}
+	prefetch2(unsafe.Pointer(&nextBucket[(nextN-1)&h6b5BlockMask]),
+		unsafe.Pointer(&nextBucket[(nextN-17)&h6b5BlockMask]))
 
 	out.len = 0
 	out.lenCodeDelta = 0

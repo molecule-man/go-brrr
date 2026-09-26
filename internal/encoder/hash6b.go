@@ -52,9 +52,8 @@ type bucketRing struct{ base unsafe.Pointer }
 //
 //nolint:govet // fieldalignment counts B as pointer data; every B is [N]uint32
 type h6b[B h6bBlock] struct {
-	num        [h6bBucketSize]uint16 // entry count per bucket
-	buckets    [h6bBucketSize]B      // position ring buffers
-	nextBucket uint32                // speculative load to warm cache
+	num     [h6bBucketSize]uint16 // entry count per bucket
+	buckets [h6bBucketSize]B      // position ring buffers
 	hasherCommon
 }
 
@@ -165,15 +164,11 @@ func (h *h6b[B]) findLongestMatch(
 	bestLen := out.len
 	key := h6bHash(data, curMasked)
 
-	// Speculatively load from the next position's bucket to warm the cache.
 	nextKey := h6bHash(data, (cur+1)&ringBufferMask)
 	nextBucket := bucketRingAt(unsafe.Pointer(&h.buckets), nextKey, blockShift)
-	nextN := h.num[nextKey]
-	h.nextBucket = nextBucket.at(0)
-	if nextN > 0 {
-		p := uint(nextBucket.at(uint((nextN-1)&uint16(blockMask)))) & ringBufferMask
-		h.nextBucket = uint32(data[p])
-	}
+	nextN := uint(h.num[nextKey])
+	prefetch2(unsafe.Add(nextBucket.base, ((nextN-1)&blockMask)<<2),
+		unsafe.Add(nextBucket.base, ((nextN-17)&blockMask)<<2))
 
 	out.len = 0
 	out.lenCodeDelta = 0
@@ -451,15 +446,11 @@ func (h *h6b[B]) findLongestMatchSmallBuf(
 	bestLen := out.len
 	key := h6bHash(data, curMasked)
 
-	// Speculatively load from the next position's bucket to warm the cache.
 	nextKey := h6bHash(data, (cur+1)&ringBufferMask)
 	nextBucket := bucketRingAt(unsafe.Pointer(&h.buckets), nextKey, blockShift)
-	nextN := h.num[nextKey]
-	h.nextBucket = nextBucket.at(0)
-	if nextN > 0 {
-		p := uint(nextBucket.at(uint((nextN-1)&uint16(blockMask)))) & ringBufferMask
-		h.nextBucket = uint32(data[p])
-	}
+	nextN := uint(h.num[nextKey])
+	prefetch2(unsafe.Add(nextBucket.base, ((nextN-1)&blockMask)<<2),
+		unsafe.Add(nextBucket.base, ((nextN-17)&blockMask)<<2))
 
 	out.len = 0
 	out.lenCodeDelta = 0
