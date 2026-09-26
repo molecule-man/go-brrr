@@ -7,7 +7,11 @@
 
 package encoder
 
-import "github.com/molecule-man/go-brrr/internal/core"
+import (
+	"math/bits"
+
+	"github.com/molecule-man/go-brrr/internal/core"
+)
 
 // Zopfli quality parameters.
 const (
@@ -23,6 +27,8 @@ const (
 	// maxZopfliLenQ11 is the same threshold for Q11.
 	maxZopfliLenQ11 = 325
 
+	maxZopfliCandidatesQ11 = 5
+
 	// longCopyQuickStep: when a copy this long is found, skip detailed
 	// evaluation of the copied positions (they are unlikely to start
 	// new commands).
@@ -31,6 +37,18 @@ const (
 
 // posData holds a candidate starting position and its associated state,
 // used by startPosQueue to track the best insert-length candidates.
+var shortCodeLaneBits = func() (t [2][128]uint16) {
+	codes := [2][7]uint16{{9, 7, 5, 0, 4, 6, 8}, {15, 13, 11, 1, 10, 12, 14}}
+	for w := range t {
+		for m := range t[w] {
+			for k, j := range codes[w] {
+				t[w][m] |= uint16(m>>k&1) << j
+			}
+		}
+	}
+	return t
+}()
+
 type posData struct {
 	pos           uint
 	distanceCache [4]int
@@ -44,6 +62,20 @@ type posData struct {
 type startPosQueue struct {
 	q   [8]posData
 	idx uint
+}
+
+type dcHit struct {
+	backward, bestLen, length, j uint
+}
+
+type dcScan struct {
+	distanceCache [4]int
+	lo, hi        int
+}
+
+type dcScratch struct {
+	scans [maxZopfliCandidatesQ11]dcScan
+	hits  [maxZopfliCandidatesQ11 * core.NumDistanceShortCodes]dcHit
 }
 
 // size returns the number of entries in the queue (at most 8).
@@ -96,7 +128,7 @@ func maxZopfliCandidates(quality int) uint {
 	if quality <= 10 {
 		return 1
 	}
-	return 5
+	return maxZopfliCandidatesQ11
 }
 
 // computeDistanceShortcut determines which earlier node provides the
@@ -183,7 +215,7 @@ func computeMinimumCopyLength(nodes []zopfliNode, pos, numBytes uint, startCost 
 //  3. Updates nodes with better costs
 //
 // Returns the longest copy length found (used for skip-ahead).
-func updateNodes(nodes []zopfliNode, ringbuffer []byte, startingDistCache []int, matches []backwardMatch, model *zopfliCostModel, queue *startPosQueue, numBytes, blockStart, pos, ringBufferMask, maxBackwardLimit, gap uint, compound *compoundDictionary, numMatches uint, quality int) uint {
+func updateNodes(nodes []zopfliNode, ringbuffer []byte, startingDistCache []int, matches []backwardMatch, model *zopfliCostModel, queue *startPosQueue, numBytes, blockStart, pos, ringBufferMask, maxBackwardLimit, gap uint, compound *compoundDictionary, numMatches uint, quality int, sc *dcScratch) uint {
 	curIx := blockStart + pos
 	curIxMasked := curIx & ringBufferMask
 	maxDistance := min(curIx, maxBackwardLimit)
@@ -212,29 +244,38 @@ func updateNodes(nodes []zopfliNode, ringbuffer []byte, startingDistCache []int,
 	result := uint(0)
 
 	nodesAtPos := nodes[pos:]
+	numScans, numHits := 0, 0
+	var back [core.NumDistanceShortCodes]uint
 
 	for k := uint(0); k < maxIters && k < queue.size(); k++ {
 		pd := queue.at(k)
-		start := pd.pos
-		insCode := getInsertLenCode(pos - start)
+		insLen := pos - pd.pos
+		insCode := getInsertLenCode(insLen)
 		startCostdiff := pd.costdiff
 		baseCost := startCostdiff + float32(insertExtra[insCode]) +
 			model.getLiteralCosts(0, pos)
+		cmdCodes := &cmdCodeLUT[0][insCode]
 
-		// Phase 1: Distance cache matches. The 16 short-code candidates are
-		// distCache[0..3] plus offsets -3..3 around the first two entries
-		// (RFC 7932 Section 4), materialised once per start position.
 		dc := &pd.distanceCache
-		d0, d1 := dc[0], dc[1]
-		back := [core.NumDistanceShortCodes]uint{
-			uint(d0), uint(d1), uint(dc[2]), uint(dc[3]),
-			uint(d0 - 1), uint(d0 + 1), uint(d0 - 2), uint(d0 + 2), uint(d0 - 3), uint(d0 + 3),
-			uint(d1 - 1), uint(d1 + 1), uint(d1 - 2), uint(d1 + 2), uint(d1 - 3), uint(d1 + 3),
+		lo, hi := numHits, numHits
+		scanned := false
+		for i := range numScans {
+			if sc.scans[i].distanceCache == *dc {
+				lo, hi = sc.scans[i].lo, sc.scans[i].hi
+				scanned = true
+				break
+			}
 		}
 		bestLen := minLen - 1
-		if curIxMasked+bestLen <= ringBufferMask {
+		if !scanned && curIxMasked+bestLen <= ringBufferMask {
+			d0, d1 := dc[0], dc[1]
+			back[0], back[1], back[2], back[3] = uint(d0), uint(d1), uint(dc[2]), uint(dc[3])
+			back[4], back[5], back[6], back[7], back[8], back[9] = uint(d0-1), uint(d0+1), uint(d0-2), uint(d0+2), uint(d0-3), uint(d0+3)
+			back[10], back[11], back[12], back[13], back[14], back[15] = uint(d1-1), uint(d1+1), uint(d1-2), uint(d1+2), uint(d1-3), uint(d1+3)
 			continuation := ringbuffer[curIxMasked+bestLen]
-			for j := uint(0); j < core.NumDistanceShortCodes && bestLen < maxLen; j++ {
+			cand := shortCodeCandidates(ringbuffer, curIxMasked, bestLen, ringBufferMask, maxDistance, dc, continuation)
+			for ; cand != 0 && bestLen < maxLen; cand &= cand - 1 {
+				j := uint(bits.TrailingZeros16(cand))
 				backward := back[j]
 				if backward == 0 || backward > maxDistanceGap {
 					continue
@@ -273,29 +314,42 @@ func updateNodes(nodes []zopfliNode, ringbuffer []byte, startingDistCache []int,
 					continue
 				}
 
-				distCost := baseCost + model.distanceCost(j)
-				_ = nodesAtPos[length] // BCE: l ≤ length
-				for l := bestLen + 1; l <= length; l++ {
-					copyCode := getCopyLenCode(l)
-					cmdCode := combineLengthCodes(insCode, copyCode, j == 0)
-					cost := baseCost
-					if cmdCode >= 128 {
-						cost = distCost
-					}
-					cost = (cost + float32(copyExtra[copyCode])) + model.commandCost(cmdCode)
-					if cost < nodesAtPos[l].cost() {
-						updateZopfliNode(nodes, pos, start, l, l, backward, j+1, cost)
-						if l > result {
-							result = l
-						}
-					}
-				}
 				if length > bestLen {
+					sc.hits[numHits] = dcHit{backward, bestLen, length, j}
+					numHits++
 					bestLen = length
 					if curIxMasked+bestLen > ringBufferMask {
 						break
 					}
 					continuation = ringbuffer[curIxMasked+bestLen]
+				}
+			}
+			hi = numHits
+			if maxIters > 1 {
+				sc.scans[numScans] = dcScan{*dc, lo, hi}
+				numScans++
+			}
+		}
+		for _, hit := range sc.hits[lo:hi] {
+			distCost := baseCost + model.distanceCost(hit.j)
+			jCmdCodes := cmdCodes
+			if hit.j == 0 {
+				jCmdCodes = &cmdCodeLUT[1][insCode]
+			}
+			_ = nodesAtPos[hit.length]
+			for l := hit.bestLen + 1; l <= hit.length; l++ {
+				copyCode := getCopyLenCode(l)
+				cmdCode := jCmdCodes[copyCode&31]
+				cost := baseCost
+				if cmdCode >= 128 {
+					cost = distCost
+				}
+				cost = (cost + copyExtra[copyCode]) + model.commandCost(cmdCode)
+				if cost < nodesAtPos[l].cost() {
+					updateZopfliNode(&nodesAtPos[l], insLen, l, l, hit.backward, hit.j+1, cost)
+					if l > result {
+						result = l
+					}
 				}
 			}
 		}
@@ -322,17 +376,30 @@ func updateNodes(nodes []zopfliNode, ringbuffer []byte, startingDistCache []int,
 				matchLen = maxMatchLen
 			}
 			_ = nodesAtPos[maxMatchLen] // BCE: matchLen ≤ maxMatchLen
-			for ; matchLen <= maxMatchLen; matchLen++ {
-				lenCode := matchLen
-				if isDictionaryMatch {
-					lenCode = match.matchLengthCode()
+			if isDictionaryMatch {
+				if matchLen <= maxMatchLen {
+					lenCode := match.matchLengthCode()
+					copyCode := getCopyLenCode(lenCode)
+					cmdCode := cmdCodes[copyCode&31]
+					cost := distCost + copyExtra[copyCode] +
+						model.commandCost(cmdCode)
+					if cost < nodesAtPos[matchLen].cost() {
+						updateZopfliNode(&nodesAtPos[matchLen], insLen, matchLen, lenCode, dist, 0, cost)
+						if matchLen > result {
+							result = matchLen
+						}
+					}
+					matchLen++
 				}
-				copyCode := getCopyLenCode(lenCode)
-				cmdCode := combineLengthCodes(insCode, copyCode, false)
-				cost := distCost + float32(copyExtra[copyCode]) +
+				continue
+			}
+			for ; matchLen <= maxMatchLen; matchLen++ {
+				copyCode := getCopyLenCode(matchLen)
+				cmdCode := cmdCodes[copyCode&31]
+				cost := distCost + copyExtra[copyCode] +
 					model.commandCost(cmdCode)
 				if cost < nodesAtPos[matchLen].cost() {
-					updateZopfliNode(nodes, pos, start, matchLen, lenCode, dist, 0, cost)
+					updateZopfliNode(&nodesAtPos[matchLen], insLen, matchLen, matchLen, dist, 0, cost)
 					if matchLen > result {
 						result = matchLen
 					}
@@ -344,11 +411,40 @@ func updateNodes(nodes []zopfliNode, ringbuffer []byte, startingDistCache []int,
 	return result
 }
 
+func shortCodeCandidates(ringbuffer []byte, curIxMasked, bestLen, ringBufferMask, maxDistance uint, dc *[4]int, continuation byte) uint16 {
+	d0, d1, d2, d3 := dc[0], dc[1], dc[2], dc[3]
+	md := int(maxDistance)
+	if d0 < 4 || d0 > md-3 || d1 < 4 || d1 > md-3 || d2 < 1 || d2 > md || d3 < 1 || d3 > md {
+		return 0xFFFF
+	}
+	w0 := (curIxMasked - uint(d0) - 4) & ringBufferMask
+	w1 := (curIxMasked - uint(d1) - 4) & ringBufferMask
+	if max(w0, w1)+bestLen+7 > ringBufferMask {
+		return 0xFFFF
+	}
+	c := uint64(continuation) * 0x0101010101010101
+	cand := shortCodeLaneBits[0][equalLanes(loadU64LE(ringbuffer, w0+bestLen)^c)] |
+		shortCodeLaneBits[1][equalLanes(loadU64LE(ringbuffer, w1+bestLen)^c)]
+	if p := (curIxMasked-uint(d2))&ringBufferMask + bestLen; p <= ringBufferMask && ringbuffer[p] == continuation {
+		cand |= 1 << 2
+	}
+	if p := (curIxMasked-uint(d3))&ringBufferMask + bestLen; p <= ringBufferMask && ringbuffer[p] == continuation {
+		cand |= 1 << 3
+	}
+	return cand
+}
+
+func equalLanes(x uint64) uint {
+	z := ^((x&0x7F7F7F7F7F7F7F7F + 0x7F7F7F7F7F7F7F7F) | x) & 0x8080808080808080
+	return uint((z >> 7) * 0x0102040810204080 >> 57)
+}
+
 // zopfliIterate runs the DP over pre-collected matches (Q11 path).
 func zopfliIterate(nodes []zopfliNode, ringbuffer []byte, distCache []int, model *zopfliCostModel, numMatches []uint32, matches []backwardMatch, numBytes, position, ringBufferMask, gap uint, compound *compoundDictionary, quality, lgwin int, feed *matchFeed) uint {
 	maxBackwardLimit := (uint(1) << lgwin) - core.WindowGap
 	maxZopfli := maxZopfliLen(quality)
 	var queue startPosQueue
+	var sc dcScratch
 	curMatchPos := uint(0)
 
 	nodes[0].length = 0
@@ -360,7 +456,7 @@ func zopfliIterate(nodes []zopfliNode, ringbuffer []byte, distCache []int, model
 		}
 		skip := updateNodes(nodes, ringbuffer, distCache,
 			matches[curMatchPos:], model, &queue,
-			numBytes, position, i, ringBufferMask, maxBackwardLimit, gap, compound, uint(numMatches[i]), quality)
+			numBytes, position, i, ringBufferMask, maxBackwardLimit, gap, compound, uint(numMatches[i]), quality, &sc)
 		if skip < longCopyQuickStep {
 			skip = 0
 		} else if quality < hqZopflificationQuality &&
