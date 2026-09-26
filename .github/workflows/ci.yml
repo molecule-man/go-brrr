@@ -60,3 +60,44 @@ jobs:
         env:
           GOAMD64: ${{ matrix.goamd64 }}
         run: go test -tags '${{ matrix.tags }}' ./...
+
+  test-arch:
+    runs-on: ${{ matrix.runner }}
+    env:
+      GOTOOLCHAIN: local
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goarch: "386"
+            runner: ubuntu-latest
+            cflags: -m32 -msse2 -mfpmath=sse
+            parallel: 1
+          - goarch: arm64
+            runner: ubuntu-24.04-arm
+            cflags: ""
+            parallel: 4
+    name: test (${{ matrix.goarch }})
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install 32-bit C toolchain
+        if: matrix.goarch == '386'
+        run: sudo apt-get update && sudo apt-get install -y gcc-multilib
+
+      - name: Build C reference static library
+        env:
+          CFLAGS: ${{ matrix.cflags }}
+        run: make lib/libbrotli_cref.a
+
+      - name: Test
+        env:
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "1"
+        run: go test -parallel ${{ matrix.parallel }} ./...
