@@ -517,9 +517,7 @@ func (h *h40) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32)
 				s.distCache[0] = sr.distance
 			}
 
-			s.commands = append(s.commands, newCommandSimpleDist(
-				insertLength, sr.len, sr.lenCodeDelta, distanceCode,
-			))
+			s.pushCommandSimpleDist(insertLength, sr.len, sr.lenCodeDelta, distanceCode)
 			s.numLiterals += insertLength
 			insertLength = 0
 
