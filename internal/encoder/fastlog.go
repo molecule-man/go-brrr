@@ -113,10 +113,10 @@ func bitsEntropy(population []uint32) float64 {
 	var retval float64
 	for _, p := range population {
 		sum += int(p)
-		retval -= float64(p) * fastLog2(int(p))
+		retval -= float64(float64(p) * fastLog2(int(p)))
 	}
 	if sum != 0 {
-		retval += float64(sum) * fastLog2(sum)
+		retval += float64(float64(sum) * fastLog2(sum))
 	}
 	if retval < float64(sum) {
 		retval = float64(sum)
