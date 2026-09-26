@@ -1227,7 +1227,7 @@ func (e *encoderSplit) writeMetaBlockSplit(length int, isLast bool) {
 	}
 
 	buildMetaBlockGreedy(s.data, startPos, uint(s.mask), s.prevByte, s.prevByte2,
-		numContexts, staticContextMap, s.commands, &e.splitBufs, &e.mb)
+		numContexts, staticContextMap, s.commands, int(s.numLiterals), &e.splitBufs, &e.mb)
 	optimizeHistograms(&e.mb, int(s.distAlphabetSizeMax), &e.goodForRLE)
 	e.writeMetaBlock(length, isLast, core.ContextUTF8, &e.mb, e.tree[:])
 }
