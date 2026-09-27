@@ -127,13 +127,13 @@ func (s *encodeState) pushCommandSimpleDist(insertLen, copyLen uint, copyLenDelt
 }
 
 func (s *encodeState) appendCommand(insertLen, copyLen, distExtra uint32, cmdPrefix, distPrefix uint16) {
-	s.commands = append(s.commands, command{})
-	c := &s.commands[len(s.commands)-1]
-	c.insertLen = insertLen
-	c.copyLen = copyLen
-	c.distExtra = distExtra
-	c.cmdPrefix = cmdPrefix
-	c.distPrefix = distPrefix
+	s.commands = append(s.commands, command{
+		insertLen:  insertLen,
+		copyLen:    copyLen,
+		distExtra:  distExtra,
+		cmdPrefix:  cmdPrefix,
+		distPrefix: distPrefix,
+	})
 }
 
 // newInsertCommand creates a command that contains only literal insertions
