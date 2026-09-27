@@ -116,24 +116,24 @@ func newCommand(cfg commandConfig) command {
 	}
 }
 
-// newCommandSimpleDist is a specialization of newCommand for the common case
-// where numDirectCodes=0 and postfixBits=0 (the default distance parameters).
-// This allows prefixEncodeSimpleDistance to be inlined, avoiding the more
-// expensive prefixEncodeCopyDistance call.
-func newCommandSimpleDist(insertLen, copyLen uint, copyLenDelta int, distanceCode uint) command {
+func (s *encodeState) pushCommandSimpleDist(insertLen, copyLen uint, copyLenDelta int, distanceCode uint) {
 	delta := uint32(uint8(int8(copyLenDelta)))
 	distPrefix, distExtra := prefixEncodeSimpleDistance(distanceCode)
 	effectiveCopyLen := uint(int(copyLen) + copyLenDelta)
 	insCode := getInsertLenCode(insertLen)
 	copyCode := getCopyLenCode(effectiveCopyLen)
 	cmdPrefix := combineLengthCodes(insCode, copyCode, (distPrefix&0x3FF) == 0)
-	return command{
-		insertLen:  uint32(insertLen),
-		copyLen:    uint32(copyLen) | (delta << 25),
+	s.appendCommand(uint32(insertLen), uint32(copyLen)|(delta<<25), distExtra, cmdPrefix, distPrefix)
+}
+
+func (s *encodeState) appendCommand(insertLen, copyLen, distExtra uint32, cmdPrefix, distPrefix uint16) {
+	s.commands = append(s.commands, command{
+		insertLen:  insertLen,
+		copyLen:    copyLen,
 		distExtra:  distExtra,
 		cmdPrefix:  cmdPrefix,
 		distPrefix: distPrefix,
-	}
+	})
 }
 
 // newInsertCommand creates a command that contains only literal insertions
