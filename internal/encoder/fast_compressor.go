@@ -10,8 +10,6 @@ import (
 	"sync"
 )
 
-const maxPooledFastInputBuffer = 64 << 10
-
 var (
 	errFastCompoundDict = errors.New("brrr: compound dictionaries require quality >= 2")
 
@@ -19,10 +17,6 @@ var (
 	poolTwoPassArena = sync.Pool{New: func() any { return new(twoPassArena) }}
 
 	poolFastCompressor = sync.Pool{New: func() any { return new(fastCompressor) }}
-	poolFastOutBuf     sync.Pool
-	poolFastTable32    sync.Pool
-	poolFastCommands   sync.Pool
-	poolFastLiterals   sync.Pool
 )
 
 // fastCompressor implements Compressor for q0 and q1. Input is compressed
@@ -156,19 +150,7 @@ func (c *fastCompressor) Release() {
 		poolTwoPassArena.Put(c.twoPass)
 		c.twoPass = nil
 	}
-	putFastByteBuffer(&poolFastOutBuf, c.outBuf)
-	c.outBuf = nil
-	putFastUint32Slice(c.table)
-	c.table = nil
-	putFastCommandBuffer(c.commandBuf)
-	c.commandBuf = nil
-	putFastByteBuffer(&poolFastLiterals, c.literalBuf)
-	c.literalBuf = nil
-	if cap(c.buf) > maxPooledFastInputBuffer {
-		c.buf = nil
-	} else {
-		c.buf = c.buf[:0]
-	}
+	c.buf = c.buf[:0]
 	c.carry = 0
 	c.carryBits = 0
 	c.quality = 0
@@ -186,7 +168,7 @@ func (c *fastCompressor) emitFragment(dst io.Writer, block []byte, isLast bool) 
 	// Worst case output: uncompressed meta-block = header + data + padding.
 	needed := len(block)*2 + 1024
 	if len(c.outBuf) < needed {
-		c.outBuf = getFastByteBuffer(&poolFastOutBuf, needed)
+		c.outBuf = make([]byte, needed)
 	}
 	c.outBuf[0] = c.carry
 	b := bitWriter{buf: c.outBuf, bitOffset: c.carryBits}
@@ -210,7 +192,7 @@ func (c *fastCompressor) emitFragment(dst io.Writer, block []byte, isLast bool) 
 			table = smallTable32[:htsize]
 		} else {
 			if len(c.table) < htsize {
-				c.table = getFastUint32Slice(htsize)
+				c.table = make([]uint32, htsize)
 			}
 			table = c.table[:htsize]
 		}
@@ -219,13 +201,13 @@ func (c *fastCompressor) emitFragment(dst io.Writer, block []byte, isLast bool) 
 	case 1:
 		bufSize := min(len(block), twoPassBlockSize)
 		if len(c.commandBuf) < bufSize {
-			c.commandBuf = getFastCommandBuffer(bufSize)
+			c.commandBuf = make([]uint32, bufSize)
 		}
 		if len(c.literalBuf) < bufSize {
-			c.literalBuf = getFastByteBuffer(&poolFastLiterals, bufSize)
+			c.literalBuf = make([]byte, bufSize)
 		}
 		if len(c.table) < htsize {
-			c.table = getFastUint32Slice(htsize)
+			c.table = make([]uint32, htsize)
 		}
 		table := c.table[:htsize]
 		clear(table)
@@ -287,58 +269,4 @@ func fastHashTableSize(quality, blockSize int) int {
 		htsize <<= 1
 	}
 	return htsize
-}
-
-// Pool helpers shared by fast paths. Pools live next to the Compressor that
-// uses them.
-
-func getFastByteBuffer(pool *sync.Pool, n int) []byte {
-	if v := pool.Get(); v != nil {
-		buf := *v.(*[]byte)
-		if cap(buf) >= n {
-			return buf[:n]
-		}
-	}
-	return make([]byte, n)
-}
-
-func putFastByteBuffer(pool *sync.Pool, buf []byte) {
-	if cap(buf) != 0 {
-		buf = buf[:0]
-		pool.Put(&buf)
-	}
-}
-
-func getFastUint32Slice(n int) []uint32 {
-	if v := poolFastTable32.Get(); v != nil {
-		buf := *v.(*[]uint32)
-		if cap(buf) >= n {
-			return buf[:n]
-		}
-	}
-	return make([]uint32, n)
-}
-
-func putFastUint32Slice(buf []uint32) {
-	if cap(buf) != 0 {
-		buf = buf[:0]
-		poolFastTable32.Put(&buf)
-	}
-}
-
-func getFastCommandBuffer(n int) []uint32 {
-	if v := poolFastCommands.Get(); v != nil {
-		buf := *v.(*[]uint32)
-		if cap(buf) >= n {
-			return buf[:n]
-		}
-	}
-	return make([]uint32, n)
-}
-
-func putFastCommandBuffer(buf []uint32) {
-	if cap(buf) != 0 {
-		buf = buf[:0]
-		poolFastCommands.Put(&buf)
-	}
 }

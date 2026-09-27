@@ -404,18 +404,30 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 					lastDistance = distance
 				}
 				cmdPos += encodeCopyLenLastDistance(commands[cmdPos:], uint(matched), cmdHisto)
+			}
 
+			// Try to find another match immediately.
+			for {
 				nextEmit = ip
 				if ip >= ipLimit {
 					goto encodeRemainder
 				}
 
-				candidate = c.updateHashTableTwoPass6(input, table, ip, shift)
-			}
+				tbl := unsafe.Pointer(unsafe.SliceData(table))
+				lo := loadU64LE(input, uint(ip-5))
+				hi := loadU64LE(input, uint(ip-2))
+				*(*uint32)(unsafe.Add(tbl, uintptr(hashBytesAtOffsetTwoPass6(lo, 0, shift))*4)) = uint32(ip - 5)
+				*(*uint32)(unsafe.Add(tbl, uintptr(hashBytesAtOffsetTwoPass6(lo, 1, shift))*4)) = uint32(ip - 4)
+				*(*uint32)(unsafe.Add(tbl, uintptr(hashBytesAtOffsetTwoPass6(lo, 2, shift))*4)) = uint32(ip - 3)
+				*(*uint32)(unsafe.Add(tbl, uintptr(hashBytesAtOffsetTwoPass6(hi, 0, shift))*4)) = uint32(ip - 2)
+				*(*uint32)(unsafe.Add(tbl, uintptr(hashBytesAtOffsetTwoPass6(hi, 1, shift))*4)) = uint32(ip - 1)
+				curPtr := (*uint32)(unsafe.Add(tbl, uintptr(hashBytesAtOffsetTwoPass6(hi, 2, shift))*4))
+				candidate = int(*curPtr)
+				*curPtr = uint32(ip)
+				if ip-candidate > maxDistance || (loadU64LE(input, uint(candidate))^(hi>>16))<<16 != 0 {
+					break
+				}
 
-			// Try to find another match immediately.
-			for ip-candidate <= maxDistance &&
-				isMatchTwoPass6At(input, uint(ip), uint(candidate)) {
 				base := ip
 				matched := minMatch + matchLenAt(
 					input, uint(candidate+minMatch), uint(ip+minMatch), ipEnd-ip-minMatch)
@@ -445,13 +457,6 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 				cmdPos++
 
 				cmdPos += encodeDistance(commands[cmdPos:], uint(lastDistance), cmdHisto)
-
-				nextEmit = ip
-				if ip >= ipLimit {
-					goto encodeRemainder
-				}
-
-				candidate = c.updateHashTableTwoPass6(input, table, ip, shift)
 			}
 
 			ip++
@@ -503,26 +508,6 @@ func (c *twoPassCompressor) updateHashTableTwoPass(input []byte, table []uint32,
 		prevHash = hashBytesAtOffsetTwoPass(inputBytes, 1, shift, minMatch)
 		table[prevHash] = uint32(ip - 1)
 	}
-
-	candidate := int(table[curHash])
-	table[curHash] = uint32(ip)
-	return candidate
-}
-
-func (c *twoPassCompressor) updateHashTableTwoPass6(input []byte, table []uint32, ip int, shift uint) int {
-	inputBytes := loadU64LE(input, uint(ip-5))
-	prevHash := hashBytesAtOffsetTwoPass6(inputBytes, 0, shift)
-	table[prevHash] = uint32(ip - 5)
-	prevHash = hashBytesAtOffsetTwoPass6(inputBytes, 1, shift)
-	table[prevHash] = uint32(ip - 4)
-	prevHash = hashBytesAtOffsetTwoPass6(inputBytes, 2, shift)
-	table[prevHash] = uint32(ip - 3)
-	inputBytes = loadU64LE(input, uint(ip-2))
-	curHash := hashBytesAtOffsetTwoPass6(inputBytes, 2, shift)
-	prevHash = hashBytesAtOffsetTwoPass6(inputBytes, 0, shift)
-	table[prevHash] = uint32(ip - 2)
-	prevHash = hashBytesAtOffsetTwoPass6(inputBytes, 1, shift)
-	table[prevHash] = uint32(ip - 1)
 
 	candidate := int(table[curHash])
 	table[curHash] = uint32(ip)
@@ -698,13 +683,6 @@ func hashBytesAtOffsetTwoPass6(v uint64, offset, shift uint) uint32 {
 // call site in the inner scan loop.
 func isMatchTwoPass4At(input []byte, a, b uint) bool {
 	return loadU32LE(input, a) == loadU32LE(input, b)
-}
-
-// isMatchTwoPass6At compares 6 bytes of input at positions a and b. Taking
-// the raw byte slice and indices avoids the sub-slice bounds check at the
-// call site in the inner scan loop.
-func isMatchTwoPass6At(input []byte, a, b uint) bool {
-	return (loadU64LE(input, a)^loadU64LE(input, b))<<16 == 0
 }
 
 // encodeInsertLen encodes an insert length command into commands and returns

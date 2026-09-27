@@ -167,7 +167,7 @@ func estimateBitCostsForLiteralsUTF8(data []byte, pos, length, mask uint, histog
 		const prologueLength = 2000
 		const multiplier = 0.35 / prologueLength
 		if i < prologueLength {
-			litCost += 0.35 + multiplier*float64(i)
+			litCost += 0.35 + float64(multiplier*float64(i))
 		}
 		cost[i] = float32(litCost)
 	}
