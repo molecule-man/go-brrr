@@ -240,7 +240,7 @@ func compareZopfliNodes(what string, got, want uint, after, before []zopfliNode)
 
 // zopfliIterateLZOnly prices only the collected matches, the same input as zopfliIterateBefore.
 func zopfliIterateLZOnly(nodes []zopfliNode, ringbuffer []byte, distCache []int, model *zopfliCostModel, numMatches []uint32, matches []backwardMatch, numBytes, position, ringBufferMask, gap uint, compound *compoundDictionary, quality, lgwin int, feed *matchFeed) uint {
-	return zopfliIterate(nodes, ringbuffer, distCache, model, numMatches, matches, numBytes, position, ringBufferMask, gap, compound, quality, lgwin, feed, false)
+	return zopfliIterate(nodes, ringbuffer, distCache, model, numMatches, matches, numBytes, position, ringBufferMask, gap, compound, quality, lgwin, feed, nil)
 }
 
 func zopfliIterateBothWays(s *encodeState, distCache []int, model *zopfliCostModel, numMatches []uint32, matches []backwardMatch, position, numBytes uint) ([]zopfliNode, uint, error) {
@@ -249,7 +249,7 @@ func zopfliIterateBothWays(s *encodeState, distCache []int, model *zopfliCostMod
 	initZopfliNodes(after)
 	initZopfliNodes(before)
 	mask, gap := uint(s.mask), s.compound.totalSize
-	got := zopfliIterate(after, s.data, distCache, model, numMatches, matches, numBytes, position, mask, gap, &s.compound, s.quality, s.lgwin, nil, false)
+	got := zopfliIterate(after, s.data, distCache, model, numMatches, matches, numBytes, position, mask, gap, &s.compound, s.quality, s.lgwin, nil, nil)
 	want := zopfliIterateBefore(before, s.data, distCache, model, numMatches, matches, numBytes, position, mask, gap, &s.compound, s.quality, s.lgwin, nil)
 	return after, got, compareZopfliNodes("zopfliIterate", got, want, after, before)
 }
@@ -570,7 +570,7 @@ func compareZopfliPassesWithPreChangeCopy(ringbuffer []byte, ringBufferMask uint
 		initZopfliNodes(nodesAfter)
 		initZopfliNodes(nodesBefore)
 		after := zopfliIterate(nodesAfter, ringbuffer, blk.distCache[:], &model, blk.numMatches, blk.matches,
-			blk.numBytes, blk.position, ringBufferMask, 0, nil, quality, lgwin, nil, false)
+			blk.numBytes, blk.position, ringBufferMask, 0, nil, quality, lgwin, nil, nil)
 		before := zopfliIterateBefore(nodesBefore, ringbuffer, blk.distCache[:], &model, blk.numMatches, blk.matches,
 			blk.numBytes, blk.position, ringBufferMask, 0, nil, quality, lgwin, nil)
 		if after != before {

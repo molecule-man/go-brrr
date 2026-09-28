@@ -47,9 +47,8 @@ const (
 // Quality threshold: qualities below this use 3 iterations, at or above use 10.
 const hqZopflificationQuality = 11
 
-// splitOffloadMinCommands is the smallest command count for which splitBlock
-// hands the command and distance splits to the collector. Below it the
-// handoff costs more than the split.
+// Below splitOffloadMinCommands, the collector handoff costs more than the
+// command and distance splits.
 const splitOffloadMinCommands = 512
 
 // noMinCost is findBlocks' sentinel starting cost, larger than any real one.
