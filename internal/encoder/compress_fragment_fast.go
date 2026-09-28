@@ -135,7 +135,7 @@ func (c *fragmentCompressor) writeCommands() {
 	// Initialize the command and distance histograms.
 	c.arena.cmdHisto = cmdHistoSeed
 	input := c.input
-	table := c.table
+	tbl := unsafe.Pointer(unsafe.SliceData(c.table))
 	ip := c.pos
 	shift := c.shift
 	lastDistance := -1
@@ -152,7 +152,8 @@ func (c *fragmentCompressor) writeCommands() {
 	ipLimit := c.pos + lenLimit
 
 	ip++
-	nextHash := hashFragment(input, uint(ip), shift)
+	nextLoad := loadU64LE(input, uint(ip))
+	nextHash := hashBytesAtOffset(nextLoad, 0, shift)
 
 	for {
 		// Step 1: Scan forward in the input looking for a 5-byte-long match.
@@ -162,7 +163,8 @@ func (c *fragmentCompressor) writeCommands() {
 		var candidate int
 
 		for {
-			hash := nextHash
+			slot := (*uint32)(unsafe.Add(tbl, uintptr(nextHash)*4))
+			ipBytes := nextLoad
 			bytesBetweenHashLookups := skip >> 5
 			skip++
 			ip = nextIP
@@ -171,24 +173,25 @@ func (c *fragmentCompressor) writeCommands() {
 				c.writeRemainder()
 				return
 			}
-			nextHash = hashFragment(input, uint(nextIP), shift)
+			nextLoad = loadU64LE(input, uint(nextIP))
+			nextHash = hashBytesAtOffset(nextLoad, 0, shift)
 
 			candidate = ip - lastDistance
 			// uint(candidate) < uint(ip) folds the two-step `candidate >= 0 &&
 			// candidate < ip` validity check into a single unsigned compare:
 			// when candidate is negative (initial state) its unsigned form is
 			// larger than uint(ip), so the compare fails.
-			if uint(candidate) < uint(ip) && isMatch(input, uint(ip), uint(candidate)) {
-				table[hash] = uint32(ip)
+			if uint(candidate) < uint(ip) && (loadU64LE(input, uint(candidate))^ipBytes)<<24 == 0 {
+				*slot = uint32(ip)
 				if ip-candidate <= maxDistance {
 					break
 				}
 				continue
 			}
 
-			candidate = int(table[hash])
-			table[hash] = uint32(ip)
-			if isMatch(input, uint(ip), uint(candidate)) {
+			candidate = int(*slot)
+			*slot = uint32(ip)
+			if (loadU64LE(input, uint(candidate))^ipBytes)<<24 == 0 {
 				if ip-candidate <= maxDistance {
 					break
 				}
@@ -208,6 +211,10 @@ func (c *fragmentCompressor) writeCommands() {
 			ip += matched
 
 			switch {
+			case insert < 6:
+				code := insert + 40
+				c.b.writeBits(uint(c.arena.cmdDepth[code]), uint64(c.arena.cmdBits[code]))
+				c.arena.cmdHisto[code]++
 			case insert < 6210:
 				c.writeInsertLen(insert)
 			case c.shouldUseUncompressedMode(insert):
@@ -235,8 +242,6 @@ func (c *fragmentCompressor) writeCommands() {
 				c.writeRemainder()
 				return
 			}
-
-			candidate = updateHashTable(input, table, ip, shift)
 		}
 
 		// Try to find another match immediately. writeCopyAndDistance is
@@ -244,7 +249,21 @@ func (c *fragmentCompressor) writeCommands() {
 		// avoids per-iteration prologue/epilogue overhead. The function is
 		// otherwise too large to inline automatically (cost ~400 vs the
 		// 80-instruction budget) yet it's the only caller.
-		for isMatch(input, uint(ip), uint(candidate)) {
+		for {
+			inputBytes := loadU64LE(input, uint(ip-3))
+			prevHash := hashBytesAtOffset(inputBytes, 0, shift)
+			curHash := hashBytesAtOffset(inputBytes, 3, shift)
+			*(*uint32)(unsafe.Add(tbl, uintptr(prevHash)*4)) = uint32(ip - 3)
+			prevHash = hashBytesAtOffset(inputBytes, 1, shift)
+			*(*uint32)(unsafe.Add(tbl, uintptr(prevHash)*4)) = uint32(ip - 2)
+			prevHash = hashBytesAtOffset(inputBytes, 2, shift)
+			*(*uint32)(unsafe.Add(tbl, uintptr(prevHash)*4)) = uint32(ip - 1)
+			curPtr := (*uint32)(unsafe.Add(tbl, uintptr(curHash)*4))
+			candidate = int(*curPtr)
+			*curPtr = uint32(ip)
+			if !isMatch(input, uint(ip), uint(candidate)) {
+				break
+			}
 			base := ip
 			matched := 5 + matchLenAt(
 				input, uint(candidate+5), uint(ip+5), c.ipEnd-ip-5)
@@ -295,12 +314,11 @@ func (c *fragmentCompressor) writeCommands() {
 				c.writeRemainder()
 				return
 			}
-
-			candidate = updateHashTable(input, table, ip, shift)
 		}
 
 		ip++
-		nextHash = hashFragment(input, uint(ip), shift)
+		nextLoad = loadU64LE(input, uint(ip))
+		nextHash = hashBytesAtOffset(nextLoad, 0, shift)
 	}
 }
 
@@ -594,27 +612,6 @@ func (c *fragmentCompressor) writeUncompressedMetaBlock(data []byte, startBitOff
 	c.b.writeUncompressedMetaBlock(data)
 }
 
-// updateHashTable updates the hash table with positions from the last copy
-// and returns the next candidate. The hash values returned by hashBytesAtOffset
-// are < 2^tableBits ≤ len(table) for q0 (whose table size is always a power
-// of two), so unsafe pointer indexing is safe and skips the five per-access
-// bounds checks on this hot path.
-func updateHashTable(input []byte, table []uint32, ip int, shift uint) int {
-	tbl := unsafe.Pointer(unsafe.SliceData(table))
-	inputBytes := loadU64LE(input, uint(ip-3))
-	prevHash := hashBytesAtOffset(inputBytes, 0, shift)
-	curHash := hashBytesAtOffset(inputBytes, 3, shift)
-	*(*uint32)(unsafe.Add(tbl, uintptr(prevHash)*4)) = uint32(ip - 3)
-	prevHash = hashBytesAtOffset(inputBytes, 1, shift)
-	*(*uint32)(unsafe.Add(tbl, uintptr(prevHash)*4)) = uint32(ip - 2)
-	prevHash = hashBytesAtOffset(inputBytes, 2, shift)
-	*(*uint32)(unsafe.Add(tbl, uintptr(prevHash)*4)) = uint32(ip - 1)
-	curPtr := (*uint32)(unsafe.Add(tbl, uintptr(curHash)*4))
-	candidate := int(*curPtr)
-	*curPtr = uint32(ip)
-	return candidate
-}
-
 // shouldUseUncompressedMode returns true when the data so far looks
 // incompressible enough to emit an uncompressed meta-block.
 func (c *fragmentCompressor) shouldUseUncompressedMode(insertLen uint) bool {
@@ -650,16 +647,6 @@ func compressFragmentFast(
 		isLast: isLast,
 	}
 	c.compress()
-}
-
-// hashFragment computes a hash of the 5 bytes at input[i:i+5], shifted right
-// by shift bits (64 - tableBits). Taking the raw byte slice and index avoids
-// the sub-slice bounds check at the call site in the inner scan loop.
-// `shift & 63` is a no-op (shift ∈ [49, 55]) that lets the compiler elide the
-// variable-shift safety mask.
-func hashFragment(input []byte, i, shift uint) uint32 {
-	h := (loadU64LE(input, i) << 24) * hashMul32
-	return uint32(h >> (shift & 63))
 }
 
 // hashBytesAtOffset computes a hash of 5 bytes within a 64-bit value,

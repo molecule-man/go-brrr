@@ -3,7 +3,11 @@
 
 package encoder
 
-import "github.com/molecule-man/go-brrr/internal/core"
+import (
+	"math/bits"
+
+	"github.com/molecule-man/go-brrr/internal/core"
+)
 
 // H54-specific configuration constants.
 const (
@@ -19,7 +23,8 @@ const (
 // to positions. Each logical bucket stores four uint32 positions spread
 // across adjacent slots (BUCKET_SWEEP=4). USE_DICTIONARY=0.
 type h54 struct {
-	buckets [h54BucketSize]uint32
+	buckets     [h54BucketSize]uint32
+	everWrapped bool
 	hasherCommon
 }
 
@@ -38,6 +43,7 @@ func (h *h54) reset(oneShot bool, inputSize uint, data []byte) {
 	} else {
 		h.buckets = [h54BucketSize]uint32{}
 	}
+	h.everWrapped = false
 	h.ready = true
 }
 
@@ -54,6 +60,21 @@ func (h *h54) storeRange(data []byte, mask, start, end uint) {
 	buckets := &h.buckets
 	for i := start; i < end; i++ {
 		key := h.hash(data, i&mask)
+		off := uint32(i) & h54BucketSweepMsk
+		buckets[(key+off)&h54BucketMask] = uint32(i)
+	}
+}
+
+func (h *h54) storeNoWrap(data []byte, pos uint) {
+	key := h.hash(data, pos)
+	off := uint32(pos) & h54BucketSweepMsk
+	h.buckets[(key+off)&h54BucketMask] = uint32(pos)
+}
+
+func (h *h54) storeRangeNoWrap(data []byte, start, end uint) {
+	buckets := &h.buckets
+	for i := start; i < end; i++ {
+		key := h.hash(data, i)
 		off := uint32(i) & h54BucketSweepMsk
 		buckets[(key+off)&h54BucketMask] = uint32(i)
 	}
@@ -76,8 +97,13 @@ func (h *h54) stitchToPreviousBlock(numBytes, position uint, ringBuffer []byte, 
 // H54 uses BUCKET_SWEEP=4 and USE_DICTIONARY=0, so no static dictionary
 // lookups are performed.
 func (h *h54) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) {
-	data := s.data
 	mask := uint(s.mask)
+	if !h.everWrapped && uint(wrappedPos)+uint(bytes) <= mask+1 {
+		h.createBackwardReferencesNoWrap(s, bytes, wrappedPos)
+		return
+	}
+	h.everWrapped = true
+	data := s.data
 	maxBackwardLimit := (uint(1) << s.lgwin) - core.WindowGap
 	gap := s.compound.totalSize
 
@@ -395,9 +421,7 @@ func (h *h54) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32)
 				s.distCache[0] = sr.distance
 			}
 
-			s.commands = append(s.commands, newCommandSimpleDist(
-				insertLength, sr.len, sr.lenCodeDelta, distanceCode,
-			))
+			s.pushCommandSimpleDist(insertLength, sr.len, sr.lenCodeDelta, distanceCode)
 			s.numLiterals += insertLength
 			insertLength = 0
 
@@ -425,6 +449,403 @@ func (h *h54) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32)
 					posJump := min(position+8, posEnd-(hashTypeLength-1))
 					for position < posJump {
 						h.store(data, mask, position)
+						insertLength += 2
+						position += 2
+					}
+				}
+			}
+		}
+	}
+
+	insertLength += posEnd - position
+	s.lastInsertLen = insertLength
+	s.numCommands += uint(len(s.commands)) - origCmdCount
+}
+
+func (h *h54) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos uint32) {
+	data := s.data
+	maxBackwardLimit := (uint(1) << s.lgwin) - core.WindowGap
+	gap := s.compound.totalSize
+
+	insertLength := s.lastInsertLen
+	position := uint(wrappedPos)
+	posEnd := position + uint(bytes)
+
+	storeEnd := position
+	if uint(bytes) >= hashTypeLength {
+		storeEnd = posEnd - hashTypeLength + 1
+	}
+
+	const randomHeuristicsWindowSize = 64
+	applyRandomHeuristics := position + randomHeuristicsWindowSize
+
+	origCmdCount := uint(len(s.commands))
+	buckets := &h.buckets
+
+	for position+hashTypeLength < posEnd {
+		maxLength := posEnd - position
+		maxDistance := min(position, maxBackwardLimit)
+
+		var sr hasherSearchResult
+		sr.len = 0
+		sr.lenCodeDelta = 0
+		sr.distance = 0
+		sr.score = minScore
+
+		{
+			lastDistance := s.distCache[0]
+			curWord := loadU64LE(data, position)
+			guardByte := byte(curWord)
+			key := uint32(((curWord << (64 - 8*h54HashLen)) * hashMul64) >> (64 - h54BucketBits))
+			bestScore := sr.score
+			bestLen := uint(0)
+
+			hkey0 := key
+			hkey1 := (key + 8) & h54BucketMask
+			hkey2 := (key + 16) & h54BucketMask
+			hkey3 := (key + 24) & h54BucketMask
+
+			keyOut := (key + uint32(position&h54BucketSweepMsk)) & h54BucketMask
+
+			prev0 := uint(buckets[hkey0])
+			prev1 := uint(buckets[hkey1])
+			prev2 := uint(buckets[hkey2])
+			prev3 := uint(buckets[hkey3])
+
+			limit := int(maxLength)
+
+			{
+				prev := position - lastDistance
+				if prev < position {
+					if guardByte == loadByte(data, prev+bestLen) {
+						length := 0
+						xor := loadU64LE(data, prev) ^ curWord
+						if xor != 0 {
+							length = bits.TrailingZeros64(xor) / 8
+						} else {
+							length = 8 + matchLenAt(data, prev+8, position+8, limit-8)
+						}
+						if length >= 4 {
+							score := backwardReferenceScoreUsingLastDistance(uint(length))
+							if bestScore < score {
+								bestLen = uint(length)
+								sr.len = bestLen
+								sr.distance = lastDistance
+								sr.score = score
+								bestScore = score
+								guardByte = loadByte(data, position+bestLen)
+							}
+						}
+					}
+				}
+			}
+
+			{
+				backward := position - prev0
+				if guardByte == loadByte(data, prev0+bestLen) && backward != 0 && backward <= maxDistance {
+					length := 0
+					xor := loadU64LE(data, prev0) ^ curWord
+					if xor != 0 {
+						length = bits.TrailingZeros64(xor) / 8
+					} else {
+						length = 8 + matchLenAt(data, prev0+8, position+8, limit-8)
+					}
+					if length >= 4 {
+						score := backwardReferenceScore(uint(length), backward)
+						if bestScore < score {
+							bestLen = uint(length)
+							sr.len = bestLen
+							guardByte = loadByte(data, position+bestLen)
+							bestScore = score
+							sr.score = score
+							sr.distance = backward
+						}
+					}
+				}
+			}
+
+			{
+				backward := position - prev1
+				if guardByte == loadByte(data, prev1+bestLen) && backward != 0 && backward <= maxDistance {
+					length := 0
+					xor := loadU64LE(data, prev1) ^ curWord
+					if xor != 0 {
+						length = bits.TrailingZeros64(xor) / 8
+					} else {
+						length = 8 + matchLenAt(data, prev1+8, position+8, limit-8)
+					}
+					if length >= 4 {
+						score := backwardReferenceScore(uint(length), backward)
+						if bestScore < score {
+							bestLen = uint(length)
+							sr.len = bestLen
+							guardByte = loadByte(data, position+bestLen)
+							bestScore = score
+							sr.score = score
+							sr.distance = backward
+						}
+					}
+				}
+			}
+
+			{
+				backward := position - prev2
+				if guardByte == loadByte(data, prev2+bestLen) && backward != 0 && backward <= maxDistance {
+					length := 0
+					xor := loadU64LE(data, prev2) ^ curWord
+					if xor != 0 {
+						length = bits.TrailingZeros64(xor) / 8
+					} else {
+						length = 8 + matchLenAt(data, prev2+8, position+8, limit-8)
+					}
+					if length >= 4 {
+						score := backwardReferenceScore(uint(length), backward)
+						if bestScore < score {
+							bestLen = uint(length)
+							sr.len = bestLen
+							guardByte = loadByte(data, position+bestLen)
+							bestScore = score
+							sr.score = score
+							sr.distance = backward
+						}
+					}
+				}
+			}
+
+			{
+				backward := position - prev3
+				if guardByte == loadByte(data, prev3+bestLen) && backward != 0 && backward <= maxDistance {
+					length := 0
+					xor := loadU64LE(data, prev3) ^ curWord
+					if xor != 0 {
+						length = bits.TrailingZeros64(xor) / 8
+					} else {
+						length = 8 + matchLenAt(data, prev3+8, position+8, limit-8)
+					}
+					if length >= 4 {
+						score := backwardReferenceScore(uint(length), backward)
+						if bestScore < score {
+							sr.len = uint(length)
+							sr.score = score
+							sr.distance = backward
+						}
+					}
+				}
+			}
+
+			buckets[keyOut] = uint32(position)
+		}
+
+		if sr.score > minScore {
+			delayedBackwardReferencesInRow := 0
+			maxLength--
+			for {
+				const costDiffLazy = 175
+				var sr2 hasherSearchResult
+				sr2.len = min(sr.len-1, maxLength)
+				sr2.lenCodeDelta = 0
+				sr2.distance = 0
+				sr2.score = minScore
+				maxDistance = min(position+1, maxBackwardLimit)
+
+				{
+					cur2 := position + 1
+					lastDistance := s.distCache[0]
+					bestLen := sr2.len
+					guardByte := loadByte(data, cur2+bestLen)
+					curWord := loadU64LE(data, cur2)
+					key := uint32(((curWord << (64 - 8*h54HashLen)) * hashMul64) >> (64 - h54BucketBits))
+					bestScore := sr2.score
+
+					hkey0 := key
+					hkey1 := (key + 8) & h54BucketMask
+					hkey2 := (key + 16) & h54BucketMask
+					hkey3 := (key + 24) & h54BucketMask
+
+					keyOut := (key + uint32(cur2&h54BucketSweepMsk)) & h54BucketMask
+
+					prev0 := uint(buckets[hkey0])
+					prev1 := uint(buckets[hkey1])
+					prev2 := uint(buckets[hkey2])
+					prev3 := uint(buckets[hkey3])
+
+					limit := int(maxLength)
+
+					{
+						prev := cur2 - lastDistance
+						if prev < cur2 {
+							if guardByte == loadByte(data, prev+bestLen) {
+								length := 0
+								xor := loadU64LE(data, prev) ^ curWord
+								if xor != 0 {
+									length = bits.TrailingZeros64(xor) / 8
+								} else {
+									length = 8 + matchLenAt(data, prev+8, cur2+8, limit-8)
+								}
+								if length >= 4 {
+									score := backwardReferenceScoreUsingLastDistance(uint(length))
+									if bestScore < score {
+										bestLen = uint(length)
+										sr2.len = bestLen
+										sr2.distance = lastDistance
+										sr2.score = score
+										bestScore = score
+										guardByte = loadByte(data, cur2+bestLen)
+									}
+								}
+							}
+						}
+					}
+
+					{
+						backward := cur2 - prev0
+						if guardByte == loadByte(data, prev0+bestLen) && backward != 0 && backward <= maxDistance {
+							length := 0
+							xor := loadU64LE(data, prev0) ^ curWord
+							if xor != 0 {
+								length = bits.TrailingZeros64(xor) / 8
+							} else {
+								length = 8 + matchLenAt(data, prev0+8, cur2+8, limit-8)
+							}
+							if length >= 4 {
+								score := backwardReferenceScore(uint(length), backward)
+								if bestScore < score {
+									bestLen = uint(length)
+									sr2.len = bestLen
+									guardByte = loadByte(data, cur2+bestLen)
+									bestScore = score
+									sr2.score = score
+									sr2.distance = backward
+								}
+							}
+						}
+					}
+
+					{
+						backward := cur2 - prev1
+						if guardByte == loadByte(data, prev1+bestLen) && backward != 0 && backward <= maxDistance {
+							length := 0
+							xor := loadU64LE(data, prev1) ^ curWord
+							if xor != 0 {
+								length = bits.TrailingZeros64(xor) / 8
+							} else {
+								length = 8 + matchLenAt(data, prev1+8, cur2+8, limit-8)
+							}
+							if length >= 4 {
+								score := backwardReferenceScore(uint(length), backward)
+								if bestScore < score {
+									bestLen = uint(length)
+									sr2.len = bestLen
+									guardByte = loadByte(data, cur2+bestLen)
+									bestScore = score
+									sr2.score = score
+									sr2.distance = backward
+								}
+							}
+						}
+					}
+
+					{
+						backward := cur2 - prev2
+						if guardByte == loadByte(data, prev2+bestLen) && backward != 0 && backward <= maxDistance {
+							length := 0
+							xor := loadU64LE(data, prev2) ^ curWord
+							if xor != 0 {
+								length = bits.TrailingZeros64(xor) / 8
+							} else {
+								length = 8 + matchLenAt(data, prev2+8, cur2+8, limit-8)
+							}
+							if length >= 4 {
+								score := backwardReferenceScore(uint(length), backward)
+								if bestScore < score {
+									bestLen = uint(length)
+									sr2.len = bestLen
+									guardByte = loadByte(data, cur2+bestLen)
+									bestScore = score
+									sr2.score = score
+									sr2.distance = backward
+								}
+							}
+						}
+					}
+
+					{
+						backward := cur2 - prev3
+						if guardByte == loadByte(data, prev3+bestLen) && backward != 0 && backward <= maxDistance {
+							length := 0
+							xor := loadU64LE(data, prev3) ^ curWord
+							if xor != 0 {
+								length = bits.TrailingZeros64(xor) / 8
+							} else {
+								length = 8 + matchLenAt(data, prev3+8, cur2+8, limit-8)
+							}
+							if length >= 4 {
+								score := backwardReferenceScore(uint(length), backward)
+								if bestScore < score {
+									sr2.len = uint(length)
+									sr2.score = score
+									sr2.distance = backward
+								}
+							}
+						}
+					}
+
+					buckets[keyOut] = uint32(cur2)
+				}
+
+				if sr2.score >= sr.score+costDiffLazy {
+					position++
+					insertLength++
+					sr = sr2
+					delayedBackwardReferencesInRow++
+					if delayedBackwardReferencesInRow < 4 &&
+						position+hashTypeLength < posEnd {
+						maxLength--
+						continue
+					}
+				}
+				break
+			}
+
+			applyRandomHeuristics = position + 2*sr.len + randomHeuristicsWindowSize
+
+			maxDistance = min(position, maxBackwardLimit)
+			distanceCode := computeDistanceCode(sr.distance, maxDistance+gap, &s.distCache)
+			if sr.distance <= maxDistance+gap && distanceCode > 0 {
+				s.distCache[3] = s.distCache[2]
+				s.distCache[2] = s.distCache[1]
+				s.distCache[1] = s.distCache[0]
+				s.distCache[0] = sr.distance
+			}
+
+			s.pushCommandSimpleDist(insertLength, sr.len, sr.lenCodeDelta, distanceCode)
+			s.numLiterals += insertLength
+			insertLength = 0
+
+			rangeStart := position + 2
+			rangeEnd := min(position+sr.len, storeEnd)
+			if sr.distance < sr.len>>2 {
+				rangeStart = min(rangeEnd, max(rangeStart, position+sr.len-(sr.distance<<2)))
+			}
+			h.storeRangeNoWrap(data, rangeStart, rangeEnd)
+
+			position += sr.len
+		} else {
+			insertLength++
+			position++
+
+			if position > applyRandomHeuristics {
+				if position > applyRandomHeuristics+4*randomHeuristicsWindowSize {
+					posJump := min(position+16, posEnd-(hashTypeLength-1))
+					for position < posJump {
+						h.storeNoWrap(data, position)
+						insertLength += 4
+						position += 4
+					}
+				} else {
+					posJump := min(position+8, posEnd-(hashTypeLength-1))
+					for position < posJump {
+						h.storeNoWrap(data, position)
 						insertLength += 2
 						position += 2
 					}

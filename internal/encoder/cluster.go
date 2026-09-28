@@ -30,9 +30,9 @@ func histogramPairIsLess(p1, p2 *histogramPair) bool {
 // combine two clusters of sizes sizeA and sizeB.
 func clusterCostDiff(sizeA, sizeB uint32) float64 {
 	sizeC := sizeA + sizeB
-	return float64(sizeA)*fastLog2(int(sizeA)) +
-		float64(sizeB)*fastLog2(int(sizeB)) -
-		float64(sizeC)*fastLog2(int(sizeC))
+	return float64(float64(sizeA)*fastLog2(int(sizeA))) +
+		float64(float64(sizeB)*fastLog2(int(sizeB))) -
+		float64(float64(sizeC)*fastLog2(int(sizeC)))
 }
 
 // histogramSlice returns the sub-slice of the flat histogram array for index idx.
