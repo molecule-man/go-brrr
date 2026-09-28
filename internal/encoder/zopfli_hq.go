@@ -169,7 +169,7 @@ func createHqZopfliBackwardReferences(numBytes, position uint, ringbuffer []byte
 	if quality < hqZopflificationQuality {
 		passes = 1
 		if numBytes >= longCopyQuickStep {
-			forestUsed = min(len(hasher.forest), 2*int(position+numBytes))
+			forestUsed = int(min(uint64(len(hasher.forest)), 2*uint64(position+numBytes)))
 			n := forestUsed + len(hasher.buckets)
 			if cap(bufs.hqHasherSnap) < n {
 				bufs.hqHasherSnap = make([]uint32, len(hasher.forest)+len(hasher.buckets))
