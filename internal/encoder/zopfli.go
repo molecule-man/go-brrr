@@ -35,8 +35,6 @@ const (
 	longCopyQuickStep = 16384
 )
 
-// posData holds a candidate starting position and its associated state,
-// used by startPosQueue to track the best insert-length candidates.
 var shortCodeLaneBits = func() (t [2][128]uint16) {
 	codes := [2][7]uint16{{9, 7, 5, 0, 4, 6, 8}, {15, 13, 11, 1, 10, 12, 14}}
 	for w := range t {
@@ -49,6 +47,8 @@ var shortCodeLaneBits = func() (t [2][128]uint16) {
 	return t
 }()
 
+// posData holds a candidate starting position and its associated state,
+// used by startPosQueue to track the best insert-length candidates.
 type posData struct {
 	pos           uint
 	distanceCache [4]int
