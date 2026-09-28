@@ -27,7 +27,7 @@ func refineFixture(tb testing.TB, numHistograms, alphabetSize int) ([]uint16, []
 	tb.Helper()
 	data := make([]uint16, refineBenchLength)
 	for i := range data {
-		data[i] = uint16((i * 2654435761) % alphabetSize)
+		data[i] = uint16((uint64(i) * 2654435761) % uint64(alphabetSize))
 	}
 	return data, make([]uint32, (numHistograms+1)*alphabetSize)
 }

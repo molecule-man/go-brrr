@@ -121,7 +121,7 @@ func findBlocksFixture(tb testing.TB, length, numHistograms int) (
 	}
 	histograms = make([]uint32, numHistograms*alphabetSize)
 	for i := range histograms {
-		histograms[i] = uint32((i*2654435761)%97) + 1
+		histograms[i] = uint32((uint64(i)*2654435761)%97) + 1
 	}
 	insertCost = make([]float64, alphabetSize*numHistograms)
 	cost = make([]float64, numHistograms)

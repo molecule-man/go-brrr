@@ -104,10 +104,11 @@ func (h *h10) findAllMatchesBefore(
 	return uint(nMatches)
 }
 
-func zopfliIterateBefore(nodes []zopfliNode, ringbuffer []byte, distCache []int, model *zopfliCostModel, numMatches []uint32, matches []backwardMatch, numBytes, position, ringBufferMask, gap uint, compound *compoundDictionary, quality, lgwin int, feed *matchFeed) uint {
+func zopfliIterateBeforeDPDict(nodes []zopfliNode, ringbuffer []byte, distCache []int, model *zopfliCostModel, numMatches []uint32, matches []backwardMatch, numBytes, position, ringBufferMask, gap uint, compound *compoundDictionary, quality, lgwin int, feed *matchFeed) uint {
 	maxBackwardLimit := (uint(1) << lgwin) - core.WindowGap
 	maxZopfli := maxZopfliLen(quality)
 	var queue startPosQueue
+	var sc dcScratch
 	curMatchPos := uint(0)
 
 	nodes[0].length = 0
@@ -119,7 +120,7 @@ func zopfliIterateBefore(nodes []zopfliNode, ringbuffer []byte, distCache []int,
 		}
 		skip := updateNodes(nodes, ringbuffer, distCache,
 			matches[curMatchPos:], model, &queue,
-			numBytes, position, i, ringBufferMask, maxBackwardLimit, gap, compound, uint(numMatches[i]), quality)
+			numBytes, position, i, ringBufferMask, maxBackwardLimit, gap, compound, uint(numMatches[i]), quality, &sc)
 		if skip < longCopyQuickStep {
 			skip = 0
 		} else if quality < hqZopflificationQuality &&
@@ -258,14 +259,14 @@ func createHqZopfliBackwardReferencesBefore(numBytes, position uint, ringbuffer 
 		}
 		restore()
 
-		result := zopfliIterateBefore(nodes, ringbuffer, distCache, model, numMatchesArr, matches,
+		result := zopfliIterateBeforeDPDict(nodes, ringbuffer, distCache, model, numMatchesArr, matches,
 			numBytes, position, ringBufferMask, gap, compound, quality, lgwin, f)
 		if result == zopfliIterateAborted {
 			col.wait()
 			matches = bufs.hqMatches
 			initZopfliNodes(nodes)
 			restore()
-			result = zopfliIterateBefore(nodes, ringbuffer, distCache, model, numMatchesArr, matches,
+			result = zopfliIterateBeforeDPDict(nodes, ringbuffer, distCache, model, numMatchesArr, matches,
 				numBytes, position, ringBufferMask, gap, compound, quality, lgwin, nil)
 		}
 		if result == zopfliIterateDiverged {
@@ -401,7 +402,7 @@ func TestZopfliIterateSearchingTheDictionaryItselfProducesTheBeforeNodesFromACol
 
 			var wantModel, dpModel, keptModel zopfliCostModel
 			wantNodes := dpDictNodes(rb, mask, n, &wantModel)
-			want := zopfliIterateBefore(wantNodes, rb, []int{4, 11, 15, 16}, &wantModel,
+			want := zopfliIterateBeforeDPDict(wantNodes, rb, []int{4, 11, 15, 16}, &wantModel,
 				withDict.hqNumMatchesArr, withDict.hqMatches, n, 0, mask, 0, nil, quality, lgwin, nil)
 			dpNodes := dpDictNodes(rb, mask, n, &dpModel)
 			dp := zopfliIterate(dpNodes, rb, []int{4, 11, 15, 16}, &dpModel,

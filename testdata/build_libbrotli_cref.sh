@@ -20,7 +20,8 @@ trap 'rm -rf "$TMPDIR"' EXIT
 for dir in common dec enc; do
     for src in "$ROOT"/brotli-ref/c/"$dir"/*.c; do
         base=$(basename "$src" .c)
-        cc -c -O2 -I"$ROOT/brotli-ref/c/include" -o "$TMPDIR/${dir}_${base}.o" "$src"
+        # C reference must round a*b before +c, same as the Go encoder.
+        cc ${CFLAGS:-} -c -O2 -ffp-contract=off -I"$ROOT/brotli-ref/c/include" -o "$TMPDIR/${dir}_${base}.o" "$src"
     done
 done
 
