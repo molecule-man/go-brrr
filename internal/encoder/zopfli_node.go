@@ -85,14 +85,10 @@ func initZopfliNodes(nodes []zopfliNode) {
 	fillSlice(nodes, stub)
 }
 
-// updateZopfliNode writes a better solution into nodes[pos+length].
-// The node records how to reach (pos+length) from startPos using a
-// copy of the given length at the given distance.
-func updateZopfliNode(nodes []zopfliNode, pos, startPos, length, lenCode, dist, shortCode uint, cost float32) {
-	next := &nodes[pos+length]
+func updateZopfliNode(next *zopfliNode, insLen, length, lenCode, dist, shortCode uint, cost float32) {
 	next.length = uint32(length | ((length + 9 - lenCode) << 25))
 	next.distance = uint32(dist)
-	next.dcodeInsertLength = uint32((shortCode << 27) | (pos - startPos))
+	next.dcodeInsertLength = uint32((shortCode << 27) | insLen)
 	next.setCost(cost)
 }
 

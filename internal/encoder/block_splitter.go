@@ -213,7 +213,7 @@ func findBlocks(
 			}
 
 			if byteIx < prologueLength {
-				switchCost *= 0.77 + prologueMultiplier*float64(byteIx)
+				switchCost *= 0.77 + float64(prologueMultiplier*float64(byteIx))
 			}
 
 			for k := range numHistograms {
@@ -229,7 +229,7 @@ func findBlocks(
 
 		// Reduce switch cost in the prologue to encourage early splits.
 		if byteIx < prologueLength {
-			switchCost *= 0.77 + prologueMultiplier*float64(byteIx)
+			switchCost *= 0.77 + float64(prologueMultiplier*float64(byteIx))
 		}
 
 		minCost, best := findBlocksStep(
