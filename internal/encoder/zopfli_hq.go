@@ -23,6 +23,11 @@ const (
 	feedSpinBeforePark = 128
 )
 
+const (
+	hqJobCollect hqJob = iota
+	hqJobSplit
+)
+
 // hqMatchesPerByte reserves match space for the parallel collector.
 var hqMatchesPerByte uint = 8
 
@@ -30,8 +35,12 @@ type hqCollector struct {
 	bufs             *q10Bufs
 	hasher           *h10
 	compound         *compoundDictionary
-	start            chan struct{}
+	start            chan hqJob
 	done             chan struct{}
+	cmdSplit         *blockSplit
+	distSplit        *blockSplit
+	cmds             []command
+	splitVecBufs     splitVecBufs
 	ringbuffer       []byte
 	numBytes         uint
 	position         uint
@@ -44,6 +53,8 @@ type hqCollector struct {
 	busy             bool
 	lzScratch        [h10MaxNumMatches]backwardMatch
 }
+
+type hqJob uint8
 
 // matchFeed shares collected matches with the first DP pass. Buffer growth
 // aborts the feed because the DP holds the prior match buffer. A parked DP
@@ -195,9 +206,11 @@ func createHqZopfliBackwardReferences(numBytes, position uint, ringbuffer []byte
 	col.storeEnd = storeEnd
 	col.shadowMatches = shadowMatches
 	col.quality = quality
+	dpDict := bufs.parallel && quality < hqZopflificationQuality && !hasCompound
+	hasher.skipDict = dpDict
 	var firstPassFeed *matchFeed
 	if bufs.parallel {
-		col.begin()
+		col.begin(hqJobCollect)
 		firstPassFeed = feed
 	} else {
 		col.collect()
@@ -237,17 +250,18 @@ func createHqZopfliBackwardReferences(numBytes, position uint, ringbuffer []byte
 		restore()
 
 		result := zopfliIterate(nodes, ringbuffer, distCache, model, numMatchesArr, matches,
-			numBytes, position, ringBufferMask, gap, compound, quality, lgwin, f)
+			numBytes, position, ringBufferMask, gap, compound, quality, lgwin, f, dpDict)
 		if result == zopfliIterateAborted {
 			col.wait()
 			matches = bufs.hqMatches
 			initZopfliNodes(nodes)
 			restore()
 			result = zopfliIterate(nodes, ringbuffer, distCache, model, numMatchesArr, matches,
-				numBytes, position, ringBufferMask, gap, compound, quality, lgwin, nil)
+				numBytes, position, ringBufferMask, gap, compound, quality, lgwin, nil, dpDict)
 		}
 		if result == zopfliIterateDiverged {
 			col.wait()
+			hasher.skipDict = false
 			copy(hasher.forest[:forestUsed], bufs.hqHasherSnap)
 			copy(hasher.buckets[:], bufs.hqHasherSnap[forestUsed:])
 			restore()
@@ -258,21 +272,26 @@ func createHqZopfliBackwardReferences(numBytes, position uint, ringbuffer []byte
 		zopfliCreateCommands(nodes, numBytes, position, maxBackwardLimit, gap, distCache, lastInsertLen, commands, numLiterals)
 	}
 	col.wait()
+	hasher.skipDict = false
 }
 
-func (c *hqCollector) begin() {
+func (c *hqCollector) begin(job hqJob) {
 	if c.start == nil {
-		c.start = make(chan struct{})
+		c.start = make(chan hqJob)
 		c.done = make(chan struct{})
 		go c.serve(c.start, c.done)
 	}
 	c.busy = true
-	c.start <- struct{}{}
+	c.start <- job
 }
 
-func (c *hqCollector) serve(start <-chan struct{}, done chan<- struct{}) {
-	for range start {
-		c.collect()
+func (c *hqCollector) serve(start <-chan hqJob, done chan<- struct{}) {
+	for job := range start {
+		if job == hqJobSplit {
+			splitCommandsAndDistances(c.cmdSplit, c.distSplit, &c.splitVecBufs, c.cmds, c.quality)
+		} else {
+			c.collect()
+		}
 		done <- struct{}{}
 	}
 }

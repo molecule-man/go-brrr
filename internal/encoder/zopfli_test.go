@@ -238,13 +238,18 @@ func compareZopfliNodes(what string, got, want uint, after, before []zopfliNode)
 	return errors.Join(errs...)
 }
 
+// zopfliIterateLZOnly prices only the collected matches, the same input as zopfliIterateBefore.
+func zopfliIterateLZOnly(nodes []zopfliNode, ringbuffer []byte, distCache []int, model *zopfliCostModel, numMatches []uint32, matches []backwardMatch, numBytes, position, ringBufferMask, gap uint, compound *compoundDictionary, quality, lgwin int, feed *matchFeed) uint {
+	return zopfliIterate(nodes, ringbuffer, distCache, model, numMatches, matches, numBytes, position, ringBufferMask, gap, compound, quality, lgwin, feed, false)
+}
+
 func zopfliIterateBothWays(s *encodeState, distCache []int, model *zopfliCostModel, numMatches []uint32, matches []backwardMatch, position, numBytes uint) ([]zopfliNode, uint, error) {
 	after := make([]zopfliNode, numBytes+1)
 	before := make([]zopfliNode, numBytes+1)
 	initZopfliNodes(after)
 	initZopfliNodes(before)
 	mask, gap := uint(s.mask), s.compound.totalSize
-	got := zopfliIterate(after, s.data, distCache, model, numMatches, matches, numBytes, position, mask, gap, &s.compound, s.quality, s.lgwin, nil)
+	got := zopfliIterate(after, s.data, distCache, model, numMatches, matches, numBytes, position, mask, gap, &s.compound, s.quality, s.lgwin, nil, false)
 	want := zopfliIterateBefore(before, s.data, distCache, model, numMatches, matches, numBytes, position, mask, gap, &s.compound, s.quality, s.lgwin, nil)
 	return after, got, compareZopfliNodes("zopfliIterate", got, want, after, before)
 }
@@ -424,7 +429,7 @@ func BenchmarkZopfliIterate256KiB(b *testing.B) {
 	impls := []struct {
 		name    string
 		iterate func([]zopfliNode, []byte, []int, *zopfliCostModel, []uint32, []backwardMatch, uint, uint, uint, uint, *compoundDictionary, int, int, *matchFeed) uint
-	}{{"before", zopfliIterateBefore}, {"after", zopfliIterate}}
+	}{{"before", zopfliIterateBefore}, {"after", zopfliIterateLZOnly}}
 	for _, in := range corpus {
 		if len(in.data) < zopfliBenchBlock {
 			b.Fatalf("%s holds %d bytes, the benchmark name promises a %d-byte block", in.name, len(in.data), zopfliBenchBlock)
@@ -565,7 +570,7 @@ func compareZopfliPassesWithPreChangeCopy(ringbuffer []byte, ringBufferMask uint
 		initZopfliNodes(nodesAfter)
 		initZopfliNodes(nodesBefore)
 		after := zopfliIterate(nodesAfter, ringbuffer, blk.distCache[:], &model, blk.numMatches, blk.matches,
-			blk.numBytes, blk.position, ringBufferMask, 0, nil, quality, lgwin, nil)
+			blk.numBytes, blk.position, ringBufferMask, 0, nil, quality, lgwin, nil, false)
 		before := zopfliIterateBefore(nodesBefore, ringbuffer, blk.distCache[:], &model, blk.numMatches, blk.matches,
 			blk.numBytes, blk.position, ringBufferMask, 0, nil, quality, lgwin, nil)
 		if after != before {
@@ -762,7 +767,7 @@ func BenchmarkZopfliIterateDistanceCacheCandidates(b *testing.B) {
 				for _, impl := range []struct {
 					name    string
 					iterate func([]zopfliNode, []byte, []int, *zopfliCostModel, []uint32, []backwardMatch, uint, uint, uint, uint, *compoundDictionary, int, int, *matchFeed) uint
-				}{{"before", zopfliIterateBefore}, {"after", zopfliIterate}} {
+				}{{"before", zopfliIterateBefore}, {"after", zopfliIterateLZOnly}} {
 					b.Run("impl="+impl.name, func(b *testing.B) {
 						nodes := make([]zopfliNode, maxNumBytes+1)
 						b.ReportAllocs()
