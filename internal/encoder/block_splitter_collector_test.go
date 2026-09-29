@@ -413,6 +413,8 @@ func TestSplitBlockWithCommandAndDistanceSplitsOnTheCollectorMatchesTheSequentia
 			{"whole_metablock", m.cmds},
 			{"no_commands", m.cmds[:0]},
 			{"fewer_symbols_than_min_split", m.cmds[:min(len(m.cmds), minLengthForBlockSplitting-1)]},
+			{"one_command_below_the_offload_threshold", m.cmds[:min(len(m.cmds), splitOffloadMinCommands-1)]},
+			{"exactly_the_offload_threshold", m.cmds[:min(len(m.cmds), splitOffloadMinCommands)]},
 			{"insert_only_commands_without_distances", insertOnly},
 		} {
 			for _, quality := range []int{10, 11} {

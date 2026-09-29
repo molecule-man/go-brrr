@@ -47,6 +47,10 @@ const (
 // Quality threshold: qualities below this use 3 iterations, at or above use 10.
 const hqZopflificationQuality = 11
 
+// Below splitOffloadMinCommands, the collector handoff costs more than the
+// command and distance splits.
+const splitOffloadMinCommands = 512
+
 // noMinCost is findBlocks' sentinel starting cost, larger than any real one.
 const noMinCost = 1e99
 
@@ -653,7 +657,8 @@ func splitBlock(
 	quality int,
 ) {
 	col := &bufs.hqCollector
-	if bufs.parallel {
+	offload := bufs.parallel && len(cmds) >= splitOffloadMinCommands
+	if offload {
 		col.cmds = cmds
 		col.cmdSplit = cmdSplit
 		col.distSplit = distSplit
@@ -677,7 +682,7 @@ func splitBlock(
 		quality:             quality,
 		alphabetSize:        core.AlphabetSizeLiteral,
 	})
-	if bufs.parallel {
+	if offload {
 		col.wait()
 		return
 	}

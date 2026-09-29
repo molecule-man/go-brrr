@@ -440,24 +440,41 @@ func equalLanes(x uint64) uint {
 }
 
 // zopfliIterate runs the DP over pre-collected matches (Q11 path).
-func zopfliIterate(nodes []zopfliNode, ringbuffer []byte, distCache []int, model *zopfliCostModel, numMatches []uint32, matches []backwardMatch, numBytes, position, ringBufferMask, gap uint, compound *compoundDictionary, quality, lgwin int, feed *matchFeed, dpDict bool) uint {
+func zopfliIterate(nodes []zopfliNode, ringbuffer []byte, distCache []int, model *zopfliCostModel, numMatches []uint32, matches []backwardMatch, numBytes, position, ringBufferMask, gap uint, compound *compoundDictionary, quality, lgwin int, feed *matchFeed, dict *dictOwnership) uint {
 	maxBackwardLimit := (uint(1) << lgwin) - core.WindowGap
 	maxZopfli := maxZopfliLen(quality)
 	var queue startPosQueue
 	var dictScratch [h10MaxNumMatches + maxStaticDictMatchLen + 1]backwardMatch
 	var sc dcScratch
 	curMatchPos := uint(0)
+	handoffs := uint32(0)
+	dpOwnsDict := false
+	nextDPPos := uint(0)
 
 	nodes[0].length = 0
 	nodes[0].setCost(0)
 
 	for i := uint(0); i+3 < numBytes; i++ {
+		if feed != nil && dict != nil {
+			if i >= nextDPPos {
+				dict.dpPos.Store(uint64(i))
+				nextDPPos = i + feedPublishBatch
+			}
+			if !dpOwnsDict && i >= dictHandoffMinPos && feed.ready.Load() <= uint64(i) && !dict.request.Load() {
+				dict.request.Store(true)
+			}
+		}
 		if !feed.wait(i) {
 			return zopfliIterateAborted
 		}
+		if dict != nil {
+			for n := dict.count.Load(); handoffs < n && dict.at[handoffs] <= uint64(i); handoffs++ {
+				dpOwnsDict = !dpOwnsDict
+			}
+		}
 		cur := matches[curMatchPos:]
 		n := uint(numMatches[i])
-		if dpDict {
+		if dpOwnsDict {
 			bestLen := uint(1)
 			if n > 0 {
 				bestLen = cur[n-1].matchLength()

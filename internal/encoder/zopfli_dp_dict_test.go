@@ -317,8 +317,9 @@ func dpDictRing(data []byte) ([]byte, uint) {
 	return rb, uint(len(rb) - 1)
 }
 
-func dpDictCollect(tb testing.TB, rb []byte, mask, numBytes uint, quality, lgwin int, skipDict bool) *q10Bufs {
+func dpDictCollect(tb testing.TB, rb []byte, mask, numBytes uint, lgwin int, skipDict bool) *q10Bufs {
 	tb.Helper()
+	const quality = 10
 	h := &h10{lgwin: lgwin, quality: quality, skipDict: skipDict}
 	h.reset(true, numBytes, nil)
 	storeEnd := uint(0)
@@ -397,8 +398,8 @@ func TestZopfliIterateSearchingTheDictionaryItselfProducesTheBeforeNodesFromACol
 			const quality = 10
 			rb, mask := dpDictRing(in.data)
 			n := uint(len(in.data))
-			withDict := dpDictCollect(t, rb, mask, n, quality, lgwin, false)
-			lzOnly := dpDictCollect(t, rb, mask, n, quality, lgwin, true)
+			withDict := dpDictCollect(t, rb, mask, n, lgwin, false)
+			lzOnly := dpDictCollect(t, rb, mask, n, lgwin, true)
 
 			var wantModel, dpModel, keptModel zopfliCostModel
 			wantNodes := dpDictNodes(rb, mask, n, &wantModel)
@@ -406,10 +407,10 @@ func TestZopfliIterateSearchingTheDictionaryItselfProducesTheBeforeNodesFromACol
 				withDict.hqNumMatchesArr, withDict.hqMatches, n, 0, mask, 0, nil, quality, lgwin, nil)
 			dpNodes := dpDictNodes(rb, mask, n, &dpModel)
 			dp := zopfliIterate(dpNodes, rb, []int{4, 11, 15, 16}, &dpModel,
-				lzOnly.hqNumMatchesArr, lzOnly.hqMatches, n, 0, mask, 0, nil, quality, lgwin, nil, true)
+				lzOnly.hqNumMatchesArr, lzOnly.hqMatches, n, 0, mask, 0, nil, quality, lgwin, nil, dictHandoffsAt(0))
 			keptNodes := dpDictNodes(rb, mask, n, &keptModel)
 			kept := zopfliIterate(keptNodes, rb, []int{4, 11, 15, 16}, &keptModel,
-				withDict.hqNumMatchesArr, withDict.hqMatches, n, 0, mask, 0, nil, quality, lgwin, nil, false)
+				withDict.hqNumMatchesArr, withDict.hqMatches, n, 0, mask, 0, nil, quality, lgwin, nil, nil)
 
 			if dp != want || !slices.Equal(dpNodes, wantNodes) {
 				t.Errorf("%s lgwin %d: the DP appending its own dictionary matches to the LZ-only feed returned %d, "+
@@ -420,6 +421,78 @@ func TestZopfliIterateSearchingTheDictionaryItselfProducesTheBeforeNodesFromACol
 				t.Errorf("%s lgwin %d: with the dictionary search left in the collector the DP returned %d, want %d, "+
 					"and nodes equal = %t; q11 and compound blocks take this path and must not change",
 					in.name, lgwin, kept, want, slices.Equal(keptNodes, wantNodes))
+			}
+		}
+	}
+}
+
+// dictHandoffsAt records handoff positions. The first transfers the dictionary search to the DP.
+func dictHandoffsAt(at ...uint) *dictOwnership {
+	d := new(dictOwnership)
+	for k, pos := range at {
+		d.at[k] = uint64(pos)
+	}
+	d.count.Store(uint32(len(at)))
+	return d
+}
+
+// handedOffMatches includes dictionary matches only where the collector owns the search.
+func handedOffMatches(withDict, lzOnly *q10Bufs, n uint, at []uint) ([]uint32, []backwardMatch) {
+	num := make([]uint32, n)
+	var out []backwardMatch
+	var wi, li uint
+	dpOwns, next := false, 0
+	for i := range n {
+		for next < len(at) && at[next] <= i {
+			dpOwns = !dpOwns
+			next++
+		}
+		w, l := uint(withDict.hqNumMatchesArr[i]), uint(lzOnly.hqNumMatchesArr[i])
+		if dpOwns {
+			num[i] = uint32(l)
+			out = append(out, lzOnly.hqMatches[li:li+l]...)
+		} else {
+			num[i] = uint32(w)
+			out = append(out, withDict.hqMatches[wi:wi+w]...)
+		}
+		wi += w
+		li += l
+	}
+	return num, append(out, make([]backwardMatch, h10MaxNumMatches)...)
+}
+
+func TestZopfliIterateWithTheDictionaryHandedBackAndForthProducesTheBeforeNodesForEveryHandoffPattern(t *testing.T) {
+	for _, in := range dpDictCorpus(t, 64<<10) {
+		const quality, lgwin = 10, 22
+		rb, mask := dpDictRing(in.data)
+		n := uint(len(in.data))
+		withDict := dpDictCollect(t, rb, mask, n, lgwin, false)
+		lzOnly := dpDictCollect(t, rb, mask, n, lgwin, true)
+		var wantModel zopfliCostModel
+		wantNodes := dpDictNodes(rb, mask, n, &wantModel)
+		want := zopfliIterateBeforeDPDict(wantNodes, rb, []int{4, 11, 15, 16}, &wantModel,
+			withDict.hqNumMatchesArr, withDict.hqMatches, n, 0, mask, 0, nil, quality, lgwin, nil)
+		for _, at := range [][]uint{
+			{},
+			{0},
+			{1},
+			{dictHandoffMinPos},
+			{n / 2},
+			{n - 1},
+			{n},
+			{n / 4, n / 2},
+			{0, 1},
+			{n / 5, n / 3, n / 2},
+			{dictHandoffMinPos, dictHandoffMinPos + 1, n / 2, n/2 + dictReclaimLead},
+		} {
+			num, matches := handedOffMatches(withDict, lzOnly, n, at)
+			var model zopfliCostModel
+			nodes := dpDictNodes(rb, mask, n, &model)
+			got := zopfliIterate(nodes, rb, []int{4, 11, 15, 16}, &model,
+				num, matches, n, 0, mask, 0, nil, quality, lgwin, nil, dictHandoffsAt(at...))
+			if got != want || !slices.Equal(nodes, wantNodes) {
+				t.Errorf("%s handoffs at %v of %d: DP result %d, want %d, nodes equal = %t",
+					in.name, at, n, got, want, slices.Equal(nodes, wantNodes))
 			}
 		}
 	}
