@@ -23,6 +23,7 @@ var combineLengthCodesBase = [3][3]uint16{
 
 var insertLenCodeLUT = initInsertLenCodeLUT()
 var copyLenCodeLUT = initCopyLenCodeLUT()
+var cmdCodeLUT = initCmdCodeLUT()
 
 // commandConfig holds the inputs for constructing a command from a LZ77 match.
 type commandConfig struct {
@@ -98,6 +99,17 @@ func initCopyLenCodeLUT() [134]uint16 {
 	return lut
 }
 
+func initCmdCodeLUT() [2][24][32]uint16 {
+	var lut [2][24][32]uint16
+	for insCode := range uint16(24) {
+		for copyCode := range uint16(24) {
+			lut[0][insCode][copyCode] = combineLengthCodes(insCode, copyCode, false)
+			lut[1][insCode][copyCode] = combineLengthCodes(insCode, copyCode, true)
+		}
+	}
+	return lut
+}
+
 // newCommand creates a command for a literal insertion followed by a backward
 // reference copy.
 func newCommand(cfg commandConfig) command {
@@ -127,13 +139,13 @@ func (s *encodeState) pushCommandSimpleDist(insertLen, copyLen uint, copyLenDelt
 }
 
 func (s *encodeState) appendCommand(insertLen, copyLen, distExtra uint32, cmdPrefix, distPrefix uint16) {
-	s.commands = append(s.commands, command{})
-	c := &s.commands[len(s.commands)-1]
-	c.insertLen = insertLen
-	c.copyLen = copyLen
-	c.distExtra = distExtra
-	c.cmdPrefix = cmdPrefix
-	c.distPrefix = distPrefix
+	s.commands = append(s.commands, command{
+		insertLen:  insertLen,
+		copyLen:    copyLen,
+		distExtra:  distExtra,
+		cmdPrefix:  cmdPrefix,
+		distPrefix: distPrefix,
+	})
 }
 
 // newInsertCommand creates a command that contains only literal insertions

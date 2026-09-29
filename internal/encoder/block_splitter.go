@@ -47,6 +47,10 @@ const (
 // Quality threshold: qualities below this use 3 iterations, at or above use 10.
 const hqZopflificationQuality = 11
 
+// Below splitOffloadMinCommands, the collector handoff costs more than the
+// command and distance splits.
+const splitOffloadMinCommands = 512
+
 // noMinCost is findBlocks' sentinel starting cost, larger than any real one.
 const noMinCost = 1e99
 
@@ -58,6 +62,29 @@ type splitVecParams struct {
 	blockSwitchCost     float64
 	quality             int
 	alphabetSize        int
+}
+
+type splitVecBufs struct {
+	svHistograms []uint32
+	svBlockIDs   []byte
+	svFloat      []float64
+	svSwitchSig  []byte
+	svNewID      []uint16
+
+	cbHistSymbols   []uint32
+	cbAllHistograms []uint32
+	cbClusterSizes  []uint32
+	cbBatchHist     []uint32
+	cbPairs         []histogramPair
+	cbTmpHist       []uint32
+	cbBatchU32      []uint32
+	cbBlockLengths  []uint32
+	cbBatchFloat    []float64
+	cbBatchTotals   []uint32
+	cbClusters      []uint32
+	cbNewIndex      []uint32
+
+	sbUint16 []uint16
 }
 
 // ---------------------------------------------------------------------------
@@ -309,7 +336,7 @@ func buildBlockHistograms(
 //  5. Write the compacted result into the blockSplit.
 func clusterBlocks(
 	split *blockSplit,
-	bufs *q10Bufs,
+	bufs *splitVecBufs,
 	data []uint16, blockIDs []byte,
 	length, numBlocks, alphabetSize int,
 ) {
@@ -553,7 +580,7 @@ func clusterBlocks(
 //  4. Cluster the resulting blocks via clusterBlocks.
 func splitByteVector(
 	split *blockSplit,
-	bufs *q10Bufs,
+	bufs *splitVecBufs,
 	data []uint16, length int,
 	p splitVecParams,
 ) {
@@ -629,6 +656,16 @@ func splitBlock(
 	data []byte, pos, mask uint,
 	quality int,
 ) {
+	col := &bufs.hqCollector
+	offload := bufs.parallel && len(cmds) >= splitOffloadMinCommands
+	if offload {
+		col.cmds = cmds
+		col.cmdSplit = cmdSplit
+		col.distSplit = distSplit
+		col.quality = quality
+		col.begin(hqJobSplit)
+	}
+
 	// Extract and split literals.
 	bufs.sbLiteralBytes = copyLiteralsToByteArrayBuf(cmds, data, pos, mask, bufs.sbLiteralBytes)
 	numLiterals := len(bufs.sbLiteralBytes)
@@ -637,7 +674,7 @@ func splitBlock(
 	for i, b := range bufs.sbLiteralBytes {
 		symbols[i] = uint16(b)
 	}
-	splitByteVector(litSplit, bufs, symbols, numLiterals, splitVecParams{
+	splitByteVector(litSplit, &bufs.splitVecBufs, symbols, numLiterals, splitVecParams{
 		symbolsPerHistogram: symbolsPerLiteralHistogram,
 		maxHistograms:       maxLiteralHistograms,
 		samplingStride:      literalStrideLength,
@@ -645,10 +682,17 @@ func splitBlock(
 		quality:             quality,
 		alphabetSize:        core.AlphabetSizeLiteral,
 	})
+	if offload {
+		col.wait()
+		return
+	}
+	splitCommandsAndDistances(cmdSplit, distSplit, &bufs.splitVecBufs, cmds, quality)
+}
 
+func splitCommandsAndDistances(cmdSplit, distSplit *blockSplit, bufs *splitVecBufs, cmds []command, quality int) {
 	// Extract and split command prefixes.
 	bufs.sbUint16 = growUint16(bufs.sbUint16, len(cmds))
-	symbols = bufs.sbUint16[:len(cmds)]
+	symbols := bufs.sbUint16[:len(cmds)]
 	for i := range cmds {
 		symbols[i] = cmds[i].cmdPrefix
 	}

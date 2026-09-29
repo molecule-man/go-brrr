@@ -188,7 +188,7 @@ func TestSplitByteVectorShort(t *testing.T) {
 		data[i] = uint16(i % 10)
 	}
 	var split blockSplit
-	splitByteVector(&split, &q10Bufs{}, data, len(data), splitVecParams{544, 100, 70, 28.1, 10, 256})
+	splitByteVector(&split, &splitVecBufs{}, data, len(data), splitVecParams{544, 100, 70, 28.1, 10, 256})
 
 	if split.numTypes != 1 {
 		t.Errorf("short input: numTypes = %d, want 1", split.numTypes)
@@ -200,7 +200,7 @@ func TestSplitByteVectorShort(t *testing.T) {
 
 func TestSplitByteVectorEmpty(t *testing.T) {
 	var split blockSplit
-	splitByteVector(&split, &q10Bufs{}, nil, 0, splitVecParams{544, 100, 70, 28.1, 10, 256})
+	splitByteVector(&split, &splitVecBufs{}, nil, 0, splitVecParams{544, 100, 70, 28.1, 10, 256})
 	if split.numTypes != 1 {
 		t.Errorf("empty input: numTypes = %d, want 1", split.numTypes)
 	}
@@ -222,7 +222,7 @@ func TestSplitByteVectorAlternatingDistributions(t *testing.T) {
 	}
 
 	var split blockSplit
-	splitByteVector(&split, &q10Bufs{}, data, length, splitVecParams{544, 100, 70, 28.1, 10, 256})
+	splitByteVector(&split, &splitVecBufs{}, data, length, splitVecParams{544, 100, 70, 28.1, 10, 256})
 
 	// Should detect multiple block types.
 	if split.numTypes < 2 {
@@ -264,7 +264,9 @@ func TestSplitBlockEndToEnd(t *testing.T) {
 	}
 
 	var litSplit, cmdSplit, distSplit blockSplit
-	splitBlock(&litSplit, &cmdSplit, &distSplit, &q10Bufs{}, cmds, data, 0, mask, 10)
+	var bufs q10Bufs
+	splitBlock(&litSplit, &cmdSplit, &distSplit, &bufs, cmds, data, 0, mask, 10)
+	bufs.hqCollector.stop()
 
 	// Basic sanity: all splits should have at least 1 type.
 	if litSplit.numTypes < 1 {
