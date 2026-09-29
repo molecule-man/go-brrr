@@ -29,24 +29,6 @@ const (
 	maxDictHandoffs = 64
 )
 
-// dictOwnership records static-dictionary handoffs. The collector owns the search first.
-// Handoffs alternate owners. The collector records each handoff before it publishes
-// that position, so the DP sees all handoffs through each published position.
-type dictOwnership struct {
-	request atomic.Bool
-	_       [64]byte
-	dpPos   atomic.Uint64
-	_       [64]byte
-	count   atomic.Uint32
-	at      [maxDictHandoffs]uint64
-}
-
-func (d *dictOwnership) reset() {
-	d.request.Store(false)
-	d.dpPos.Store(0)
-	d.count.Store(0)
-}
-
 const (
 	hqJobCollect hqJob = iota
 	hqJobSplit
@@ -93,6 +75,24 @@ type matchFeed struct {
 	// dictHandoff enables static-dictionary handoffs between the collector and the DP.
 	dictHandoff bool
 	_           [64]byte
+}
+
+// dictOwnership records static-dictionary handoffs. The collector owns the search first.
+// Handoffs alternate owners. The collector records each handoff before it publishes
+// that position, so the DP sees all handoffs through each published position.
+type dictOwnership struct {
+	dpPos   atomic.Uint64
+	_       [64]byte
+	request atomic.Bool
+	_       [64]byte
+	count   atomic.Uint32
+	at      [maxDictHandoffs]uint64
+}
+
+func (d *dictOwnership) reset() {
+	d.request.Store(false)
+	d.dpPos.Store(0)
+	d.count.Store(0)
 }
 
 func (f *matchFeed) reset() {

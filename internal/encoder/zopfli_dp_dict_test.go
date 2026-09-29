@@ -317,8 +317,9 @@ func dpDictRing(data []byte) ([]byte, uint) {
 	return rb, uint(len(rb) - 1)
 }
 
-func dpDictCollect(tb testing.TB, rb []byte, mask, numBytes uint, quality, lgwin int, skipDict bool) *q10Bufs {
+func dpDictCollect(tb testing.TB, rb []byte, mask, numBytes uint, lgwin int, skipDict bool) *q10Bufs {
 	tb.Helper()
+	const quality = 10
 	h := &h10{lgwin: lgwin, quality: quality, skipDict: skipDict}
 	h.reset(true, numBytes, nil)
 	storeEnd := uint(0)
@@ -397,8 +398,8 @@ func TestZopfliIterateSearchingTheDictionaryItselfProducesTheBeforeNodesFromACol
 			const quality = 10
 			rb, mask := dpDictRing(in.data)
 			n := uint(len(in.data))
-			withDict := dpDictCollect(t, rb, mask, n, quality, lgwin, false)
-			lzOnly := dpDictCollect(t, rb, mask, n, quality, lgwin, true)
+			withDict := dpDictCollect(t, rb, mask, n, lgwin, false)
+			lzOnly := dpDictCollect(t, rb, mask, n, lgwin, true)
 
 			var wantModel, dpModel, keptModel zopfliCostModel
 			wantNodes := dpDictNodes(rb, mask, n, &wantModel)
@@ -465,8 +466,8 @@ func TestZopfliIterateWithTheDictionaryHandedBackAndForthProducesTheBeforeNodesF
 		const quality, lgwin = 10, 22
 		rb, mask := dpDictRing(in.data)
 		n := uint(len(in.data))
-		withDict := dpDictCollect(t, rb, mask, n, quality, lgwin, false)
-		lzOnly := dpDictCollect(t, rb, mask, n, quality, lgwin, true)
+		withDict := dpDictCollect(t, rb, mask, n, lgwin, false)
+		lzOnly := dpDictCollect(t, rb, mask, n, lgwin, true)
 		var wantModel zopfliCostModel
 		wantNodes := dpDictNodes(rb, mask, n, &wantModel)
 		want := zopfliIterateBeforeDPDict(wantNodes, rb, []int{4, 11, 15, 16}, &wantModel,
