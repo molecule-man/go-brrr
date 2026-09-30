@@ -21,6 +21,17 @@ import (
 const (
 	feedPublishBatch   = 512
 	feedSpinBeforePark = 128
+	// Before dictHandoffMinPos, DP stalls reflect initial batches or blocks
+	// too small to benefit from a static-dictionary handoff.
+	dictHandoffMinPos = 16 * feedPublishBatch
+	// dictReclaimLead is the collector lead required to reclaim the static-dictionary search.
+	dictReclaimLead = 16 * feedPublishBatch
+	maxDictHandoffs = 64
+)
+
+const (
+	hqJobCollect hqJob = iota
+	hqJobSplit
 )
 
 // hqMatchesPerByte reserves match space for the parallel collector.
@@ -30,8 +41,12 @@ type hqCollector struct {
 	bufs             *q10Bufs
 	hasher           *h10
 	compound         *compoundDictionary
-	start            chan struct{}
+	start            chan hqJob
 	done             chan struct{}
+	cmdSplit         *blockSplit
+	distSplit        *blockSplit
+	cmds             []command
+	splitVecBufs     splitVecBufs
 	ringbuffer       []byte
 	numBytes         uint
 	position         uint
@@ -45,6 +60,8 @@ type hqCollector struct {
 	lzScratch        [h10MaxNumMatches]backwardMatch
 }
 
+type hqJob uint8
+
 // matchFeed shares collected matches with the first DP pass. Buffer growth
 // aborts the feed because the DP holds the prior match buffer. A parked DP
 // waits for more matches or an abort.
@@ -54,13 +71,35 @@ type matchFeed struct {
 	ready   atomic.Uint64
 	aborted atomic.Bool
 	parked  atomic.Bool
+	dict    dictOwnership
+	// dictHandoff enables static-dictionary handoffs between the collector and the DP.
+	dictHandoff bool
+	_           [64]byte
+}
+
+// dictOwnership records static-dictionary handoffs. The collector owns the search first.
+// Handoffs alternate owners. The collector records each handoff before it publishes
+// that position, so the DP sees all handoffs through each published position.
+type dictOwnership struct {
+	dpPos   atomic.Uint64
 	_       [64]byte
+	request atomic.Bool
+	_       [64]byte
+	count   atomic.Uint32
+	at      [maxDictHandoffs]uint64
+}
+
+func (d *dictOwnership) reset() {
+	d.request.Store(false)
+	d.dpPos.Store(0)
+	d.count.Store(0)
 }
 
 func (f *matchFeed) reset() {
 	f.ready.Store(0)
 	f.aborted.Store(false)
 	f.parked.Store(false)
+	f.dict.reset()
 	if f.wake == nil {
 		f.wake = make(chan struct{}, 1)
 	}
@@ -169,7 +208,7 @@ func createHqZopfliBackwardReferences(numBytes, position uint, ringbuffer []byte
 	if quality < hqZopflificationQuality {
 		passes = 1
 		if numBytes >= longCopyQuickStep {
-			forestUsed = min(len(hasher.forest), 2*int(position+numBytes))
+			forestUsed = int(min(uint64(len(hasher.forest)), 2*uint64(position+numBytes)))
 			n := forestUsed + len(hasher.buckets)
 			if cap(bufs.hqHasherSnap) < n {
 				bufs.hqHasherSnap = make([]uint32, len(hasher.forest)+len(hasher.buckets))
@@ -195,9 +234,14 @@ func createHqZopfliBackwardReferences(numBytes, position uint, ringbuffer []byte
 	col.storeEnd = storeEnd
 	col.shadowMatches = shadowMatches
 	col.quality = quality
+	feed.dictHandoff = bufs.parallel && quality < hqZopflificationQuality && !hasCompound
+	var dict *dictOwnership
+	if feed.dictHandoff {
+		dict = &feed.dict
+	}
 	var firstPassFeed *matchFeed
 	if bufs.parallel {
-		col.begin()
+		col.begin(hqJobCollect)
 		firstPassFeed = feed
 	} else {
 		col.collect()
@@ -237,17 +281,18 @@ func createHqZopfliBackwardReferences(numBytes, position uint, ringbuffer []byte
 		restore()
 
 		result := zopfliIterate(nodes, ringbuffer, distCache, model, numMatchesArr, matches,
-			numBytes, position, ringBufferMask, gap, compound, quality, lgwin, f)
+			numBytes, position, ringBufferMask, gap, compound, quality, lgwin, f, dict)
 		if result == zopfliIterateAborted {
 			col.wait()
 			matches = bufs.hqMatches
 			initZopfliNodes(nodes)
 			restore()
 			result = zopfliIterate(nodes, ringbuffer, distCache, model, numMatchesArr, matches,
-				numBytes, position, ringBufferMask, gap, compound, quality, lgwin, nil)
+				numBytes, position, ringBufferMask, gap, compound, quality, lgwin, nil, dict)
 		}
 		if result == zopfliIterateDiverged {
 			col.wait()
+			hasher.skipDict = false
 			copy(hasher.forest[:forestUsed], bufs.hqHasherSnap)
 			copy(hasher.buckets[:], bufs.hqHasherSnap[forestUsed:])
 			restore()
@@ -258,21 +303,26 @@ func createHqZopfliBackwardReferences(numBytes, position uint, ringbuffer []byte
 		zopfliCreateCommands(nodes, numBytes, position, maxBackwardLimit, gap, distCache, lastInsertLen, commands, numLiterals)
 	}
 	col.wait()
+	hasher.skipDict = false
 }
 
-func (c *hqCollector) begin() {
+func (c *hqCollector) begin(job hqJob) {
 	if c.start == nil {
-		c.start = make(chan struct{})
+		c.start = make(chan hqJob)
 		c.done = make(chan struct{})
 		go c.serve(c.start, c.done)
 	}
 	c.busy = true
-	c.start <- struct{}{}
+	c.start <- job
 }
 
-func (c *hqCollector) serve(start <-chan struct{}, done chan<- struct{}) {
-	for range start {
-		c.collect()
+func (c *hqCollector) serve(start <-chan hqJob, done chan<- struct{}) {
+	for job := range start {
+		if job == hqJobSplit {
+			splitCommandsAndDistances(c.cmdSplit, c.distSplit, &c.splitVecBufs, c.cmds, c.quality)
+		} else {
+			c.collect()
+		}
 		done <- struct{}{}
 	}
 }
@@ -318,11 +368,24 @@ func (c *hqCollector) collect() {
 	curMatchPos := uint(0)
 	nextPublish := uint(0)
 	aborted := false
+	dpOwnsDict := false
+	handoffs := uint32(0)
 	// Phase 1: Collect all matches.
 	for i := uint(0); i+h10HashTypeLength-1 < numBytes; i++ {
 		pos := position + i
 		maxDistance := min(pos, maxBackwardLimit)
 		maxLength := numBytes - i
+
+		if feed.dictHandoff && handoffs < maxDictHandoffs &&
+			(!dpOwnsDict && feed.dict.request.Load() ||
+				dpOwnsDict && uint64(i) > feed.dict.dpPos.Load()+dictReclaimLead) {
+			feed.dict.at[handoffs] = uint64(i)
+			handoffs++
+			feed.dict.count.Store(handoffs)
+			feed.dict.request.Store(false)
+			dpOwnsDict = !dpOwnsDict
+			hasher.skipDict = dpOwnsDict
+		}
 
 		// Ensure capacity (grow-and-reuse via bufs).
 		if curMatchPos+h10MaxNumMatches+shadowMatches > uint(len(matches)) {

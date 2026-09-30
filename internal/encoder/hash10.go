@@ -54,13 +54,14 @@ const (
 // forest[2*(pos & windowMask)+1] is the right child.
 type h10 struct {
 	bufs    *q10Bufs // reusable scratch buffers for Zopfli DP
-	forest  []uint32 // length = 2 * window size
+	forest  []uint32
 	lgwin   int
 	quality int
 	hasherCommon
 	windowMask uint32
 	invalidPos uint32
 	buckets    [h10BucketSize]uint32
+	skipDict   bool
 }
 
 func (h *h10) common() *hasherCommon {
@@ -69,16 +70,12 @@ func (h *h10) common() *hasherCommon {
 
 // reset initializes the hasher for a new compression session.
 // All bucket roots are set to invalidPos (sentinel for empty tree).
-// The forest is allocated once and reused across metablocks.
-func (h *h10) reset(oneShot bool, inputSize uint, _ []byte) {
+func (h *h10) reset(_ bool, inputSize uint, _ []byte) {
 	lgwin := h.lgwin
 	h.windowMask = (1 << lgwin) - 1
 	h.invalidPos = 0 - h.windowMask
 
-	numNodes := uint(1) << lgwin
-	if oneShot && inputSize < numNodes {
-		numNodes = inputSize
-	}
+	numNodes := min(uint(1)<<lgwin, inputSize)
 	if len(h.forest) < int(2*numNodes) {
 		h.forest = make([]uint32, 2*numNodes)
 	}
@@ -379,6 +376,15 @@ func (h *h10) findAllMatches(
 	// Search the RFC 7932 static dictionary for matches at all lengths
 	// longer than the best LZ77 match found so far. Each length's best
 	// dictionary match is converted to a backwardMatch.
+	if !h.skipDict {
+		nMatches += staticDictBackwardMatches(data, curIxMasked, bestLen, maxLength, dictionaryDistance, matches[nMatches:])
+	}
+
+	return uint(nMatches)
+}
+
+func staticDictBackwardMatches(data []byte, curIxMasked, bestLen, maxLength, dictionaryDistance uint, matches []backwardMatch) int {
+	nMatches := 0
 	minLen := max(uint(4), bestLen+1)
 	maxLen := min(uint(maxStaticDictMatchLen), maxLength)
 	if minLen <= maxLen {
@@ -399,8 +405,7 @@ func (h *h10) findAllMatches(
 			}
 		}
 	}
-
-	return uint(nMatches)
+	return nMatches
 }
 
 // store records position ix in the binary tree without returning matches.
@@ -438,6 +443,7 @@ func (h *h10) storeRange(data []byte, mask, ixStart, ixEnd uint) {
 // that could not be stored earlier because they required data from the
 // current block (the sequence at those positions spans the block boundary).
 func (h *h10) stitchToPreviousBlock(numBytes, position uint, ringBuffer []byte, ringBufferMask uint) {
+	h.growForest(position + numBytes)
 	// Need at least 3 bytes (hashTypeLength - 1 = 4 - 1) and the position
 	// must be past the initial StoreLookahead region.
 	if numBytes < 3 || position < h10MaxTreeCompLength {
@@ -454,6 +460,17 @@ func (h *h10) stitchToPreviousBlock(numBytes, position uint, ringBuffer []byte, 
 		maxBackward := uint(h.windowMask) - max(core.WindowGap-1, position-i)
 		h.storeOnly(ringBuffer, i, ringBufferMask, maxBackward)
 	}
+}
+
+func (h *h10) growForest(end uint) {
+	window := uint(h.windowMask) + 1
+	need := 2 * min(window, end)
+	if uint(len(h.forest)) >= need {
+		return
+	}
+	forest := make([]uint32, min(max(need, 2*uint(len(h.forest))), 2*window))
+	copy(forest, h.forest)
+	h.forest = forest
 }
 
 // createBackwardReferences runs the Zopfli optimal parsing algorithm to
