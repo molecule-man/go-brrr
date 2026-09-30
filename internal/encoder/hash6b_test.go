@@ -40,9 +40,17 @@ func (h *h6b[B]) findLongestMatchBefore(
 
 	nextKey := h6bHash(data, (cur+1)&ringBufferMask)
 	nextBucket := bucketRingAt(unsafe.Pointer(&h.buckets), nextKey, blockShift)
-	nextN := uint(h.num[nextKey])
-	prefetch2(unsafe.Add(nextBucket.base, ((nextN-1)&blockMask)<<2),
-		unsafe.Add(nextBucket.base, ((nextN-17)&blockMask)<<2))
+	nextN := h.num[nextKey]
+	if hasPrefetch {
+		prefetch2(unsafe.Add(nextBucket.base, (uint(nextN-1)&blockMask)<<2),
+			unsafe.Add(nextBucket.base, (uint(nextN-17)&blockMask)<<2))
+	} else {
+		h.nextBucket = nextBucket.at(0)
+		if nextN > 0 {
+			p := uint(nextBucket.at(uint((nextN-1)&uint16(blockMask)))) & ringBufferMask
+			h.nextBucket = uint32(data[p])
+		}
+	}
 
 	out.len = 0
 	out.lenCodeDelta = 0
@@ -247,11 +255,11 @@ func h6bCompareUnrolledWithLoop[B h6bBlock](input h6bInput) error {
 		want := *out
 		p.before.findLongestMatchBefore(data, mask, distCache, cur, maxLength, maxBackward, maxBackward, &beforeLookups, &beforeMatches, &want)
 		p.after.findLongestMatch(data, mask, distCache, cur, maxLength, maxBackward, maxBackward, &afterLookups, &afterMatches, out)
-		if *out != want || afterLookups != beforeLookups || afterMatches != beforeMatches {
-			return fmt.Errorf("cur=%d maxLength=%d maxBackward=%d distCache=%v: unrolled search gave %+v dict=%d/%d, the loop it replaces gave %+v dict=%d/%d, so q7/q8 output would stop matching the C reference",
+		if *out != want || p.after.nextBucket != p.before.nextBucket || afterLookups != beforeLookups || afterMatches != beforeMatches {
+			return fmt.Errorf("cur=%d maxLength=%d maxBackward=%d distCache=%v: unrolled search gave %+v nextBucket=%d dict=%d/%d, the loop it replaces gave %+v nextBucket=%d dict=%d/%d, so q7/q8 output would stop matching the C reference",
 				cur, maxLength, maxBackward, distCache[:h6bNumLastDistances],
-				*out, afterLookups, afterMatches,
-				want, beforeLookups, beforeMatches)
+				*out, p.after.nextBucket, afterLookups, afterMatches,
+				want, p.before.nextBucket, beforeLookups, beforeMatches)
 		}
 		return nil
 	}
