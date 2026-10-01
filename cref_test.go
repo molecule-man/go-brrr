@@ -71,7 +71,7 @@ func crefTestCases(t *testing.T) []struct {
 	cases := make([]struct {
 		name  string
 		input []byte
-	}, 0, len(corpusFiles)+5)
+	}, 0, len(corpusFiles)+7)
 
 	for _, name := range corpusFiles {
 		cases = append(cases, struct {
@@ -105,6 +105,14 @@ func crefTestCases(t *testing.T) []struct {
 			name  string
 			input []byte
 		}{"pseudo_random_65536", pseudoRandomBytesCRef(65536, 99)},
+		struct {
+			name  string
+			input []byte
+		}{"match_ending_at_ring_end_262144", matchEndingAtRingEndCRef(1 << 18)},
+		struct {
+			name  string
+			input []byte
+		}{"run_heavy_327680", runHeavyCRef(1<<18+1<<16, 118)},
 	)
 
 	return cases
@@ -204,12 +212,9 @@ func testMatchesCRef(t *testing.T, quality, lgwin int, sizeHint uint) {
 			// Conditions where Go output may differ from C but both are valid:
 			//   - Q10+: rounding differences between Go's math.Log2 and the
 			//     C math library's log2 can change Zopfli command choices.
-			//   - Q5–9 lgwin>16: h5/h6 hashers elide ring-buffer end checks
-			//     (the tail mirror makes them redundant), which can produce
-			//     different match selections vs the C reference.
 			// Allow 0.02% above C's size, rounded up to avoid a zero-byte
 			// allowance on small streams. Both decoders verify the output above.
-			if quality >= 10 || (quality >= 5 && lgwin > 16) {
+			if quality >= 10 {
 				goLen := len(goOut)
 				cLen := len(cOut)
 				threshold := math.Ceil(float64(cLen) * 1.0002)
@@ -236,10 +241,10 @@ func testMatchesCRef(t *testing.T, quality, lgwin int, sizeHint uint) {
 }
 
 // TestMatchesCRef verifies the Go streaming encoder against the C reference
-// across quality levels, window sizes, and size hints. For Q5–9 lgwin>16 and
-// Q10–11 it checks roundtrip correctness and that compressed size is within
-// 0.02% of C. Other combinations check byte-identical output. All qualities
-// verify roundtrip via C and Go decompression.
+// across quality levels, window sizes, and size hints. For Q10–11 it checks
+// roundtrip correctness and that compressed size is within 0.02% of C. Other
+// combinations check byte-identical output. All qualities verify roundtrip via
+// C and Go decompression.
 func TestMatchesCRef(t *testing.T) {
 	t.Parallel()
 
@@ -252,9 +257,9 @@ func TestMatchesCRef(t *testing.T) {
 		{"1MiB", 1 << 20},
 	}
 
-	lgwinValues := []int{14, 22, 24}
+	lgwinValues := []int{14, 17, 22, 24}
 	if os.Getenv("BRRR_LONG_TESTS") != "" {
-		lgwinValues = []int{10, 14, 18, 22, 24}
+		lgwinValues = []int{10, 14, 17, 18, 22, 24}
 	}
 
 	for _, sh := range sizeHints {
@@ -718,4 +723,47 @@ func pseudoRandomBytesCRef(n int, seed uint64) []byte {
 		b[i] = byte(rng.IntN(256))
 	}
 	return b
+}
+
+func matchEndingAtRingEndCRef(n int) []byte {
+	rng := rand.New(rand.NewPCG(uint64(n), 7))
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = 'a' + byte(rng.IntN(16))
+	}
+	tail := n - 32
+	copy(b[tail-4999:tail-4999+32], b[tail-9000:tail-9000+32])
+	b[n-4999] = b[0]
+	for i, d := range []int{9000, 7000, 6000, 5000} {
+		at := tail - 800 + i*200
+		copy(b[at:at+200], b[at-d:at-d+200])
+	}
+	copy(b[tail:], b[tail-9000:tail-9000+32])
+	return b
+}
+
+func runHeavyCRef(n int, seed uint64) []byte {
+	rng := rand.New(rand.NewPCG(seed, 5))
+	b := make([]byte, 0, n)
+	for len(b) < n {
+		switch rng.IntN(3) {
+		case 0:
+			c := byte('a' + rng.IntN(2))
+			for k := 1 + rng.IntN(300); k > 0; k-- {
+				b = append(b, c)
+			}
+		case 1:
+			if len(b) > 8 {
+				d := 1 + rng.IntN(min(len(b), 60000))
+				for k := 4 + rng.IntN(300); k > 0; k-- {
+					b = append(b, b[len(b)-d])
+				}
+			}
+		default:
+			for k := 1 + rng.IntN(20); k > 0; k-- {
+				b = append(b, byte('a'+rng.IntN(2)))
+			}
+		}
+	}
+	return b[:n]
 }
