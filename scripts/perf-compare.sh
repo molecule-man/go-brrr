@@ -7,17 +7,19 @@
 #   BENCHTIME   passed to -test.benchtime; MUST be Nx form so before/after do
 #               the same work (default 100000x).
 #   COUNT       perf stat -r repetition count (default 10).
+#   PROCS       passed to -test.cpu, which sets GOMAXPROCS (default 1).
 
 set -euo pipefail
 
 BENCH_PATTERN="${1:?usage: perf-compare.sh <bench-pattern>}"
 BENCHTIME="${BENCHTIME:-1000x}"
 COUNT="${COUNT:-10}"
+PROCS="${PROCS:-1}"
 
 BEFORE_BIN="/tmp/bench-before.test"
 AFTER_BIN="/tmp/bench-after.test"
 
-EVENTS='cpu_core/cycles/u,cpu_core/instructions/u,cpu_core/branches/u,cpu_core/br_misp_retired.cond/u,cpu_core/frontend_retired.l1i_miss/u,cpu_core/mem_load_retired.l1_miss/u,cpu_core/idq.dsb_uops/u,cpu_core/idq.mite_uops/u'
+EVENTS='task-clock,cpu_core/cycles/u,cpu_core/instructions/u,cpu_core/branches/u,cpu_core/br_misp_retired.cond/u,cpu_core/frontend_retired.l1i_miss/u,cpu_core/mem_load_retired.l1_miss/u,cpu_core/idq.dsb_uops/u,cpu_core/idq.mite_uops/u'
 
 ./scripts/testbins.sh
 
@@ -26,16 +28,19 @@ AFTER_CSV=$(mktemp /tmp/perf-compare.XXXXXX.after.csv)
 trap 'rm -f "$BEFORE_CSV" "$AFTER_CSV"' EXIT
 
 run_side() {
-    local bin="$1" out="$2"
-    GOGC=off setarch -R perf stat -x',' -r "$COUNT" -e "$EVENTS" -o "$out" -- \
+    local bin="$1" out="$2" start end
+    start=$(date +%s%N)
+    LC_ALL=C GOGC=off setarch -R perf stat -x',' -r "$COUNT" -e "$EVENTS" -o "$out" -- \
         "$bin" -test.run '^$' -test.bench "$BENCH_PATTERN" \
-               -test.cpu=1 -test.benchtime "$BENCHTIME" -test.count=1 \
+               -test.cpu="$PROCS" -test.benchtime "$BENCHTIME" -test.count=1 \
         > /dev/null
+    end=$(date +%s%N)
+    echo "$(( (end - start) / COUNT / 1000000 )),ms,elapsed" >> "$out"
 }
 
-echo "before: $COUNT reps x -benchtime=$BENCHTIME" >&2
+echo "before: $COUNT reps x -benchtime=$BENCHTIME, GOMAXPROCS=$PROCS" >&2
 run_side "$BEFORE_BIN" "$BEFORE_CSV"
-echo "after:  $COUNT reps x -benchtime=$BENCHTIME" >&2
+echo "after:  $COUNT reps x -benchtime=$BENCHTIME, GOMAXPROCS=$PROCS" >&2
 run_side "$AFTER_BIN"  "$AFTER_CSV"
 
 awk -F, -v before="$BEFORE_CSV" -v after="$AFTER_CSV" '
@@ -67,6 +72,14 @@ BEGIN {
     load(before, B); load(after, A)
     printf "%-32s  %12s  %12s  %11s\n", "event", "before", "after", "delta"
     print  "----------------------------------------------------------------------------"
+    row("elapsed (ms per rep)", B["elapsed"], A["elapsed"])
+    row("task-clock (ms, all threads)", B["task-clock"], A["task-clock"])
+    if (B["elapsed"] > 0 && A["elapsed"] > 0) {
+        u_b = B["task-clock"] / B["elapsed"]
+        u_a = A["task-clock"] / A["elapsed"]
+        printf "%-32s  %12.2f  %12.2f  %+10.2f%%\n", "CPU utilization (cores)", u_b, u_a,
+               (u_a - u_b) / u_b * 100
+    }
     n = split("cycles instructions branches br_misp_retired.cond " \
               "frontend_retired.l1i_miss mem_load_retired.l1_miss " \
               "idq.dsb_uops idq.mite_uops", evs, " ")
