@@ -37,7 +37,7 @@ func histogramCombineRedirectFixture(tb testing.TB, n, oldOneIn int) []uint32 {
 }
 
 func TestHistogramCombineRedirectMatchesTheScalarLoopAtEveryLengthAndMatchDensityAndNeverWritesPastTheSlice(t *testing.T) {
-	var lengths []int
+	lengths := make([]int, 0, 304)
 	for n := range 301 {
 		lengths = append(lengths, n)
 	}
