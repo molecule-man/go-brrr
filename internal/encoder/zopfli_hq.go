@@ -31,7 +31,9 @@ const (
 
 const (
 	hqJobCollect hqJob = iota
-	hqJobSplit
+	hqJobSplitCommands
+	hqJobSplitDistances
+	hqJobClusterDistances
 )
 
 // hqMatchesPerByte reserves match space for the parallel collector.
@@ -47,6 +49,9 @@ type hqCollector struct {
 	distSplit        *blockSplit
 	cmds             []command
 	splitVecBufs     splitVecBufs
+	clusterIn        []uint32
+	clusterOut       []uint32
+	clusterSymbols   []uint32
 	ringbuffer       []byte
 	numBytes         uint
 	position         uint
@@ -55,7 +60,11 @@ type hqCollector struct {
 	gap              uint
 	storeEnd         uint
 	shadowMatches    uint
+	clusterInSize    int
+	clusterAlphabet  int
+	clusterOutSize   int
 	quality          int
+	distParams       distanceParams
 	busy             bool
 	lzScratch        [h10MaxNumMatches]backwardMatch
 }
@@ -318,9 +327,16 @@ func (c *hqCollector) begin(job hqJob) {
 
 func (c *hqCollector) serve(start <-chan hqJob, done chan<- struct{}) {
 	for job := range start {
-		if job == hqJobSplit {
-			splitCommandsAndDistances(c.cmdSplit, c.distSplit, &c.splitVecBufs, c.cmds, c.quality)
-		} else {
+		switch job {
+		case hqJobSplitCommands:
+			splitCommands(c.cmdSplit, &c.splitVecBufs, c.cmds, c.quality)
+		case hqJobSplitDistances:
+			c.distParams = optimizeDistanceParams(c.cmds, &c.bufs.bmTmpHist)
+			splitDistances(c.distSplit, &c.splitVecBufs, c.cmds, c.quality)
+		case hqJobClusterDistances:
+			c.clusterOutSize, c.clusterSymbols = clusterHistograms(c.clusterIn, c.clusterInSize, c.clusterAlphabet,
+				maxHistograms, c.clusterOut, &c.bufs.distClusterBufs)
+		default:
 			c.collect()
 		}
 		done <- struct{}{}
@@ -345,6 +361,10 @@ func (c *hqCollector) stop() {
 	c.hasher = nil
 	c.compound = nil
 	c.ringbuffer = nil
+	c.cmds = nil
+	c.clusterIn = nil
+	c.clusterOut = nil
+	c.clusterSymbols = nil
 }
 
 func (c *hqCollector) collect() {

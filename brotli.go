@@ -44,7 +44,7 @@ type WriterOptions struct {
 	SizeHint uint
 
 	// Parallelism limits concurrent work per Writer. At levels 10 and 11,
-	// values of 2 or more use the caller and one worker goroutine. Other
+	// values of 2 or more use the caller and up to two worker goroutines. Other
 	// valid values use the caller only. Parallel mode can reduce latency
 	// but uses more memory. Benchmarks show similar total throughput when
 	// all CPUs are busy. Negative values are invalid. A Writer does not
