@@ -204,18 +204,6 @@ func benchSizeHint() uint {
 	return 0
 }
 
-// BENCH_PARALLELISM sets WriterOptions.Parallelism.
-func benchParallelism() int {
-	if s := os.Getenv("BENCH_PARALLELISM"); s != "" {
-		v, err := strconv.Atoi(s)
-		if err != nil {
-			panic(fmt.Sprintf("invalid BENCH_PARALLELISM=%q: %v", s, err))
-		}
-		return v
-	}
-	return 0
-}
-
 // benchChunkSize returns the chunk size for streaming Write calls in
 // benchCompress. 0 means "single Write of the full payload" (the default).
 // Set BENCH_CHUNK_SIZE=32768 to model an HTTP server feeding the encoder via
@@ -310,7 +298,7 @@ func BenchmarkCompress(b *testing.B) {
 
 				b.Run("payload="+tc.name+suffix, func(b *testing.B) {
 					b.Run("impl=go-brrr", func(b *testing.B) {
-						opts := brrr.WriterOptions{LGWin: lgwin, SizeHint: sizeHint, Parallelism: benchParallelism()}
+						opts := brrr.WriterOptions{LGWin: lgwin, SizeHint: sizeHint}
 						if dict != nil {
 							pd, err := brrr.PrepareDictionary(dict)
 							if err != nil {
@@ -466,7 +454,7 @@ func BenchmarkCompressOneshot(b *testing.B) {
 				b.Run("payload="+tc.name+suffix, func(b *testing.B) {
 					b.Run("impl=go-brrr", func(b *testing.B) {
 						benchCompressOneshot(b, func(w io.Writer, quality, lgwin int) (io.WriteCloser, error) {
-							return brrr.NewWriterOptions(w, quality, brrr.WriterOptions{LGWin: lgwin, SizeHint: sizeHint, Parallelism: benchParallelism()})
+							return brrr.NewWriterOptions(w, quality, brrr.WriterOptions{LGWin: lgwin, SizeHint: sizeHint})
 						}, payloads, q, lgwin)
 					})
 					for _, ec := range extraCompressors {

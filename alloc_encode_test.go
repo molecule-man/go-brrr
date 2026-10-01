@@ -15,17 +15,17 @@ import (
 
 func TestReusedWriterCompressesAStreamWithoutAllocating(t *testing.T) {
 	in := allocTestPayload(t)
-	for _, parallelism := range []int{1, 2} {
+	for _, workers := range []bool{false, true} {
 		for level := 0; level <= 11; level++ {
-			t.Run(fmt.Sprintf("p%d/q%d", parallelism, level), func(t *testing.T) {
-				testReusedWriterAllocations(t, in, level, parallelism)
+			t.Run(fmt.Sprintf("workers=%t/q%d", workers, level), func(t *testing.T) {
+				testReusedWriterAllocations(t, in, level, workers)
 			})
 		}
 	}
 }
 
-func testReusedWriterAllocations(t *testing.T, in []byte, level, parallelism int) {
-	w, err := NewWriterOptions(io.Discard, level, WriterOptions{SizeHint: uint(len(in)), Parallelism: parallelism})
+func testReusedWriterAllocations(t *testing.T, in []byte, level int, workers bool) {
+	w, err := newWriter(io.Discard, level, WriterOptions{SizeHint: uint(len(in))}, workers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func testReusedWriterAllocations(t *testing.T, in []byte, level, parallelism int
 		allocs = allocsBetweenCollections(2, stream)
 	}
 	if allocs != 0 {
-		t.Errorf("q%d p%d: got %.1f allocations per stream, want 0", level, parallelism, allocs)
+		t.Errorf("q%d workers=%t: got %.1f allocations per stream, want 0", level, workers, allocs)
 	}
 }
 
@@ -69,7 +69,7 @@ func TestHighQualityWriterReleasesItsMatchCollectorWhenClosedOrAbandoned(t *test
 	in := allocTestPayload(t)
 	baseline := waitForGoroutines(t, runtime.NumGoroutine())
 
-	w, err := NewWriterOptions(io.Discard, 11, WriterOptions{SizeHint: uint(len(in)), Parallelism: 8})
+	w, err := newWriter(io.Discard, 11, WriterOptions{SizeHint: uint(len(in))}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestHighQualityWriterReleasesItsMatchCollectorWhenClosedOrAbandoned(t *test
 	}
 
 	func() {
-		abandoned, err := NewWriterOptions(io.Discard, 10, WriterOptions{SizeHint: uint(len(in)), Parallelism: 2})
+		abandoned, err := newWriter(io.Discard, 10, WriterOptions{SizeHint: uint(len(in))}, true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -109,7 +109,7 @@ func TestSequentialWriterStartsNoGoroutine(t *testing.T) {
 	in := allocTestPayload(t)
 	baseline := waitForGoroutines(t, runtime.NumGoroutine())
 	for _, level := range []int{10, 11} {
-		w, err := NewWriterOptions(io.Discard, level, WriterOptions{SizeHint: uint(len(in)), Parallelism: 1})
+		w, err := newWriter(io.Discard, level, WriterOptions{SizeHint: uint(len(in))}, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -120,7 +120,7 @@ func TestSequentialWriterStartsNoGoroutine(t *testing.T) {
 			t.Fatal(err)
 		}
 		if got := runtime.NumGoroutine(); got > baseline {
-			t.Errorf("q%d p1: got %d goroutines, baseline %d", level, got, baseline)
+			t.Errorf("q%d without workers: got %d goroutines, baseline %d", level, got, baseline)
 		}
 		if err := w.Close(); err != nil {
 			t.Fatal(err)
@@ -128,38 +128,51 @@ func TestSequentialWriterStartsNoGoroutine(t *testing.T) {
 	}
 }
 
-func TestWriterOutputIsTheSameAtEveryParallelism(t *testing.T) {
+func TestWriterOutputIsTheSameWithAndWithoutWorkers(t *testing.T) {
 	in := allocTestPayload(t)
 	for _, level := range []int{9, 10, 11} {
-		want := writerStreamParallel(t, in, level, 0)
-		for _, parallelism := range []int{1, 2, 8} {
-			if got := writerStreamParallel(t, in, level, parallelism); !bytes.Equal(got, want) {
-				t.Errorf("q%d p%d: output differs from p0 (%d bytes versus %d)",
-					level, parallelism, len(got), len(want))
-			}
+		if got, want := writerStreamWorkers(t, in, level, true), writerStreamWorkers(t, in, level, false); !bytes.Equal(got, want) {
+			t.Errorf("q%d: output with workers differs from output without (%d bytes versus %d)",
+				level, len(got), len(want))
 		}
 	}
 }
 
-func TestWriterRejectsNegativeParallelism(t *testing.T) {
-	w, err := NewWriterOptions(io.Discard, 11, WriterOptions{Parallelism: -1})
-	if err == nil || w != nil {
-		t.Fatalf("NewWriterOptions with Parallelism -1 returned (%v, %v); want a nil Writer and an error", w, err)
-	}
-	if want := "brrr: invalid parallelism: -1"; err.Error() != want {
-		t.Fatalf("error = %q, want %q", err, want)
+func TestWriterStartsWorkersOnlyWithTwoOrMoreProcs(t *testing.T) {
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(0))
+	for _, c := range []struct {
+		procs, level int
+		want         bool
+	}{
+		{1, 10, false},
+		{1, 11, false},
+		{2, 9, false},
+		{2, 10, true},
+		{2, 11, true},
+	} {
+		runtime.GOMAXPROCS(c.procs)
+		w, err := NewWriter(io.Discard, c.level)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if w.parallel != c.want {
+			t.Errorf("GOMAXPROCS=%d q%d: parallel = %t, want %t", c.procs, c.level, w.parallel, c.want)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
 func writerStream(tb testing.TB, in []byte, level int) []byte {
 	tb.Helper()
-	return writerStreamParallel(tb, in, level, 0)
+	return writerStreamWorkers(tb, in, level, false)
 }
 
-func writerStreamParallel(tb testing.TB, in []byte, level, parallelism int) []byte {
+func writerStreamWorkers(tb testing.TB, in []byte, level int, workers bool) []byte {
 	tb.Helper()
 	var buf bytes.Buffer
-	w, err := NewWriterOptions(&buf, level, WriterOptions{SizeHint: uint(len(in)), Parallelism: parallelism})
+	w, err := newWriter(&buf, level, WriterOptions{SizeHint: uint(len(in))}, workers)
 	if err != nil {
 		tb.Fatal(err)
 	}

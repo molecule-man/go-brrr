@@ -1,4 +1,4 @@
-name: Fuzz
+name: Nightly
 
 on:
   schedule:
@@ -15,7 +15,7 @@ permissions:
   issues: write
 
 concurrency:
-  group: fuzz
+  group: nightly
   cancel-in-progress: false
 
 jobs:
@@ -93,3 +93,32 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SHA: ${{ github.sha }}
         run: .github/scripts/report-fuzz-failure.sh
+
+  race:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build C reference static library
+        run: make lib/libbrotli_cref.a
+
+      - name: Race test
+        run: go test -race ./...
+
+      - name: Report the failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: .github/scripts/report-race-failure.sh

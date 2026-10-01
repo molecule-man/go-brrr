@@ -26,6 +26,10 @@ type oneshotCompressor struct {
 // Writer compresses data into brotli format.
 //
 // Callers must Close the Writer to finalize the brotli stream.
+//
+// At levels 10 and 11, a Writer uses up to two worker goroutines when
+// GOMAXPROCS is at least 2. This can reduce latency but uses more memory.
+// A Writer does not support concurrent calls.
 type Writer struct {
 	dst      io.Writer
 	err      error
@@ -51,6 +55,10 @@ func NewWriter(dst io.Writer, level int) (*Writer, error) {
 // selects the default (22). Compound dictionaries supplied via opts.Dictionaries
 // require level >= 2.
 func NewWriterOptions(dst io.Writer, level int, opts WriterOptions) (*Writer, error) {
+	return newWriter(dst, level, opts, runtime.GOMAXPROCS(0) >= 2)
+}
+
+func newWriter(dst io.Writer, level int, opts WriterOptions, workers bool) (*Writer, error) {
 	if err := checkLevel(level); err != nil {
 		return nil, err
 	}
@@ -70,9 +78,6 @@ func NewWriterOptions(dst io.Writer, level int, opts WriterOptions) (*Writer, er
 	if len(opts.Dictionaries) > 0 && level < 2 {
 		return nil, encoder.ErrQualityTooLow
 	}
-	if opts.Parallelism < 0 {
-		return nil, errors.New("brrr: invalid parallelism: " + strconv.Itoa(opts.Parallelism))
-	}
 
 	w := &Writer{
 		dst:      dst,
@@ -80,7 +85,7 @@ func NewWriterOptions(dst io.Writer, level int, opts WriterOptions) (*Writer, er
 		lgwin:    lgwin,
 		sizeHint: opts.SizeHint,
 		dicts:    opts.Dictionaries,
-		parallel: opts.Parallelism >= 2 && level >= minWorkerLevel,
+		parallel: workers && level >= minWorkerLevel,
 	}
 	w.c = encoder.NewCompressor(w.quality, w.lgwin, w.sizeHint, w.parallel)
 	for _, pd := range w.dicts {
