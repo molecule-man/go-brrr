@@ -86,74 +86,20 @@ func buildMetaBlock(
 	mb *metaBlockSplit,
 	bufs *q10Bufs,
 ) distanceParams {
-	// Phase 1: Search for optimal distance parameters.
-	//
-	// Starting from (NPOSTFIX=0, NDIRECT=0), test all valid combinations.
-	// For each NPOSTFIX (0–3), sweep NDIRECT_MSB (0–15) where
-	// NDIRECT = NDIRECT_MSB << NPOSTFIX. Stop the inner loop when cost
-	// increases or a distance is out of range. Between outer iterations,
-	// halve NDIRECT_MSB to converge on the optimum.
-	origParams := initDistanceParams(0, 0)
-	bestParams := origParams
-	bestCost := 1e99
-	checkOrig := true
-
-	bufs.bmTmpHist = growUint32(bufs.bmTmpHist, int(origParams.alphabetSizeMax))
-	tmpHist := bufs.bmTmpHist
-	var ndirectMSB uint32
-
-	for npostfix := uint32(0); npostfix <= 3; npostfix++ {
-		for ; ndirectMSB < 16; ndirectMSB++ {
-			ndirect := ndirectMSB << npostfix
-			candidate := initDistanceParams(npostfix, ndirect)
-
-			if npostfix == origParams.postfixBits &&
-				ndirect == origParams.numDirectCodes {
-				checkOrig = false
-			}
-
-			// Ensure tmpHist is large enough for this candidate.
-			if int(candidate.alphabetSizeLimit) > len(tmpHist) {
-				bufs.bmTmpHist = growUint32(bufs.bmTmpHist, int(candidate.alphabetSizeLimit))
-				tmpHist = bufs.bmTmpHist
-			}
-
-			cost, ok := computeDistanceCost(cmds, origParams, candidate,
-				tmpHist[:candidate.alphabetSizeLimit])
-			if !ok || cost > bestCost {
-				break
-			}
-			bestCost = cost
-			bestParams = candidate
-		}
-		if ndirectMSB > 0 {
-			ndirectMSB--
-		}
-		ndirectMSB /= 2
-	}
-
-	if checkOrig {
-		if int(origParams.alphabetSizeLimit) > len(tmpHist) {
-			bufs.bmTmpHist = growUint32(bufs.bmTmpHist, int(origParams.alphabetSizeLimit))
-			tmpHist = bufs.bmTmpHist
-		}
-		cost, _ := computeDistanceCost(cmds, origParams, origParams,
-			tmpHist[:origParams.alphabetSizeLimit])
-		if cost < bestCost {
-			bestParams = origParams
-		}
-	}
-
-	recomputeDistancePrefixes(cmds, origParams, bestParams)
-
-	// Phase 2: Block splitting using iterative DP.
-	// Reset block splits to avoid appending to stale data from a previous
-	// encode (e.g. after Writer.Reset), preserving backing arrays.
+	// Phase 1 and 2: distance parameter search and block splitting.
 	mb.litSplit.reset()
 	mb.cmdSplit.reset()
 	mb.distSplit.reset()
-	splitBlock(&mb.litSplit, &mb.cmdSplit, &mb.distSplit, bufs,
-		cmds, ringbuffer, pos, mask, quality)
+	parallel := bufs.parallel && len(cmds) >= splitOffloadMinCommands
+	var bestParams distanceParams
+	if parallel {
+		bestParams = splitBlockParallel(&mb.litSplit, &mb.cmdSplit, &mb.distSplit, bufs,
+			cmds, ringbuffer, pos, mask, quality)
+	} else {
+		bestParams = optimizeDistanceParams(cmds, &bufs.bmTmpHist)
+		splitBlock(&mb.litSplit, &mb.cmdSplit, &mb.distSplit, bufs,
+			cmds, ringbuffer, pos, mask, quality)
+	}
 
 	// Phase 3: Build histograms with context.
 	distAlphabetSize := int(bestParams.alphabetSizeMax)
@@ -183,6 +129,19 @@ func buildMetaBlock(
 		litHistograms, mb.cmdHistograms, distHistograms)
 
 	// Phase 4: Cluster literal histograms.
+	distContextMapSize := mb.distSplit.numTypes << core.DistanceContextBits
+	bufs.bmDistOutHist = growUint32(bufs.bmDistOutHist, distContextMapSize*distAlphabetSize)
+	distOutHistograms := bufs.bmDistOutHist[:distContextMapSize*distAlphabetSize]
+	distWorker := &bufs.hqHelper
+	if parallel {
+		distWorker.bufs = bufs
+		distWorker.clusterIn = distHistograms
+		distWorker.clusterInSize = distHistSize
+		distWorker.clusterAlphabet = distAlphabetSize
+		distWorker.clusterOut = distOutHistograms
+		distWorker.begin(hqJobClusterDistances)
+	}
+
 	litContextMapSize := mb.litSplit.numTypes << core.LiteralContextBits
 	mb.literalContextMap = growUint32(mb.literalContextMap, litContextMapSize)
 
@@ -190,7 +149,7 @@ func buildMetaBlock(
 	litOutHistograms := bufs.bmLitOutHist[:litContextMapSize*core.AlphabetSizeLiteral]
 	litOutSize, litSymbols := clusterHistograms(
 		litHistograms, litHistSize, core.AlphabetSizeLiteral,
-		maxHistograms, litOutHistograms, bufs)
+		maxHistograms, litOutHistograms, &bufs.clusterBufs)
 	mb.litHistograms = litOutHistograms[:litOutSize*core.AlphabetSizeLiteral]
 
 	// Build the literal context map from cluster assignments.
@@ -210,18 +169,76 @@ func buildMetaBlock(
 	}
 
 	// Phase 5: Cluster distance histograms.
-	distContextMapSize := mb.distSplit.numTypes << core.DistanceContextBits
 	mb.distanceContextMap = growUint32(mb.distanceContextMap, distContextMapSize)
-
-	bufs.bmDistOutHist = growUint32(bufs.bmDistOutHist, distContextMapSize*distAlphabetSize)
-	distOutHistograms := bufs.bmDistOutHist[:distContextMapSize*distAlphabetSize]
-	distOutSize, distSymbols := clusterHistograms(
-		distHistograms, distHistSize, distAlphabetSize,
-		maxHistograms, distOutHistograms, bufs)
+	var distOutSize int
+	var distSymbols []uint32
+	if parallel {
+		distWorker.wait()
+		distOutSize, distSymbols = distWorker.clusterOutSize, distWorker.clusterSymbols
+	} else {
+		distOutSize, distSymbols = clusterHistograms(
+			distHistograms, distHistSize, distAlphabetSize,
+			maxHistograms, distOutHistograms, &bufs.distClusterBufs)
+	}
 	mb.distHistograms = distOutHistograms[:distOutSize*distAlphabetSize]
 
 	copy(mb.distanceContextMap, distSymbols)
 
+	return bestParams
+}
+
+func optimizeDistanceParams(cmds []command, tmpHistBuf *[]uint32) distanceParams {
+	origParams := initDistanceParams(0, 0)
+	bestParams := origParams
+	bestCost := 1e99
+	checkOrig := true
+
+	*tmpHistBuf = growUint32(*tmpHistBuf, int(origParams.alphabetSizeMax))
+	tmpHist := *tmpHistBuf
+	var ndirectMSB uint32
+
+	for npostfix := uint32(0); npostfix <= 3; npostfix++ {
+		for ; ndirectMSB < 16; ndirectMSB++ {
+			ndirect := ndirectMSB << npostfix
+			candidate := initDistanceParams(npostfix, ndirect)
+
+			if npostfix == origParams.postfixBits &&
+				ndirect == origParams.numDirectCodes {
+				checkOrig = false
+			}
+
+			if int(candidate.alphabetSizeLimit) > len(tmpHist) {
+				*tmpHistBuf = growUint32(*tmpHistBuf, int(candidate.alphabetSizeLimit))
+				tmpHist = *tmpHistBuf
+			}
+
+			cost, ok := computeDistanceCost(cmds, origParams, candidate,
+				tmpHist[:candidate.alphabetSizeLimit])
+			if !ok || cost > bestCost {
+				break
+			}
+			bestCost = cost
+			bestParams = candidate
+		}
+		if ndirectMSB > 0 {
+			ndirectMSB--
+		}
+		ndirectMSB /= 2
+	}
+
+	if checkOrig {
+		if int(origParams.alphabetSizeLimit) > len(tmpHist) {
+			*tmpHistBuf = growUint32(*tmpHistBuf, int(origParams.alphabetSizeLimit))
+			tmpHist = *tmpHistBuf
+		}
+		cost, _ := computeDistanceCost(cmds, origParams, origParams,
+			tmpHist[:origParams.alphabetSizeLimit])
+		if cost < bestCost {
+			bestParams = origParams
+		}
+	}
+
+	recomputeDistancePrefixes(cmds, origParams, bestParams)
 	return bestParams
 }
 
