@@ -2,8 +2,6 @@
 
 package encoder
 
-const minHistogramsForKernel = 0
-
 // findBlocksDPStep adds insertCost into cost and returns the minimum together
 // with the index of its first occurrence.
 func findBlocksDPStep(cost, insertCost []float64) (minCost float64, best int) {
@@ -35,4 +33,29 @@ func findBlocksStep(cost, insertCost []float64, sig []byte, switchCost float64) 
 	minCost, best = findBlocksDPStep(cost, insertCost)
 	findBlocksClamp(cost, sig, minCost, switchCost)
 	return minCost, best
+}
+
+func findBlocksDP(data []uint16, insertCost, cost []float64, switchSignal, blockID []byte, blockSwitchBitcost float64) {
+	numHistograms := len(cost)
+	bitmapLen := (numHistograms + 7) >> 3
+
+	const prologueLength = 2000
+	const prologueMultiplier = 0.07 / 2000
+
+	for byteIx, symbol := range data {
+		ix := byteIx * bitmapLen
+		insertCostIx := int(symbol) * numHistograms
+		switchCost := blockSwitchBitcost
+
+		if byteIx < prologueLength {
+			switchCost *= 0.77 + float64(prologueMultiplier*float64(byteIx))
+		}
+
+		minCost, best := findBlocksStep(cost,
+			insertCost[insertCostIx:insertCostIx+numHistograms],
+			switchSignal[ix:], switchCost)
+		if minCost < noMinCost {
+			blockID[byteIx] = byte(best)
+		}
+	}
 }
