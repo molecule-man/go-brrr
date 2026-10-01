@@ -28,7 +28,7 @@ func histogramTotalCountFixture(tb testing.TB, n int, base uint32) []uint32 {
 }
 
 func TestHistogramTotalCountKernelMatchesScalarAtEveryLengthAndWrapsLikeTheScalarLoop(t *testing.T) {
-	var lengths []int
+	lengths := make([]int, 0, 303)
 	for n := range 301 {
 		lengths = append(lengths, n)
 	}
