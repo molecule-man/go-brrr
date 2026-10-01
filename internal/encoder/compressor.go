@@ -38,8 +38,8 @@ type Compressor interface {
 
 // NewCompressor constructs a Compressor for the given quality/lgwin/sizeHint,
 // dispatching to the appropriate backend (q0/q1 fast or q>=2 streaming) and
-// configuring it from its pool. parallel lets q10 and q11 search matches on a
-// second goroutine.
+// configuring it from its pool. parallel lets q10 and q11 search matches,
+// split blocks and cluster distances on worker goroutines.
 func NewCompressor(quality, lgwin int, sizeHint uint, parallel bool) Compressor {
 	switch {
 	case quality >= 4:

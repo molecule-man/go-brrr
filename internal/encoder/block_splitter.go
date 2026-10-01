@@ -47,8 +47,8 @@ const (
 // Quality threshold: qualities below this use 3 iterations, at or above use 10.
 const hqZopflificationQuality = 11
 
-// Below splitOffloadMinCommands, the collector handoff costs more than the
-// command and distance splits.
+// Below splitOffloadMinCommands, the worker handoffs cost more than the
+// command and distance splits and the distance clustering they offload.
 const splitOffloadMinCommands = 512
 
 // noMinCost is findBlocks' sentinel starting cost, larger than any real one.
@@ -610,18 +610,41 @@ func splitBlock(
 	data []byte, pos, mask uint,
 	quality int,
 ) {
-	col := &bufs.hqCollector
-	offload := bufs.parallel && len(cmds) >= splitOffloadMinCommands
-	if offload {
-		col.cmds = cmds
-		col.cmdSplit = cmdSplit
-		col.distSplit = distSplit
-		col.quality = quality
-		col.begin(hqJobSplit)
-	}
-
-	// Extract and split literals.
 	bufs.sbLiteralBytes = copyLiteralsToByteArrayBuf(cmds, data, pos, mask, bufs.sbLiteralBytes)
+	splitLiterals(litSplit, bufs, quality)
+	splitCommands(cmdSplit, &bufs.splitVecBufs, cmds, quality)
+	splitDistances(distSplit, &bufs.splitVecBufs, cmds, quality)
+}
+
+func splitBlockParallel(
+	litSplit, cmdSplit, distSplit *blockSplit,
+	bufs *q10Bufs,
+	cmds []command,
+	data []byte, pos, mask uint,
+	quality int,
+) distanceParams {
+	bufs.sbLiteralBytes = copyLiteralsToByteArrayBuf(cmds, data, pos, mask, bufs.sbLiteralBytes)
+
+	cmdWorker := &bufs.hqCollector
+	cmdWorker.cmds = cmds
+	cmdWorker.cmdSplit = cmdSplit
+	cmdWorker.quality = quality
+	cmdWorker.begin(hqJobSplitCommands)
+
+	distWorker := &bufs.hqHelper
+	distWorker.bufs = bufs
+	distWorker.cmds = cmds
+	distWorker.distSplit = distSplit
+	distWorker.quality = quality
+	distWorker.begin(hqJobSplitDistances)
+
+	splitLiterals(litSplit, bufs, quality)
+	cmdWorker.wait()
+	distWorker.wait()
+	return distWorker.distParams
+}
+
+func splitLiterals(litSplit *blockSplit, bufs *q10Bufs, quality int) {
 	numLiterals := len(bufs.sbLiteralBytes)
 	bufs.sbUint16 = growUint16(bufs.sbUint16, numLiterals)
 	symbols := bufs.sbUint16[:numLiterals]
@@ -636,15 +659,9 @@ func splitBlock(
 		quality:             quality,
 		alphabetSize:        core.AlphabetSizeLiteral,
 	})
-	if offload {
-		col.wait()
-		return
-	}
-	splitCommandsAndDistances(cmdSplit, distSplit, &bufs.splitVecBufs, cmds, quality)
 }
 
-func splitCommandsAndDistances(cmdSplit, distSplit *blockSplit, bufs *splitVecBufs, cmds []command, quality int) {
-	// Extract and split command prefixes.
+func splitCommands(cmdSplit *blockSplit, bufs *splitVecBufs, cmds []command, quality int) {
 	bufs.sbUint16 = growUint16(bufs.sbUint16, len(cmds))
 	symbols := bufs.sbUint16[:len(cmds)]
 	for i := range cmds {
@@ -658,10 +675,11 @@ func splitCommandsAndDistances(cmdSplit, distSplit *blockSplit, bufs *splitVecBu
 		quality:             quality,
 		alphabetSize:        core.AlphabetSizeInsertAndCopyLength,
 	})
+}
 
-	// Extract and split distance prefixes (only for commands that encode a distance).
+func splitDistances(distSplit *blockSplit, bufs *splitVecBufs, cmds []command, quality int) {
 	bufs.sbUint16 = growUint16(bufs.sbUint16, len(cmds))
-	symbols = bufs.sbUint16[:len(cmds)]
+	symbols := bufs.sbUint16[:len(cmds)]
 	j := 0
 	for i := range cmds {
 		cmd := &cmds[i]

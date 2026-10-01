@@ -38,11 +38,16 @@ jobs:
         go: ["", "oldstable", "stable"]
         tags: ["", "purego"]
         goamd64: [v1]
+        cpu: [""]
         include:
           - go: stable
             tags: ""
             goamd64: v3
-    name: test (${{ matrix.go || 'go.mod' }}${{ matrix.tags && format(', {0}', matrix.tags) || '' }}${{ matrix.goamd64 == 'v3' && ', v3' || '' }})
+          - go: stable
+            tags: ""
+            goamd64: v1
+            cpu: "1"
+    name: test (${{ matrix.go || 'go.mod' }}${{ matrix.tags && format(', {0}', matrix.tags) || '' }}${{ matrix.goamd64 == 'v3' && ', v3' || '' }}${{ matrix.cpu && format(', cpu {0}', matrix.cpu) || '' }})
     steps:
       - uses: actions/checkout@v6
         with:
@@ -59,7 +64,7 @@ jobs:
       - name: Test
         env:
           GOAMD64: ${{ matrix.goamd64 }}
-        run: go test -tags '${{ matrix.tags }}' ./...
+        run: go test -tags '${{ matrix.tags }}' ${{ matrix.cpu && format('-cpu {0}', matrix.cpu) || '' }} ./...
 
   test-arch:
     runs-on: ${{ matrix.runner }}

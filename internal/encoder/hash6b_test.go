@@ -41,10 +41,15 @@ func (h *h6b[B]) findLongestMatchBefore(
 	nextKey := h6bHash(data, (cur+1)&ringBufferMask)
 	nextBucket := bucketRingAt(unsafe.Pointer(&h.buckets), nextKey, blockShift)
 	nextN := h.num[nextKey]
-	h.nextBucket = nextBucket.at(0)
-	if nextN > 0 {
-		p := uint(nextBucket.at(uint((nextN-1)&uint16(blockMask)))) & ringBufferMask
-		h.nextBucket = uint32(data[p])
+	if hasPrefetch {
+		prefetch2(unsafe.Add(nextBucket.base, (uint(nextN-1)&blockMask)<<2),
+			unsafe.Add(nextBucket.base, (uint(nextN-17)&blockMask)<<2))
+	} else {
+		h.nextBucket = nextBucket.at(0)
+		if nextN > 0 {
+			p := uint(nextBucket.at(uint((nextN-1)&uint16(blockMask)))) & ringBufferMask
+			h.nextBucket = uint32(data[p])
+		}
 	}
 
 	out.len = 0

@@ -341,6 +341,7 @@ func splitBlockBefore(
 
 type recordedMetablock struct {
 	cmds      []command
+	raw       []command
 	data      []byte
 	pos, mask uint
 	size      int
@@ -367,9 +368,10 @@ func recordMetablock(tb testing.TB, path string, quality int) recordedMetablock 
 	}
 	pos := wrapPosition(s.lastFlushPos)
 	mask := uint(s.mask)
+	raw := slices.Clone(s.commands)
 	buildMetaBlock(s.data, pos, mask, quality, s.prevByte, s.prevByte2, s.commands,
 		chooseContextMode(quality, s.data, pos, mask, uint(len(in))), false, &e.mb, &e.q10)
-	return recordedMetablock{cmds: slices.Clone(s.commands), data: slices.Clone(s.data), pos: pos, mask: mask, size: len(in)}
+	return recordedMetablock{cmds: slices.Clone(s.commands), raw: raw, data: slices.Clone(s.data), pos: pos, mask: mask, size: len(in)}
 }
 
 func blockSplitMismatch(category string, got, want *blockSplit) error {
@@ -384,18 +386,21 @@ func blockSplitMismatch(category string, got, want *blockSplit) error {
 		category, got.numTypes, len(got.lengths), want.numTypes, len(want.lengths), i)
 }
 
-func TestSplitBlockWithCommandAndDistanceSplitsOnTheCollectorMatchesTheSequentialSplitter(t *testing.T) {
+func recordedMetablockPaths(tb testing.TB) []string {
+	tb.Helper()
 	corpus, err := filepath.Glob(filepath.Join("..", "..", "brotli-ref", "tests", "testdata", "*.txt"))
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
-	paths := append([]string{
+	return append([]string{
 		"../../testdata/github_events_2k.json",
 		"../../testdata/github_events_8k.json",
 		"../../testdata/gh_172KB.html",
 		"../../testdata/reactcore_187KB.js",
 	}, corpus...)
+}
 
+func TestSplitBlockParallelChoosesTheDistanceParametersAndSplitsAllThreeCategoriesExactlyLikeTheSequentialSplitter(t *testing.T) {
 	insertOnly := make([]command, 0, 300)
 	for i := range 300 {
 		insertOnly = append(insertOnly, newInsertCommand(uint(1+i%37)))
@@ -404,69 +409,145 @@ func TestSplitBlockWithCommandAndDistanceSplitsOnTheCollectorMatchesTheSequentia
 	var before, serial q10Bufs
 	parallel := q10Bufs{parallel: true}
 	t.Cleanup(parallel.hqCollector.stop)
-	for _, path := range paths {
+	t.Cleanup(parallel.hqHelper.stop)
+	var tmpHist []uint32
+	for _, path := range recordedMetablockPaths(t) {
 		m := recordMetablock(t, path, 10)
 		for _, c := range []struct {
 			name string
 			cmds []command
 		}{
-			{"whole_metablock", m.cmds},
-			{"no_commands", m.cmds[:0]},
-			{"fewer_symbols_than_min_split", m.cmds[:min(len(m.cmds), minLengthForBlockSplitting-1)]},
-			{"one_command_below_the_offload_threshold", m.cmds[:min(len(m.cmds), splitOffloadMinCommands-1)]},
-			{"exactly_the_offload_threshold", m.cmds[:min(len(m.cmds), splitOffloadMinCommands)]},
+			{"whole_metablock", m.raw},
+			{"no_commands", m.raw[:0]},
+			{"fewer_symbols_than_min_split", m.raw[:min(len(m.raw), minLengthForBlockSplitting-1)]},
+			{"one_command_below_the_offload_threshold", m.raw[:min(len(m.raw), splitOffloadMinCommands-1)]},
+			{"exactly_the_offload_threshold", m.raw[:min(len(m.raw), splitOffloadMinCommands)]},
 			{"insert_only_commands_without_distances", insertOnly},
 		} {
 			for _, quality := range []int{10, 11} {
+				wantCmds := slices.Clone(c.cmds)
+				wantParams := optimizeDistanceParams(wantCmds, &tmpHist)
 				var litWant, cmdWant, distWant blockSplit
-				splitBlockBefore(&litWant, &cmdWant, &distWant, &before, c.cmds, m.data, m.pos, m.mask, quality)
-				for _, after := range []*q10Bufs{&serial, &parallel} {
-					var litGot, cmdGot, distGot blockSplit
-					splitBlock(&litGot, &cmdGot, &distGot, after, c.cmds, m.data, m.pos, m.mask, quality)
-					if err := errors.Join(
-						blockSplitMismatch("literal", &litGot, &litWant),
-						blockSplitMismatch("command", &cmdGot, &cmdWant),
-						blockSplitMismatch("distance", &distGot, &distWant),
-					); err != nil {
-						t.Errorf("%s %s q%d parallel=%v: splitting commands and distances on the collector goroutine "+
-							"(parallel) or after the literals on the caller (serial) must give exactly the sequential "+
-							"splits, or the metablock stops being byte-identical to the C reference:\n%v",
-							filepath.Base(path), c.name, quality, after.parallel, err)
+				splitBlockBefore(&litWant, &cmdWant, &distWant, &before, wantCmds, m.data, m.pos, m.mask, quality)
+
+				serialCmds := slices.Clone(c.cmds)
+				serialParams := optimizeDistanceParams(serialCmds, &serial.bmTmpHist)
+				var litSerial, cmdSerial, distSerial blockSplit
+				splitBlock(&litSerial, &cmdSerial, &distSerial, &serial, serialCmds, m.data, m.pos, m.mask, quality)
+
+				parallelCmds := slices.Clone(c.cmds)
+				var litParallel, cmdParallel, distParallel blockSplit
+				parallelParams := splitBlockParallel(&litParallel, &cmdParallel, &distParallel, &parallel,
+					parallelCmds, m.data, m.pos, m.mask, quality)
+
+				var errs []error
+				for _, got := range []struct {
+					mode           string
+					params         distanceParams
+					cmds           []command
+					lit, cmd, dist *blockSplit
+				}{
+					{"serial", serialParams, serialCmds, &litSerial, &cmdSerial, &distSerial},
+					{"parallel", parallelParams, parallelCmds, &litParallel, &cmdParallel, &distParallel},
+				} {
+					if got.params != wantParams {
+						errs = append(errs, fmt.Errorf("%s: distance parameters %+v, want %+v", got.mode, got.params, wantParams))
 					}
+					if !slices.Equal(got.cmds, wantCmds) {
+						errs = append(errs, fmt.Errorf("%s: commands after the distance prefix rewrite differ", got.mode))
+					}
+					if err := errors.Join(
+						blockSplitMismatch("literal", got.lit, &litWant),
+						blockSplitMismatch("command", got.cmd, &cmdWant),
+						blockSplitMismatch("distance", got.dist, &distWant),
+					); err != nil {
+						errs = append(errs, fmt.Errorf("%s: %w", got.mode, err))
+					}
+				}
+				if err := errors.Join(errs...); err != nil {
+					t.Errorf("%s %s q%d: the distance search, prefix rewrite and three splits must come out exactly as "+
+						"the sequential splitter's whether they run on the caller or on the collector and helper "+
+						"goroutines, or the metablock stops being byte-identical to the C reference:\n%v",
+						filepath.Base(path), c.name, quality, err)
 				}
 			}
 		}
 	}
 }
 
-func BenchmarkSplitBlockOnRecordedCommands(b *testing.B) {
+func TestBuildMetaBlockInParallelModeGivesExactlyTheSequentialSplitsHistogramsContextMapsAndDistanceParameters(t *testing.T) {
+	parallel := q10Bufs{parallel: true}
+	t.Cleanup(parallel.hqCollector.stop)
+	t.Cleanup(parallel.hqHelper.stop)
+	for _, path := range recordedMetablockPaths(t) {
+		for _, quality := range []int{10, 11} {
+			m := recordMetablock(t, path, quality)
+			for _, disableContextModeling := range []bool{false, true} {
+				contextMode := chooseContextMode(quality, m.data, m.pos, m.mask, uint(m.size))
+				var serial q10Bufs
+				var mbWant, mbGot metaBlockSplit
+				wantCmds, gotCmds := slices.Clone(m.raw), slices.Clone(m.raw)
+				wantParams := buildMetaBlock(m.data, m.pos, m.mask, quality, 0, 0, wantCmds,
+					contextMode, disableContextModeling, &mbWant, &serial)
+				gotParams := buildMetaBlock(m.data, m.pos, m.mask, quality, 0, 0, gotCmds,
+					contextMode, disableContextModeling, &mbGot, &parallel)
+
+				var errs []error
+				if gotParams != wantParams {
+					errs = append(errs, fmt.Errorf("distance parameters %+v, want %+v", gotParams, wantParams))
+				}
+				if !slices.Equal(gotCmds, wantCmds) {
+					errs = append(errs, errors.New("commands after the distance prefix rewrite differ"))
+				}
+				errs = append(errs,
+					blockSplitMismatch("literal", &mbGot.litSplit, &mbWant.litSplit),
+					blockSplitMismatch("command", &mbGot.cmdSplit, &mbWant.cmdSplit),
+					blockSplitMismatch("distance", &mbGot.distSplit, &mbWant.distSplit))
+				for _, f := range []struct {
+					name      string
+					got, want []uint32
+				}{
+					{"literal histograms", mbGot.litHistograms, mbWant.litHistograms},
+					{"command histograms", mbGot.cmdHistograms, mbWant.cmdHistograms},
+					{"distance histograms", mbGot.distHistograms, mbWant.distHistograms},
+					{"literal context map", mbGot.literalContextMap, mbWant.literalContextMap},
+					{"distance context map", mbGot.distanceContextMap, mbWant.distanceContextMap},
+				} {
+					if !slices.Equal(f.got, f.want) {
+						errs = append(errs, fmt.Errorf("%s differ", f.name))
+					}
+				}
+				if err := errors.Join(errs...); err != nil {
+					t.Errorf("%s q%d contextModeling=%v: buildMetaBlock with the splits and the distance clustering on "+
+						"worker goroutines must produce exactly the sequential metablock, or the output stops being "+
+						"byte-identical to the C reference:\n%v",
+						filepath.Base(path), quality, !disableContextModeling, err)
+				}
+			}
+		}
+	}
+}
+
+func BenchmarkBuildMetaBlockOnRecordedCommands(b *testing.B) {
 	for _, name := range []string{"plrabn12.txt", "lcet10.txt", "mapsdatazrh"} {
 		for _, quality := range []int{10, 11} {
 			m := recordMetablock(b, filepath.Join("..", "..", "brotli-ref", "tests", "testdata", name), quality)
-			var lit, cmd, dist blockSplit
-			b.Run(fmt.Sprintf("q%d_%s/impl=before", quality, name), func(b *testing.B) {
-				var bufs q10Bufs
-				b.SetBytes(int64(m.size))
-				b.ReportAllocs()
-				for i := 0; i < b.N; i++ {
-					lit.reset()
-					cmd.reset()
-					dist.reset()
-					splitBlockBefore(&lit, &cmd, &dist, &bufs, m.cmds, m.data, m.pos, m.mask, quality)
-				}
-			})
-			b.Run(fmt.Sprintf("q%d_%s/impl=after", quality, name), func(b *testing.B) {
-				bufs := q10Bufs{parallel: true}
-				defer bufs.hqCollector.stop()
-				b.SetBytes(int64(m.size))
-				b.ReportAllocs()
-				for i := 0; i < b.N; i++ {
-					lit.reset()
-					cmd.reset()
-					dist.reset()
-					splitBlock(&lit, &cmd, &dist, &bufs, m.cmds, m.data, m.pos, m.mask, quality)
-				}
-			})
+			contextMode := chooseContextMode(quality, m.data, m.pos, m.mask, uint(m.size))
+			for _, impl := range []string{"serial", "parallel"} {
+				b.Run(fmt.Sprintf("q%d_%s/impl=%s", quality, name, impl), func(b *testing.B) {
+					bufs := q10Bufs{parallel: impl == "parallel"}
+					defer bufs.hqCollector.stop()
+					defer bufs.hqHelper.stop()
+					var mb metaBlockSplit
+					work := make([]command, len(m.raw))
+					b.SetBytes(int64(m.size))
+					b.ReportAllocs()
+					for range b.N {
+						copy(work, m.raw)
+						buildMetaBlock(m.data, m.pos, m.mask, quality, 0, 0, work, contextMode, false, &mb, &bufs)
+					}
+				})
+			}
 		}
 	}
 }

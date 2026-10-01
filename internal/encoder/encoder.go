@@ -67,20 +67,8 @@ type q10Bufs struct {
 	bmLitOutHist   []uint32
 	bmDistOutHist  []uint32
 
-	// clusterHistograms scratch.
-	chClusterSize []uint32
-	chClusters    []uint32
-	chBitCosts    []float64
-	chTotalCounts []uint32
-	chSymbols     []uint32
-	chTmpHist     []uint32
-	chPairs       []histogramPair
-
-	// histogramReindex scratch.
-	hrNewIndex    []uint32
-	hrTmpData     []uint32
-	hrTmpBitCosts []float64
-	hrTmpTotals   []uint32
+	clusterBufs
+	distClusterBufs clusterBufs
 
 	// Zopfli backward references scratch.
 	zNodes   []zopfliNode
@@ -93,6 +81,7 @@ type q10Bufs struct {
 
 	hqFeed      matchFeed
 	hqCollector hqCollector
+	hqHelper    hqCollector
 	zCostModel  zopfliCostModel // large value type; keep last to minimize pointer bytes
 
 	parallel bool
@@ -122,6 +111,7 @@ type encoderSplit struct {
 // prevHasher to its pool.
 func (e *encoderSplit) releaseBuffers() {
 	e.q10.hqCollector.stop()
+	e.q10.hqHelper.stop()
 	releaseHasher(e.prevHasher)
 	e.prevHasher = nil
 	e.encoderCore.releaseBuffers()
