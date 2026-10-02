@@ -12,7 +12,6 @@ on:
 permissions:
   actions: write
   contents: read
-  issues: write
 
 concurrency:
   group: nightly
@@ -84,16 +83,6 @@ jobs:
           if-no-files-found: ignore
           retention-days: 90
 
-      - name: Report the failure
-        if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TARGET: ${{ matrix.target }}
-          REPO: ${{ github.repository }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          SHA: ${{ github.sha }}
-        run: .github/scripts/report-fuzz-failure.sh
-
   race:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -113,12 +102,3 @@ jobs:
 
       - name: Race test
         run: go test -race -timeout=25m ./...
-
-      - name: Report the failure
-        if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          SHA: ${{ github.sha }}
-        run: .github/scripts/report-race-failure.sh
