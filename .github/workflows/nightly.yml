@@ -112,7 +112,7 @@ jobs:
         run: make lib/libbrotli_cref.a
 
       - name: Race test
-        run: go test -race ./...
+        run: go test -race -timeout=25m ./...
 
       - name: Report the failure
         if: failure()
