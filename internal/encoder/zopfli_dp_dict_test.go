@@ -155,25 +155,20 @@ type dpDictRun struct {
 	numLiterals   uint
 }
 
-func runDPDictEntry(tb testing.TB, parallel bool, data []byte, block, quality, lgwin int, compound *compoundDictionary, shrinkMatches bool) *dpDictRun {
+func runDPDictEntry(tb testing.TB, parallel bool, data []byte, shrinkMatches bool) *dpDictRun {
 	tb.Helper()
+	const quality, lgwin = 10, 22
 	rb, mask := dpDictRing(data)
 	bufs := &q10Bufs{parallel: parallel}
 	tb.Cleanup(bufs.hqCollector.stop)
 	if shrinkMatches {
 		bufs.hqMatches = make([]backwardMatch, 0, 16)
 	}
-	gap := uint(0)
-	if compound != nil {
-		gap = compound.totalSize
-	}
 	r := &dpDictRun{hasher: &h10{lgwin: lgwin, quality: quality, bufs: bufs}, bufs: bufs, distCache: [4]int{4, 11, 15, 16}}
-	r.hasher.reset(true, uint(len(data)), nil)
-	for start := 0; start < len(data); start += block {
-		n, position := uint(min(block, len(data)-start)), uint(start)
-		r.hasher.stitchToPreviousBlock(n, position, rb, mask)
-		createHqZopfliBackwardReferences(n, position, rb, mask, quality, lgwin, gap, compound, r.distCache[:], r.hasher, &r.lastInsertLen, &r.commands, &r.numLiterals, bufs)
-	}
+	n := uint(len(data))
+	r.hasher.reset(true, n, nil)
+	r.hasher.stitchToPreviousBlock(n, 0, rb, mask)
+	createHqZopfliBackwardReferences(n, 0, rb, mask, quality, lgwin, 0, nil, r.distCache[:], r.hasher, &r.lastInsertLen, &r.commands, &r.numLiterals, bufs)
 	return r
 }
 
@@ -225,8 +220,8 @@ func dpDictDivergingInput(tb testing.TB) []byte {
 func TestParallelCreateHqZopfliBackwardReferencesEmitsTheSerialCommandsWhenTheBlockDivergesOrTheFeedAborts(t *testing.T) {
 	t.Run("diverged_block_redone_serially", func(t *testing.T) {
 		in := dpDictDivergingInput(t)
-		want := runDPDictEntry(t, false, in, len(in), 10, 22, nil, false)
-		got := runDPDictEntry(t, true, in, len(in), 10, 22, nil, false)
+		want := runDPDictEntry(t, false, in, false)
+		got := runDPDictEntry(t, true, in, false)
 		if cap(got.bufs.zMatches) == 0 {
 			t.Fatal("the input must make the DP skip a long copy the collector did not, so the block is redone by " +
 				"the serial fallback; without that this case never checks the fallback keeps its dictionary matches")
@@ -239,8 +234,8 @@ func TestParallelCreateHqZopfliBackwardReferencesEmitsTheSerialCommandsWhenTheBl
 		hqMatchesPerByte = 0
 		t.Cleanup(func() { hqMatchesPerByte = saved })
 		in := dpDictCorpus(t, 16<<10)[4].data
-		want := runDPDictEntry(t, false, in, len(in), 10, 22, nil, true)
-		got := runDPDictEntry(t, true, in, len(in), 10, 22, nil, true)
+		want := runDPDictEntry(t, false, in, true)
+		got := runDPDictEntry(t, true, in, true)
 		if !got.bufs.hqFeed.aborted.Load() {
 			t.Fatal("the shrunk match buffer must force the collector to reallocate and abort the feed, " +
 				"otherwise this case never checks the rerun keeps searching the dictionary on the DP")
