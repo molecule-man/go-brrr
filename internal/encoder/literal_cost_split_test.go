@@ -5,10 +5,7 @@ import (
 	"testing"
 )
 
-var (
-	literalCostBoolSink bool
-	literalCostUintSink uint
-)
+var literalCostSink float32
 
 const (
 	splitN    = 128 << 10
@@ -28,38 +25,9 @@ func literalCostRealData(tb testing.TB, path string) []byte {
 	return data[:splitN]
 }
 
-func benchmarkIsMostlyUTF8(b *testing.B, path string) {
-	data := literalCostRealData(b, path)
-	b.ReportAllocs()
-	b.SetBytes(int64(splitN))
-	for range b.N {
-		literalCostBoolSink = isMostlyUTF8(data, 0, uint(splitN-1), uint(splitN))
-	}
-}
-
-func benchmarkDecideMultiByteStatsLevel(b *testing.B, path string) {
-	data := literalCostRealData(b, path)
-	b.ReportAllocs()
-	b.SetBytes(int64(splitN))
-	for range b.N {
-		literalCostUintSink = decideMultiByteStatsLevel(data, 0, uint(splitN), uint(splitN-1))
-	}
-}
-
-func benchmarkEstimateUTF8Only(b *testing.B, path string) {
-	data := literalCostRealData(b, path)
-	histogram, cost := literalCostBuffers(splitN)
-	b.ReportAllocs()
-	b.SetBytes(int64(splitN))
-	for range b.N {
-		estimateBitCostsForLiteralsUTF8(data, 0, uint(splitN), uint(splitN-1), histogram, cost)
-	}
-	literalCostSink = cost[0]
-}
-
 func benchmarkEstimateDispatch(b *testing.B, path string) {
 	data := literalCostRealData(b, path)
-	histogram, cost := literalCostBuffers(splitN)
+	histogram, cost := make([]uint, 3*256), make([]float32, splitN)
 	b.ReportAllocs()
 	b.SetBytes(int64(splitN))
 	for range b.N {
@@ -68,20 +36,6 @@ func benchmarkEstimateDispatch(b *testing.B, path string) {
 	literalCostSink = cost[0]
 }
 
-func BenchmarkIsMostlyUTF8Html128KiB(b *testing.B) { benchmarkIsMostlyUTF8(b, splitHTML) }
-func BenchmarkIsMostlyUTF8Js128KiB(b *testing.B)   { benchmarkIsMostlyUTF8(b, splitJS) }
-func BenchmarkDecideMultiByteStatsLevelHtml128KiB(b *testing.B) {
-	benchmarkDecideMultiByteStatsLevel(b, splitHTML)
-}
-func BenchmarkDecideMultiByteStatsLevelJs128KiB(b *testing.B) {
-	benchmarkDecideMultiByteStatsLevel(b, splitJS)
-}
-func BenchmarkEstimateBitCostsForLiteralsUTF8OnlyHtml128KiB(b *testing.B) {
-	benchmarkEstimateUTF8Only(b, splitHTML)
-}
-func BenchmarkEstimateBitCostsForLiteralsUTF8OnlyJs128KiB(b *testing.B) {
-	benchmarkEstimateUTF8Only(b, splitJS)
-}
 func BenchmarkEstimateBitCostsForLiteralsDispatchHtml128KiB(b *testing.B) {
 	benchmarkEstimateDispatch(b, splitHTML)
 }
