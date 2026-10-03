@@ -56,8 +56,8 @@ func FuzzEncodeCRef(f *testing.F) {
 		goEncoded := encodeChunked(t, data, quality, opts, max(1, len(data)), false)
 		assertCRefDecodes(t, goEncoded, data, nil)
 		assertGoDecodes(t, goEncoded, data, nil, chunkSize, readSize)
-		// Other settings may choose different valid encodings and compressed sizes.
-		exact := quality < 10 && (quality < 5 || lgwin <= 16)
+		// At q10 and q11, Go and C can choose different valid encodings.
+		exact := quality < 10
 		if exact && !bytes.Equal(goEncoded, cEncoded) {
 			t.Fatalf("Go stream differs from C: %s", firstDiff(goEncoded, cEncoded))
 		}
