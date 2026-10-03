@@ -9,6 +9,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"testing/iotest"
@@ -110,9 +111,26 @@ func crefTestCases(t *testing.T) []struct {
 	return cases
 }
 
-// testMatchesCRef verifies that the Go streaming encoder at the given quality,
-// window size, and size hint produces byte-identical output to the C reference
-// encoder.
+func crefSizeOnly(quality, lgwin, inputLen int) bool {
+	return quality >= 5 && quality <= 9 && lgwin > 16 && inputLen > 1<<(lgwin+1)
+}
+
+func assertMatchesCRef(t *testing.T, goOut, cOut []byte, sizeOnly bool) {
+	t.Helper()
+	if sizeOnly {
+		threshold := math.Ceil(float64(len(cOut)) * 1.0002)
+		if float64(len(goOut)) > threshold {
+			t.Errorf("Go output too large: %d bytes (C: %d bytes, threshold: %.0f)",
+				len(goOut), len(cOut), threshold)
+		}
+		return
+	}
+	if !bytes.Equal(goOut, cOut) {
+		t.Errorf("output mismatch: Go produced %d bytes, C produced %d bytes, %s",
+			len(goOut), len(cOut), firstDiff(goOut, cOut))
+	}
+}
+
 func testMatchesCRef(t *testing.T, quality, lgwin int, sizeHint uint) {
 	t.Helper()
 
@@ -201,44 +219,14 @@ func testMatchesCRef(t *testing.T, quality, lgwin int, sizeHint uint) {
 
 			cOut := creftest.BrotliCompress(t, tt.input, quality, lgwin, sizeHint)
 
-			// Conditions where Go output may differ from C but both are valid:
-			//   - Q10+: rounding differences between Go's math.Log2 and the
-			//     C math library's log2 can change Zopfli command choices.
-			//   - Q5–9 lgwin>16: h5/h6 hashers elide ring-buffer end checks
-			//     (the tail mirror makes them redundant), which can produce
-			//     different match selections vs the C reference.
-			// Allow 0.02% above C's size, rounded up to avoid a zero-byte
-			// allowance on small streams. Both decoders verify the output above.
-			if quality >= 10 || (quality >= 5 && lgwin > 16) {
-				goLen := len(goOut)
-				cLen := len(cOut)
-				threshold := math.Ceil(float64(cLen) * 1.0002)
-				if float64(goLen) > threshold {
-					t.Errorf("Go output too large: %d bytes (C: %d bytes, threshold: %.0f)",
-						goLen, cLen, threshold)
-				}
-			} else {
-				if !bytes.Equal(goOut, cOut) {
-					t.Errorf("output mismatch: Go produced %d bytes, C produced %d bytes",
-						len(goOut), len(cOut))
-					minLen := min(len(goOut), len(cOut))
-					for i := range minLen {
-						if goOut[i] != cOut[i] {
-							t.Errorf("first difference at byte %d: Go=0x%02x C=0x%02x",
-								i, goOut[i], cOut[i])
-							break
-						}
-					}
-				}
-			}
+			assertMatchesCRef(t, goOut, cOut, crefSizeOnly(quality, lgwin, len(tt.input)))
 		})
 	}
 }
 
 // TestMatchesCRef verifies the Go streaming encoder against the C reference
-// across quality levels, window sizes, and size hints. For Q5–9 lgwin>16 and
-// Q10–11 it checks roundtrip correctness and that compressed size is within
-// 0.02% of C. Other combinations check byte-identical output. All qualities
+// across quality levels, window sizes, and size hints. It checks
+// byte-identical output, except for the cases in crefSizeOnly. All qualities
 // verify roundtrip via C and Go decompression.
 func TestMatchesCRef(t *testing.T) {
 	t.Parallel()
@@ -302,26 +290,7 @@ func TestCompressMatchesCRef(t *testing.T) {
 
 					cOut := creftest.BrotliCompress(t, tt.input, quality, defaultLGWin, uint(len(tt.input)))
 
-					if quality >= 5 {
-						threshold := math.Ceil(float64(len(cOut)) * 1.0002)
-						if float64(len(goOut)) > threshold {
-							t.Errorf("Go output too large: %d bytes (C: %d bytes, threshold: %.0f)",
-								len(goOut), len(cOut), threshold)
-						}
-						return
-					}
-					if !bytes.Equal(goOut, cOut) {
-						t.Errorf("output mismatch: Go produced %d bytes, C produced %d bytes",
-							len(goOut), len(cOut))
-						minLen := min(len(goOut), len(cOut))
-						for i := range minLen {
-							if goOut[i] != cOut[i] {
-								t.Errorf("first difference at byte %d: Go=0x%02x C=0x%02x",
-									i, goOut[i], cOut[i])
-								break
-							}
-						}
-					}
+					assertMatchesCRef(t, goOut, cOut, crefSizeOnly(quality, defaultLGWin, len(tt.input)))
 				})
 			}
 		})
@@ -373,6 +342,26 @@ func TestPositionWrap(t *testing.T) {
 				t.Fatalf("roundtrip mismatch: decoded %d bytes, want %d",
 					len(decoded), len(data))
 			}
+		})
+	}
+}
+
+func TestFlushedStreamBeyondTheDefaultWindowDecodes(t *testing.T) {
+	t.Parallel()
+
+	html := readTestdata(t, filepath.Join("testdata", "gh_172KB.html"))
+	js := readTestdata(t, filepath.Join("testdata", "reactcore_187KB.js"))
+	events := readTestdata(t, filepath.Join("testdata", "github_events_8k.json"))
+	src := slices.Concat(html, js, events)
+	stream := similarCopies(src, (9<<20)/len(src)+1)
+	const message = 32 << 10
+
+	for quality := 0; quality <= 11; quality++ {
+		t.Run(fmt.Sprintf("q%d", quality), func(t *testing.T) {
+			t.Parallel()
+			encoded := encodeChunked(t, stream, quality, WriterOptions{LGWin: defaultLGWin}, message, true)
+			assertCRefDecodes(t, encoded, stream, nil)
+			assertGoDecodes(t, encoded, stream, nil, message, message)
 		})
 	}
 }
@@ -501,8 +490,7 @@ func testCompoundDictMatchesCRef(t *testing.T, quality, lgwin int, sizeHint uint
 }
 
 // TestCompoundDictMatchesCRef verifies compound dictionary output across
-// quality levels, window sizes, and size hints. For Q<=9 it checks
-// byte-identical output; for Q10+ it checks roundtrip and size within 0.05% of C.
+// quality levels, window sizes, and size hints. It checks byte-identical output.
 func TestCompoundDictMatchesCRef(t *testing.T) {
 	t.Parallel()
 
@@ -709,6 +697,22 @@ func TestCompoundDictDecoderSmallBuffer(t *testing.T) {
 	if !bytes.Equal(got, input) {
 		t.Fatalf("roundtrip mismatch: got %d bytes, want %d bytes", len(got), len(input))
 	}
+}
+
+func similarCopies(data []byte, n int) []byte {
+	if n <= 1 || len(data) == 0 {
+		return data
+	}
+	out := make([]byte, 0, n*len(data))
+	rng := rand.New(rand.NewPCG(uint64(len(data)), uint64(n)))
+	for k := range n {
+		start := len(out)
+		out = append(out, data...)
+		for range min(k, 4) {
+			out[start+rng.IntN(len(data))] ^= byte(1 + rng.IntN(255))
+		}
+	}
+	return out
 }
 
 func pseudoRandomBytesCRef(n int, seed uint64) []byte {

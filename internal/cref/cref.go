@@ -7,6 +7,7 @@ package cref
 #cgo CFLAGS: -I${SRCDIR}/../../brotli-ref/c/include
 #cgo LDFLAGS: ${SRCDIR}/../../lib/libbrotli_cref.a -lm
 
+#include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -303,4 +304,9 @@ func EncodeDict(input, dict []byte, quality, lgwin int, sizeHint uint) ([]byte, 
 	defer C.free(unsafe.Pointer(out))
 
 	return goBytesLarge(unsafe.Pointer(out), outLen), nil
+}
+
+// Log2 returns log2(v) from the C math library that the C reference encoder uses.
+func Log2(v float64) float64 {
+	return float64(C.log2(C.double(v)))
 }

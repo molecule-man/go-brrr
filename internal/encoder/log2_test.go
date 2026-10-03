@@ -1,0 +1,67 @@
+package encoder
+
+import (
+	"math"
+	"math/rand/v2"
+	"runtime"
+	"testing"
+
+	"github.com/molecule-man/go-brrr/internal/cref"
+)
+
+// log2HardOddBases times powers of two are the integers below 2^31 where
+// log2Large in source order of log2.c, without glibc's extra fusion, differs
+// from glibc.
+var log2HardOddBases = [...]int{
+	8908987, 45475711, 96541909, 120406517, 159283035, 167643223,
+	176643973, 190418545, 195042765, 196146045, 199795963, 201803845,
+	212353557, 254163997, 258124223, 272745555, 276580953, 280973305,
+	284983531, 289977057, 297717187, 305611883, 306151089, 314873467,
+	377318281, 466468083, 470203575, 545037445, 547639231, 555901749,
+	571917063, 580989903, 587012443, 597254401, 612872333, 613358553,
+	638745083, 688788137, 713424109, 789725015, 804147915, 805229533,
+	812597951, 840831027, 848797029, 864382453, 929196197, 938380705,
+	975655205, 1039466287, 1064457657, 1064633961, 1075206257, 1096298413,
+	1124795967, 1143356779, 1159683583, 1160029201, 1187435269, 1191221941,
+	1193808583, 1201704621, 1229587737, 1257223425, 1274858881, 1289181951,
+	1309031811, 1370314775, 1374850055, 1377012689, 1424042735, 1438898055,
+	1458333545, 1476445435, 1491168713, 1493591667, 1525127119, 1526045321,
+	1526507719, 1532260809, 1539794493, 1543241621, 1583974749, 1620933503,
+	1629315853, 1629935327, 1678644637, 1762815177, 1777820499, 1778540803,
+	1792019331, 1844406545, 1858838949, 1882517669, 1896525461, 1899670967,
+	1911068799, 1927326921, 1994757949, 2047942315, 2063475729,
+}
+
+func TestLog2LargeMatchesTheCMathLibrary(t *testing.T) {
+	if runtime.GOARCH == "386" {
+		t.Skip("32-bit glibc log2 uses x87 code, not the FMA path that log2Large ports")
+	}
+	check := func(v int) bool {
+		got, want := log2Large(v), cref.Log2(float64(v))
+		if got != want {
+			t.Errorf("log2Large(%d) = %b, C log2 = %b", v, got, want)
+		}
+		return got == want
+	}
+	for _, base := range log2HardOddBases {
+		for v := base; ; v <<= 1 {
+			if !check(v) {
+				return
+			}
+			if v > math.MaxInt32>>1 {
+				break
+			}
+		}
+	}
+	for v := 256; v < 1<<22; v++ {
+		if !check(v) {
+			return
+		}
+	}
+	rng := rand.New(rand.NewPCG(1, 2))
+	for range 1 << 20 {
+		if !check(256 + rng.IntN(math.MaxInt32-255)) {
+			return
+		}
+	}
+}
