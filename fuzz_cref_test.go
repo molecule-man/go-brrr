@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/molecule-man/go-brrr/internal/cref"
@@ -14,6 +16,7 @@ import (
 
 const (
 	// Limit expensive high-quality compression and one-byte streaming.
+	// The copies of FuzzEncodeCRef grow a stream to at most 64 times this size.
 	fuzzMaxPlain = 64 << 10
 	// This limits mutation size, not decoded output size.
 	fuzzMaxCompressed = 8 << 10
@@ -27,20 +30,30 @@ func fuzzLGWin(b uint8) int {
 // FuzzEncodeCRef checks encoder equivalence and cross-decoding with C.
 func FuzzEncodeCRef(f *testing.F) {
 	for quality := uint8(0); quality <= 11; quality++ {
-		f.Add([]byte{}, quality, uint8(22), uint16(1), uint16(1), false)
-		f.Add([]byte("hello, brotli fuzzer!"), quality, uint8(10), uint16(3), uint16(5), true)
+		f.Add([]byte{}, quality, uint8(22), uint16(1), uint16(1), false, uint8(0))
+		f.Add([]byte("hello, brotli fuzzer!"), quality, uint8(10), uint16(3), uint16(5), true, uint8(0))
 		f.Add(bytes.Repeat([]byte("the quick brown fox jumps over the lazy dog\n"), 100),
-			quality, uint8(24), uint16(127), uint16(4096), false)
+			quality, uint8(24), uint16(127), uint16(4096), false, uint8(0))
 	}
 	// Cross small-window fragment boundaries with both fast encoders.
-	f.Add(pseudoRandomBytesCRef(32<<10, 42), uint8(0), uint8(10), uint16(700), uint16(1000), false)
-	f.Add(bytes.Repeat([]byte("abcdefgh"), 4096), uint8(1), uint8(10), uint16(701), uint16(1), true)
+	f.Add(pseudoRandomBytesCRef(32<<10, 42), uint8(0), uint8(10), uint16(700), uint16(1000), false, uint8(0))
+	f.Add(bytes.Repeat([]byte("abcdefgh"), 4096), uint8(1), uint8(10), uint16(701), uint16(1), true, uint8(0))
+	// 64 copies of 64 KiB: 4 MiB wraps the 2 MiB ring buffer of lgwin 19, and
+	// the size hint selects the large-input hashers.
+	html, err := os.ReadFile(filepath.Join("testdata", "gh_172KB.html"))
+	if err != nil {
+		f.Fatal(err)
+	}
+	for _, quality := range []uint8{4, 5, 6, 7, 9} {
+		f.Add(html[:fuzzMaxPlain], quality, uint8(19-minLGWin), uint16(32<<10), uint16(32<<10), true, uint8(6))
+	}
 
-	f.Fuzz(func(t *testing.T, data []byte, qualityByte, windowByte uint8, chunkWord, readWord uint16, flush bool) {
-		data = data[:min(len(data), fuzzMaxPlain)]
+	f.Fuzz(func(t *testing.T, data []byte, qualityByte, windowByte uint8, chunkWord, readWord uint16, flush bool, copiesByte uint8) {
+		data = similarCopies(data[:min(len(data), fuzzMaxPlain)], 1<<(copiesByte%7))
 		quality := int(qualityByte) % 12
 		lgwin := fuzzLGWin(windowByte)
-		chunkSize := max(1, int(chunkWord))
+		// At most 4096 writes and flushes per stream.
+		chunkSize := max(1, int(chunkWord), len(data)>>12)
 		readSize := max(1, int(readWord))
 		sizeHint := uint(len(data))
 
@@ -57,9 +70,8 @@ func FuzzEncodeCRef(f *testing.F) {
 		assertCRefDecodes(t, goEncoded, data, nil)
 		assertGoDecodes(t, goEncoded, data, nil, chunkSize, readSize)
 		// At q10 and q11, Go and C can choose different valid encodings.
-		exact := quality < 10
-		if exact && !bytes.Equal(goEncoded, cEncoded) {
-			t.Fatalf("Go stream differs from C: %s", firstDiff(goEncoded, cEncoded))
+		if quality < 10 {
+			assertMatchesCRef(t, goEncoded, cEncoded, crefSizeOnly(quality, lgwin, len(data)))
 		}
 
 		chunked := encodeChunked(t, data, quality, opts, chunkSize, flush)

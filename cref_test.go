@@ -9,6 +9,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"testing/iotest"
@@ -345,6 +346,26 @@ func TestPositionWrap(t *testing.T) {
 	}
 }
 
+func TestFlushedStreamBeyondTheDefaultWindowDecodes(t *testing.T) {
+	t.Parallel()
+
+	html := readTestdata(t, filepath.Join("testdata", "gh_172KB.html"))
+	js := readTestdata(t, filepath.Join("testdata", "reactcore_187KB.js"))
+	events := readTestdata(t, filepath.Join("testdata", "github_events_8k.json"))
+	src := slices.Concat(html, js, events)
+	stream := similarCopies(src, (9<<20)/len(src)+1)
+	const message = 32 << 10
+
+	for quality := 0; quality <= 11; quality++ {
+		t.Run(fmt.Sprintf("q%d", quality), func(t *testing.T) {
+			t.Parallel()
+			encoded := encodeChunked(t, stream, quality, WriterOptions{LGWin: defaultLGWin}, message, true)
+			assertCRefDecodes(t, encoded, stream, nil)
+			assertGoDecodes(t, encoded, stream, nil, message, message)
+		})
+	}
+}
+
 // seedEncoderPosForTest advances the streaming encoder's stream-position
 // fields to pos so the next Write straddles the 32-bit wrap boundary without
 // having to compress GiB of input first. Delegates to encoder package since
@@ -676,6 +697,22 @@ func TestCompoundDictDecoderSmallBuffer(t *testing.T) {
 	if !bytes.Equal(got, input) {
 		t.Fatalf("roundtrip mismatch: got %d bytes, want %d bytes", len(got), len(input))
 	}
+}
+
+func similarCopies(data []byte, n int) []byte {
+	if n <= 1 || len(data) == 0 {
+		return data
+	}
+	out := make([]byte, 0, n*len(data))
+	rng := rand.New(rand.NewPCG(uint64(len(data)), uint64(n)))
+	for k := range n {
+		start := len(out)
+		out = append(out, data...)
+		for range min(k, 4) {
+			out[start+rng.IntN(len(data))] ^= byte(1 + rng.IntN(255))
+		}
+	}
+	return out
 }
 
 func pseudoRandomBytesCRef(n int, seed uint64) []byte {
