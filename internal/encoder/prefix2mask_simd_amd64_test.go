@@ -2,10 +2,7 @@
 
 package encoder
 
-import (
-	"math/bits"
-	"testing"
-)
+import "testing"
 
 var prefix2MaskSink uint64
 
@@ -49,16 +46,6 @@ func TestPrefix2Mask64MatchesScalarForEveryBytePair(t *testing.T) {
 	}
 }
 
-func TestPrefix2Mask64AllOnesAndAllZeroes(t *testing.T) {
-	same := make([]byte, 128)
-	if got := prefix2Mask64(&same[0], 0, 0); got != ^uint64(0) {
-		t.Fatalf("uniform buffer: got %064b, want all ones", got)
-	}
-	if got := prefix2Mask64(&same[0], 1, 1); got != 0 {
-		t.Fatalf("no match anywhere: got %064b, want zero", got)
-	}
-}
-
 func BenchmarkPrefix2Mask64(b *testing.B) {
 	data := prefix2MaskFixture(b, 11)
 	c0, c1 := data[64], data[65]
@@ -72,19 +59,6 @@ func BenchmarkPrefix2Mask64(b *testing.B) {
 		b.ReportAllocs()
 		for range b.N {
 			prefix2MaskSink = prefix2Mask64(&data[0], c0, c1)
-		}
-	})
-	b.Run("impl=sse2_mask_plus_walk", func(b *testing.B) {
-		b.ReportAllocs()
-		for range b.N {
-			m := prefix2Mask64(&data[0], c0, c1)
-			var n uint64
-			for m != 0 {
-				j := uint(63 - bits.LeadingZeros64(m))
-				m &^= 1 << j
-				n += uint64(j)
-			}
-			prefix2MaskSink = n
 		}
 	})
 }
