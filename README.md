@@ -14,7 +14,7 @@ Brotli compression library for Go (RFC 7932), with encoder and decoder support.
 
 - **No C toolchain.** Builds with standard Go tooling.
 - **Faster than other pure-Go brotli libraries** at every quality level we measure (see [Benchmarks](#benchmarks)).
-- **Even faster than CGO brotli** on levels 2-9.
+- **Faster than CGO brotli** (cbrotli) in our benchmarks, for compression at q0-q11 and for one-shot decompression.
 - **Compound dictionaries.**
 - **Encoder tuning.** `LGWin` (window size) and `SizeHint` (expected total input size) are exposed via `WriterOptions`. `SizeHint` lets the encoder pick context modeling and hasher parameters tuned for the actual payload size.
 
@@ -141,7 +141,7 @@ The table below measures end-to-end throughput through each package's public Go 
 
 `go-brrr` still benefits from internal reuse in that shape: encoder arenas, hashers, hash tables, and scratch buffers are kept reusable through reset paths and internal `sync.Pool`s. That avoids repeated large allocations and zeroing, which matters for small and mid-size payloads. `cbrotli` uses the C reference encoder underneath, but each payload creates a new `BrotliEncoderState` through `cbrotli.NewWriter` and destroys it on `Close`, paying setup, teardown, cgo, and allocation costs for every stream.
 
-Read these rows as repeated complete-stream compression through the Go APIs. They are not a claim that every pure-Go compression hot path is faster than the C implementation; the same table shows quality levels where `cbrotli` is faster.
+Read these rows as repeated complete-stream compression through the Go APIs. They are not a claim that every pure-Go hot path is faster than the C implementation. Part of the gap comes from per-stream setup and cgo cost in `cbrotli`.
 
 <!-- bench:compress -->
 | | go-brrr (sec/op) | andybalholm (sec/op) | cbrotli (sec/op) |
