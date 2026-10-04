@@ -27,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [FuzzEncodeCRef, FuzzDecodeCRef, FuzzCompoundDictCRef]
+        target: [FuzzEncodeCRef, FuzzDecodeCRef, FuzzCompoundDictCRef, FuzzEncodeDictWordsCRef]
     name: fuzz (${{ matrix.target }})
     steps:
       - uses: actions/checkout@v6

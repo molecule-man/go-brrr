@@ -69,16 +69,18 @@ func crefTestCases(t *testing.T) []struct {
 		corpusFiles = append(corpusFiles, "bb.binast")
 	}
 
+	type tc struct {
+		name  string
+		input []byte
+	}
+
 	cases := make([]struct {
 		name  string
 		input []byte
 	}, 0, len(corpusFiles)+5)
 
 	for _, name := range corpusFiles {
-		cases = append(cases, struct {
-			name  string
-			input []byte
-		}{
+		cases = append(cases, tc{
 			name:  name,
 			input: readTestdata(t, filepath.Join("brotli-ref", "tests", "testdata", name)),
 		})
@@ -86,26 +88,13 @@ func crefTestCases(t *testing.T) []struct {
 
 	// Synthetic cases that exercise patterns the corpus doesn't cover.
 	cases = append(cases,
-		struct {
-			name  string
-			input []byte
-		}{"hello_world", []byte("Hello, World!")},
-		struct {
-			name  string
-			input []byte
-		}{"repeated_a_1000", bytes.Repeat([]byte("a"), 1000)},
-		struct {
-			name  string
-			input []byte
-		}{"pseudo_random_2048", pseudoRandomBytesCRef(2048, 42)},
-		struct {
-			name  string
-			input []byte
-		}{"multi_block_130000", bytes.Repeat([]byte("abcdefghijklmnopqrstuvwxyz"), 5000)},
-		struct {
-			name  string
-			input []byte
-		}{"pseudo_random_65536", pseudoRandomBytesCRef(65536, 99)},
+		tc{"hello_world", []byte("Hello, World!")},
+		tc{"repeated_a_1000", bytes.Repeat([]byte("a"), 1000)},
+		tc{"pseudo_random_2048", pseudoRandomBytesCRef(2048, 42)},
+		tc{"multi_block_130000", bytes.Repeat([]byte("abcdefghijklmnopqrstuvwxyz"), 5000)},
+		tc{"pseudo_random_65536", pseudoRandomBytesCRef(65536, 99)},
+		// Found in silesia/webster. It corrupted q10
+		tc{"webster_dict_words", []byte(" the physical properties of the body bei")},
 	)
 
 	return cases

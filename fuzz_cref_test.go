@@ -4,6 +4,7 @@ package brrr
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/molecule-man/go-brrr/internal/core"
 	"github.com/molecule-man/go-brrr/internal/cref"
 )
 
@@ -69,10 +71,7 @@ func FuzzEncodeCRef(f *testing.F) {
 		goEncoded := encodeChunked(t, data, quality, opts, max(1, len(data)), false)
 		assertCRefDecodes(t, goEncoded, data, nil)
 		assertGoDecodes(t, goEncoded, data, nil, chunkSize, readSize)
-		// At q10 and q11, Go and C can choose different valid encodings.
-		if quality < 10 {
-			assertMatchesCRef(t, goEncoded, cEncoded, crefSizeOnly(quality, lgwin, len(data)))
-		}
+		assertMatchesCRef(t, goEncoded, cEncoded, crefSizeOnly(quality, lgwin, len(data)))
 
 		chunked := encodeChunked(t, data, quality, opts, chunkSize, flush)
 		assertCRefDecodes(t, chunked, data, nil)
@@ -197,6 +196,47 @@ func FuzzCompoundDictCRef(f *testing.F) {
 		assertCRefDecodes(t, chunked, data, dict)
 		assertGoDecodes(t, chunked, data, dict, chunkSize, readSize)
 	})
+}
+
+// FuzzEncodeDictWordsCRef feeds the encoder text made of transformed static
+// dictionary words.
+func FuzzEncodeDictWordsCRef(f *testing.F) {
+	for quality := uint8(0); quality <= 11; quality++ {
+		f.Add([]byte{0, 0, 0, 0, 7, 1, 0, 9}, quality, uint8(22))
+		// " the " + 24-byte word + " of the ": a 32-byte dictionary match.
+		f.Add([]byte{0, 0, 0, 0, 7, 1, 0, 9, 20, 3, 0, 73}, quality, uint8(22))
+	}
+
+	f.Fuzz(func(t *testing.T, recipe []byte, qualityByte, windowByte uint8) {
+		data := dictWordText(recipe, fuzzMaxPlain)
+		quality := int(qualityByte) % 12
+		lgwin := fuzzLGWin(windowByte)
+		opts := WriterOptions{LGWin: lgwin, SizeHint: uint(len(data))}
+
+		goEncoded := encodeChunked(t, data, quality, opts, max(1, len(data)), false)
+		assertCRefDecodes(t, goEncoded, data, nil)
+		assertGoDecodes(t, goEncoded, data, nil, max(1, len(goEncoded)), max(1, len(data)))
+
+		cEncoded, err := cref.Encode(data, quality, lgwin, uint(len(data)))
+		if err != nil {
+			t.Fatalf("C Encode (q=%d, lgwin=%d): %v", quality, lgwin, err)
+		}
+		assertMatchesCRef(t, goEncoded, cEncoded, crefSizeOnly(quality, lgwin, len(data)))
+	})
+}
+
+func dictWordText(recipe []byte, limit int) []byte {
+	var out []byte
+	var buf [128]byte // TransformDictionaryWord needs slack after its result.
+	for len(recipe) >= 4 && len(out) < limit {
+		l := core.DictMinWordLength + int(recipe[0])%(core.DictMaxWordLength-core.DictMinWordLength+1)
+		idx := int(binary.LittleEndian.Uint16(recipe[1:])) % (1 << core.DictSizeBitsByLength[l])
+		off := int(core.DictOffsetsByLength[l]) + idx*l
+		n := core.TransformDictionaryWord(buf[:], core.DictData[off:off+l], int(recipe[3])%core.NumTransforms)
+		out = append(out, buf[:n]...)
+		recipe = recipe[4:]
+	}
+	return out
 }
 
 func encodeChunked(t *testing.T, data []byte, quality int, opts WriterOptions, chunkSize int, flush bool) []byte {
