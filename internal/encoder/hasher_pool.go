@@ -25,7 +25,9 @@ var (
 	poolH5b7    = sync.Pool{New: func() any { return new(h5b7) }}
 	poolH5b8    = sync.Pool{New: func() any { return new(h5b8) }}
 	poolH6      = sync.Pool{New: func() any { return new(h6) }}
+	poolH6u     = sync.Pool{New: func() any { return new(h6u) }}
 	poolH6b5    = sync.Pool{New: func() any { return new(h6b5) }}
+	poolH6b5u   = sync.Pool{New: func() any { return new(h6b5u) }}
 	poolH6b6    = sync.Pool{New: func() any { return new(h6b6) }}
 	poolH6b7    = sync.Pool{New: func() any { return new(h6b7) }}
 	poolH6b8    = sync.Pool{New: func() any { return new(h6b8) }}
@@ -65,8 +67,12 @@ func releaseHasher(h streamHasher) {
 		poolH5b8.Put(h)
 	case *h6:
 		poolH6.Put(h)
+	case *h6u:
+		poolH6u.Put(h)
 	case *h6b5:
 		poolH6b5.Put(h)
+	case *h6b5u:
+		poolH6b5u.Put(h)
 	case *h6b6:
 		poolH6b6.Put(h)
 	case *h6b7:

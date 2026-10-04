@@ -182,8 +182,32 @@ func (c *encoderCore) stitchHasher(isLast bool) {
 // faithful 1:1 zero-extension. Pool-stale slots in the new hasher are either
 // fully overwritten by the copy (ready) or zeroed by the upcoming reset
 // (!ready).
+//
+// It also converts h6u and h6b5u to their tagged hashers when the tagged
+// scan becomes faster. A hasher that is not ready holds the counters of
+// an old stream, so it is not converted.
 func (c *encoderCore) maybePromoteHasher() {
 	s := &c.encodeState
+	switch h := c.hasher.(type) {
+	case *h6u:
+		if h.ready && h.wantsTags() {
+			n := poolH6.Get().(*h6)
+			h.copyTo(n, s.data, uint(s.mask))
+			c.hasher = n
+			poolH6u.Put(h)
+			c.hashers[0] = c.hasher.common()
+		}
+		return
+	case *h6b5u:
+		if h.ready && h.wantsTags() {
+			n := poolH6b5.Get().(*h6b5)
+			h.copyTo(n, s.data, uint(s.mask))
+			c.hasher = n
+			poolH6b5u.Put(h)
+			c.hashers[0] = c.hasher.common()
+		}
+		return
+	}
 	if s.inputPos <= 1<<16 {
 		return
 	}
@@ -951,11 +975,11 @@ func (e *encoderSplit) chooseHasher(isLast bool) {
 				e.hasher = &h40{maxHops: 16}
 			}
 		case s.sizeHint >= 1<<20 && s.lgwin >= 19:
-			if h, ok := prev.(*h6); ok {
+			if h, ok := prev.(*h6u); ok {
 				e.hasher = h
 			} else {
 				releaseHasher(prev)
-				e.hasher = poolH6.Get().(*h6)
+				e.hasher = poolH6u.Get().(*h6u)
 			}
 		default:
 			if h, ok := prev.(*h5); ok {
@@ -975,11 +999,11 @@ func (e *encoderSplit) chooseHasher(isLast bool) {
 				e.hasher = &h40{maxHops: 32}
 			}
 		case s.sizeHint >= 1<<20 && s.lgwin >= 19:
-			if h, ok := prev.(*h6b5); ok {
+			if h, ok := prev.(*h6b5u); ok {
 				e.hasher = h
 			} else {
 				releaseHasher(prev)
-				e.hasher = poolH6b5.Get().(*h6b5)
+				e.hasher = poolH6b5u.Get().(*h6b5u)
 			}
 		default:
 			if h, ok := prev.(*h5b5); ok {
