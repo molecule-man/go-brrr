@@ -7,10 +7,8 @@ package encoder
 
 import "io"
 
-// Compressor is the unified backend interface for Writer. Quality, lgwin, and
-// sizeHint are immutable after construction; Reset clears per-stream state but
-// keeps those parameters. AttachDictionary may return an error for backends
-// that do not support compound dictionaries (q0/q1).
+// Compressor writes brotli streams for one quality and window size.
+// AttachDictionary returns an error at q0 and q1.
 type Compressor interface {
 	// Write enqueues input. Implementations may emit compressed output to dst
 	// during this call (q>=2) or buffer until Flush/Close (q0/q1).
@@ -23,9 +21,8 @@ type Compressor interface {
 	// Close finalizes the stream by writing the last meta-block.
 	Close(dst io.Writer) error
 
-	// Reset discards per-stream state for reuse with the same parameters.
-	Reset()
-
+	// ResetSizeHint clears stream state and attached dictionaries.
+	// Attach dictionaries again for the next stream. A zero hint means unknown size.
 	ResetSizeHint(sizeHint uint)
 
 	// AttachDictionary attaches a compound dictionary to the encoder.

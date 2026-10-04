@@ -30,7 +30,7 @@ func testReusedWriterAllocations(t *testing.T, in []byte, level int, workers boo
 		t.Fatal(err)
 	}
 	stream := func() {
-		w.Reset(io.Discard)
+		w.ResetWithSizeHint(io.Discard, uint(len(in)))
 		if _, err := w.Write(in); err != nil {
 			t.Fatal(err)
 		}

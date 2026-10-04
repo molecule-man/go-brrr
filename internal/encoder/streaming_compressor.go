@@ -87,23 +87,13 @@ func streamClose(se streamEncoder, dst io.Writer) error {
 	return nil
 }
 
-// originalSizeHint reconstructs the user-supplied sizeHint (0 if auto-detect
-// was requested). userSizeHint guards against auto-detected values leaking
-// into the next stream after Reset.
-func (c *encoderCore) originalSizeHint() uint {
-	if c.userSizeHint {
-		return c.sizeHint
-	}
-	return 0
-}
-
 // AttachDictionary attaches a compound dictionary chunk. Shared by both
 // streaming encoder variants via the embedded encodeState.
 func (c *encoderCore) AttachDictionary(pd *PreparedDictionary) error {
 	return c.attachDictionary(pd)
 }
 
-// encoderArena Compressor surface. Reset/Write/Flush/Close are defined here
+// encoderArena Compressor surface. ResetSizeHint/Write/Flush/Close are defined here
 // (rather than on encoderCore) so method resolution dispatches to
 // encoderArena.reset and encoderArena.encodeData rather than the embedded
 // encodeState's reset.
@@ -118,12 +108,6 @@ func (e *encoderArena) Flush(dst io.Writer) error {
 
 func (e *encoderArena) Close(dst io.Writer) error {
 	return streamClose(e, dst)
-}
-
-// Reset discards per-stream state (including dictionaries) for reuse with the
-// same quality/lgwin/sizeHint configuration.
-func (e *encoderArena) Reset() {
-	e.reset(e.quality, e.lgwin, e.originalSizeHint())
 }
 
 func (e *encoderArena) ResetSizeHint(sizeHint uint) {
@@ -149,10 +133,6 @@ func (e *encoderSplit) Flush(dst io.Writer) error {
 
 func (e *encoderSplit) Close(dst io.Writer) error {
 	return streamClose(e, dst)
-}
-
-func (e *encoderSplit) Reset() {
-	e.reset(e.quality, e.lgwin, e.originalSizeHint())
 }
 
 func (e *encoderSplit) ResetSizeHint(sizeHint uint) {

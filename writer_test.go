@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -248,6 +249,78 @@ func TestWriterReset(t *testing.T) {
 				t.Errorf("stream 2 mismatch: got %q, want %q", dec2, input2)
 			}
 		})
+	}
+}
+
+func TestWriterResetSizeHint(t *testing.T) {
+	input := readTestdata(t, filepath.Join("brotli-ref", "tests", "testdata", "alice29.txt"))
+	const bigHint = 4 << 20 // q5 selects the large input hasher
+
+	pd, err := PrepareDictionary([]byte("Alice was beginning to get very tired"))
+	if err != nil {
+		t.Fatalf("PrepareDictionary: %v", err)
+	}
+
+	compress := func(t *testing.T, w *Writer, dst *bytes.Buffer) []byte {
+		t.Helper()
+		if _, err := w.Write(input); err != nil {
+			t.Fatalf("Write: %v", err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		return bytes.Clone(dst.Bytes())
+	}
+	fresh := func(t *testing.T, level int, opts WriterOptions) []byte {
+		t.Helper()
+		var buf bytes.Buffer
+		w, err := NewWriterOptions(&buf, level, opts)
+		if err != nil {
+			t.Fatalf("NewWriterOptions: %v", err)
+		}
+		return compress(t, w, &buf)
+	}
+
+	for _, level := range writerLevels {
+		for _, dicts := range [][]*PreparedDictionary{nil, {pd}} {
+			if dicts != nil && level < 2 {
+				continue
+			}
+			t.Run(fmt.Sprintf("quality_%d/dicts_%d", level, len(dicts)), func(t *testing.T) {
+				noHint := fresh(t, level, WriterOptions{Dictionaries: dicts})
+				withHint := fresh(t, level, WriterOptions{Dictionaries: dicts, SizeHint: bigHint})
+				if level == 5 && bytes.Equal(noHint, withHint) {
+					t.Fatal("the hint does not change the output")
+				}
+
+				var buf bytes.Buffer
+				w, err := NewWriterOptions(&buf, level, WriterOptions{Dictionaries: dicts, SizeHint: bigHint})
+				if err != nil {
+					t.Fatalf("NewWriterOptions: %v", err)
+				}
+				if got := compress(t, w, &buf); !bytes.Equal(got, withHint) {
+					t.Fatalf("first stream: %s", firstDiff(got, withHint))
+				}
+
+				// The first Reset reacquires the compressor. Later resets reuse it.
+				steps := []struct {
+					name  string
+					reset func(dst io.Writer)
+					want  []byte
+				}{
+					{"Reset after the options hint", w.Reset, noHint},
+					{"ResetWithSizeHint", func(dst io.Writer) { w.ResetWithSizeHint(dst, bigHint) }, withHint},
+					{"Reset after ResetWithSizeHint", w.Reset, noHint},
+				}
+				for _, step := range steps {
+					buf.Reset()
+					step.reset(&buf)
+					if got := compress(t, w, &buf); !bytes.Equal(got, step.want) {
+						t.Fatalf("%s: %s", step.name, firstDiff(got, step.want))
+					}
+				}
+			})
+		}
 	}
 }
 
