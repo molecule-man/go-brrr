@@ -44,8 +44,8 @@ type hasherSearchResult struct {
 }
 
 // streamHasher is the interface for all streaming hashers (H2–H54, H5, H5b5,
-// H5b6, H5b7, H5b8, H6, H6b5, H6b6, H6b7, H6b8, H40, H41, H42, H10). The
-// hot match-finding loop lives inside createBackwardReferences so that
+// H5b6, H5b7, H5b8, H6, H6u, H6b5, H6b5u, H6b6, H6b7, H6b8, H40, H41, H42,
+// H10). The hot match-finding loop lives inside createBackwardReferences so that
 // findLongestMatch/store/storeRange remain direct (non-virtual) calls — only
 // the per-metablock entry point is virtual.
 type streamHasher interface {

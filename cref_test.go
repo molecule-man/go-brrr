@@ -712,3 +712,39 @@ func pseudoRandomBytesCRef(n int, seed uint64) []byte {
 	}
 	return b
 }
+
+// TestTagSwitchMatchesCRef covers the q5/q6 large-input hashers after they
+// switch to tags. The first part is binary, so that the encoder switches.
+// The rest copies pieces of it, so that matches use the rebuilt tags.
+func TestTagSwitchMatchesCRef(t *testing.T) {
+	t.Parallel()
+
+	const binaryLen = 768 << 10
+	input := pseudoRandomBytesCRef(binaryLen, 11)
+	rng := rand.New(rand.NewPCG(11, 12))
+	for len(input) < 2<<20 {
+		off := rng.IntN(binaryLen - 2048)
+		input = append(input, input[off:off+8+rng.IntN(2040)]...)
+		input = append(input, pseudoRandomBytesCRef(rng.IntN(64), rng.Uint64())...)
+	}
+
+	for _, quality := range []int{5, 6} {
+		t.Run(fmt.Sprintf("q%d", quality), func(t *testing.T) {
+			t.Parallel()
+
+			var goBuf bytes.Buffer
+			w, err := NewWriterOptions(&goBuf, quality, WriterOptions{SizeHint: uint(len(input))})
+			if err != nil {
+				t.Fatalf("NewWriter: %v", err)
+			}
+			if _, err := w.Write(input); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+			if err := w.Close(); err != nil {
+				t.Fatalf("Close: %v", err)
+			}
+			cOut := creftest.BrotliCompress(t, input, quality, defaultLGWin, uint(len(input)))
+			assertMatchesCRef(t, goBuf.Bytes(), cOut, false)
+		})
+	}
+}
