@@ -136,7 +136,7 @@ func testMatchesCRef(t *testing.T, quality, lgwin int, sizeHint uint) {
 	for _, tt := range crefTestCases(t) {
 		t.Run(tt.name, func(t *testing.T) {
 			goBuf.Reset()
-			w.Reset(&goBuf)
+			w.ResetWithSizeHint(&goBuf, sizeHint)
 			if _, err := w.Write(tt.input); err != nil {
 				t.Fatalf("Write: %v", err)
 			}

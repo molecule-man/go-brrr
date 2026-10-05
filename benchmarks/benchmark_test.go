@@ -19,6 +19,13 @@ type compressor interface {
 	Reset(io.Writer)
 }
 
+type fixedHintWriter struct {
+	*brrr.Writer
+	sizeHint uint
+}
+
+func (w fixedHintWriter) Reset(dst io.Writer) { w.ResetWithSizeHint(dst, w.sizeHint) }
+
 type compressorFactory func(w io.Writer, quality, lgwin int) (compressor, error)
 
 var extraCompressors []struct {
@@ -310,7 +317,7 @@ func BenchmarkCompress(b *testing.B) {
 						if err != nil {
 							b.Fatal(err)
 						}
-						benchCompress(b, w, payloads)
+						benchCompress(b, fixedHintWriter{w, sizeHint}, payloads)
 					})
 					if dict != nil {
 						return
@@ -375,7 +382,7 @@ func BenchmarkCompressHasher(b *testing.B) {
 					if err != nil {
 						b.Fatal(err)
 					}
-					benchCompress(b, w, payloads)
+					benchCompress(b, fixedHintWriter{w, hc.sizeHint}, payloads)
 				})
 			}
 		})

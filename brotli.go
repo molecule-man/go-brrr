@@ -41,6 +41,9 @@ type WriterOptions struct {
 	// promotes its internal hasher to the unbounded variant if buffered
 	// input crosses the size-tuned threshold, preserving the bucket state
 	// that was learned under the small-hint dispatch.
+	//
+	// SizeHint applies only to the first stream. [Writer.Reset] clears it.
+	// [Writer.ResetWithSizeHint] sets the hint for the next stream.
 	SizeHint uint
 }
 
