@@ -11,6 +11,8 @@ import (
 	"github.com/molecule-man/go-brrr/internal/core"
 )
 
+//go:generate go run ../../cmd/gencommands15
+
 // maxDistance is the maximum backward reference distance for window size 18.
 // BROTLI_MAX_BACKWARD_LIMIT(18) = (1 << 18) - 16 = 262128.
 const maxDistance = (1 << 18) - 16
@@ -132,6 +134,15 @@ func (c *fragmentCompressor) compress() {
 }
 
 func (c *fragmentCompressor) writeCommands() {
+	if c.shift == 64-15 {
+		c.writeCommandsTable15()
+		return
+	}
+	c.writeCommandsAnyTable()
+}
+
+// The generator uses writeCommandsAnyTable as the source for writeCommandsTable15.
+func (c *fragmentCompressor) writeCommandsAnyTable() {
 	// Initialize the command and distance histograms.
 	c.arena.cmdHisto = cmdHistoSeed
 	input := c.input

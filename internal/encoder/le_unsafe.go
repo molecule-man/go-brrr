@@ -53,15 +53,14 @@ func (b *bitWriter) writeLiteralBits(input []byte, depths *[256]byte, bits *[256
 	b.bitOffset = writeLiteralBitsAt(b.buf, b.bitOffset, input, depths, bits)
 }
 
-// writeLiteralBitsAt writes 4 codes per store. 4 codes of at most 14 bits take
-// at most 56 bits, and fit into one 64-bit store with the 7-bit byte offset.
-// Not inlined: inside a large caller the loop spills its state to the stack.
+// Four literal codes use at most 56 bits. They fit in one 64-bit store with a seven-bit offset.
+// A large caller spills the loop state to the stack if the compiler inlines this function.
 //
 //go:noinline
 func writeLiteralBitsAt(buf []byte, bitOffset uint, input []byte, depths *[256]byte, bits *[256]uint16) uint {
 	bufBase := unsafe.Pointer(unsafe.SliceData(buf))
 	src := unsafe.Pointer(unsafe.SliceData(input))
-	d, c := depths[:], bits[:] // nil checks once, not per literal
+	d, c := depths[:], bits[:]
 	n := uint(len(input))
 	i := uint(0)
 	for ; i+4 <= n; i += 4 {
