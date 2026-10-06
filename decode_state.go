@@ -236,6 +236,8 @@ type decodeState struct {
 	err              error
 	ringbuffer       []byte
 	htreeCommand     []core.HuffmanCode // slice into insertCopyHGroup.codes
+	htreeCommandLut  []uint64           // command LUT entries for the active tree
+	cmdLuts          []uint64           // command LUT entries for all insert-and-copy trees
 	contextLookup    []byte
 	distContextMap   []byte
 	literalHTree     []core.HuffmanCode // slice into literalHGroup.codes
@@ -488,6 +490,7 @@ func (s *decodeState) initForReuse() {
 	// decompression. The saved backing slices (ringbuffer, blockTypeTrees,
 	// contextMap, etc.) are kept; derived slices are re-derived later.
 	s.htreeCommand = nil
+	s.htreeCommandLut = nil
 	s.contextLookup = nil
 	s.literalHTree = nil
 	s.blockLenTrees = nil
