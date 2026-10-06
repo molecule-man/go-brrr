@@ -1608,16 +1608,18 @@ commandBegin:
 		val >>= cmdDrop & 63
 		bitPos -= cmdDrop
 
+		// The refill leaves at least 56 bits. The command code uses at most 15 bits.
+		// The copy extra bits need another refill only after the insert extra bits.
 		insertLenExtra = 0
 		if insertBits != 0 {
 			insertLenExtra = val & bitMask(insertBits)
 			val >>= insertBits & 63
 			bitPos -= insertBits
+			val |= *(*uint64)(unsafe.Add(br.inputBase, br.pos)) << (bitPos & 63)
+			br.pos += int((63 - bitPos) >> 3)
+			bitPos |= 56
 		}
 
-		val |= *(*uint64)(unsafe.Add(br.inputBase, br.pos)) << (bitPos & 63)
-		br.pos += int((63 - bitPos) >> 3)
-		bitPos |= 56
 		copyExtra := val & bitMask(copyBits)
 		val >>= copyBits & 63
 		bitPos -= copyBits
