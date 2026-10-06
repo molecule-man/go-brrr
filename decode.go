@@ -1588,16 +1588,16 @@ commandBegin:
 		s.htreeCommandLut = s.cmdLuts[s.blockTypeRB[3]<<huffmanTableBits:]
 	}
 
-	// Read command.
-	if br.checkInputAmount() {
+	// Read the command. The fast path requires enough bits for a root index.
+	// It computes the index before the refill, which removes a load dependency.
+	if br.checkInputAmountAndBits(huffmanTableBits) {
 		val, bitPos := br.val, br.bitPos
+		idx := val & huffmanTableMask
 		val |= *(*uint64)(unsafe.Add(br.inputBase, br.pos)) << (bitPos & 63)
 		br.pos += int((63 - bitPos) >> 3)
 		bitPos |= 56
-		// Inline command symbol decode with unsafe pointer arithmetic to
-		// avoid bounds checks on every command (same pattern as distanceSymbolEntryFast).
+		// Decode the command inline to avoid a call and bounds checks.
 		cmdTableBase := unsafe.Pointer(unsafe.SliceData(s.htreeCommand))
-		idx := val & huffmanTableMask
 		raw := *(*uint32)(unsafe.Add(cmdTableBase, idx*4))
 		lutSlot := (*uint64)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(s.htreeCommandLut)), idx*8))
 		lut := *lutSlot
@@ -1871,14 +1871,14 @@ commandPostDecodeLiterals:
 			s.updateDistCodesCache()
 			s.distCodesOffset = s.distCodesCache[s.distanceContext]
 		}
-		// Inlined fast path of readDistance to avoid function call overhead
-		// (readDistance exceeds the compiler's inlining budget).
-		if br.checkInputAmount() {
+		// Decode the distance inline because readDistance exceeds the compiler's inline budget.
+		if br.checkInputAmountAndBits(huffmanTableBits) {
 			val, bitPos := br.val, br.bitPos
+			// Load the root entry before the refill.
+			raw := distanceSymbolEntryFast(val, s.distanceHGroup.codes, s.distCodesOffset)
 			val |= *(*uint64)(unsafe.Add(br.inputBase, br.pos)) << (bitPos & 63)
 			br.pos += int((63 - bitPos) >> 3)
 			bitPos |= 56
-			raw := distanceSymbolEntryFast(val, s.distanceHGroup.codes, s.distCodesOffset)
 			drop := uint(raw & 0xFF)
 			code := uint(raw >> 16)
 			if drop > huffmanTableBits {
