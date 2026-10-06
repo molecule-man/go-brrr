@@ -63,6 +63,18 @@ func packCmdLut() (t [core.AlphabetSizeInsertAndCopyLength]uint64) {
 	return t
 }
 
+// resetCmdLuts clears one command LUT entry for each root slot in every
+// insert-and-copy tree. The command decoder caches entries on first use.
+// Zero marks an empty slot because cmdLutPacked contains no zero entries.
+func (s *decodeState) resetCmdLuts() {
+	n := int(s.insertCopyHGroup.numHTrees) << huffmanTableBits
+	if cap(s.cmdLuts) < n {
+		s.cmdLuts = make([]uint64, n)
+	}
+	s.cmdLuts = s.cmdLuts[:n]
+	clear(s.cmdLuts)
+}
+
 func getDecRingBuf(size int) []byte {
 	if v := decRingBufPool.Get(); v != nil {
 		bp := v.(*[]byte)
@@ -313,7 +325,9 @@ func (s *decodeState) decompressStream(output *[]byte) decoderResult {
 			s.prepareLiteralDecoding()
 			s.distContextMapSliceIdx = 0
 			s.updateDistCodesCache()
+			s.resetCmdLuts()
 			s.htreeCommand = s.insertCopyHGroup.codes[s.insertCopyHGroup.htrees[0]:]
+			s.htreeCommandLut = s.cmdLuts
 			s.ensureRingBuffer()
 			s.calculateDistanceLut()
 			s.state = decoderStateCommandBegin
@@ -1571,30 +1585,34 @@ commandBegin:
 			return decoderResultNeedsMoreInput
 		}
 		s.htreeCommand = s.insertCopyHGroup.codes[s.insertCopyHGroup.htrees[s.blockTypeRB[3]]:]
+		s.htreeCommandLut = s.cmdLuts[s.blockTypeRB[3]<<huffmanTableBits:]
 	}
 
-	// Read command.
-	if br.checkInputAmount() {
+	// Read the command. The fast path requires enough bits for a root index.
+	// It computes the index before the refill, which removes a load dependency.
+	if br.checkInputAmountAndBits(huffmanTableBits) {
 		val, bitPos := br.val, br.bitPos
+		idx := val & huffmanTableMask
 		val |= *(*uint64)(unsafe.Add(br.inputBase, br.pos)) << (bitPos & 63)
 		br.pos += int((63 - bitPos) >> 3)
 		bitPos |= 56
-		// Inline command symbol decode with unsafe pointer arithmetic to
-		// avoid bounds checks on every command (same pattern as distanceSymbolEntryFast).
+		// Decode the command inline to avoid a call and bounds checks.
 		cmdTableBase := unsafe.Pointer(unsafe.SliceData(s.htreeCommand))
-		idx := val & huffmanTableMask
 		raw := *(*uint32)(unsafe.Add(cmdTableBase, idx*4))
+		lutSlot := (*uint64)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(s.htreeCommandLut)), idx*8))
+		lut := *lutSlot
 		cmdDrop := uint(raw & 0xFF)
-		cmdCode = uint(raw >> 16)
 		if cmdDrop > huffmanTableBits {
 			nbits := cmdDrop - huffmanTableBits
-			idx2 := idx + uint64(cmdCode) + ((val >> huffmanTableBits) & bitMask(nbits))
+			idx2 := idx + uint64(raw>>16) + ((val >> huffmanTableBits) & bitMask(nbits))
 			raw = *(*uint32)(unsafe.Add(cmdTableBase, idx2*4))
 			cmdDrop = huffmanTableBits + uint(raw&0xFF)
-			cmdCode = uint(raw >> 16)
+			lut = *(*uint64)(unsafe.Add(unsafe.Pointer(&cmdLutPacked[0]), uintptr(raw>>16)*8))
+		} else if lut == 0 {
+			lut = *(*uint64)(unsafe.Add(unsafe.Pointer(&cmdLutPacked[0]), uintptr(raw>>16)*8))
+			*lutSlot = lut
 		}
 
-		lut := *(*uint64)(unsafe.Add(unsafe.Pointer(&cmdLutPacked[0]), uintptr(cmdCode)*8))
 		s.distanceCode = int(int8(lut >> 16))
 		s.distanceContext = int(uint8(lut >> 24))
 		s.distCodesOffset = s.distCodesCache[s.distanceContext&3]
@@ -1608,16 +1626,18 @@ commandBegin:
 		val >>= cmdDrop & 63
 		bitPos -= cmdDrop
 
+		// The refill leaves at least 56 bits. The command code uses at most 15 bits.
+		// The copy extra bits need another refill only after the insert extra bits.
 		insertLenExtra = 0
 		if insertBits != 0 {
 			insertLenExtra = val & bitMask(insertBits)
 			val >>= insertBits & 63
 			bitPos -= insertBits
+			val |= *(*uint64)(unsafe.Add(br.inputBase, br.pos)) << (bitPos & 63)
+			br.pos += int((63 - bitPos) >> 3)
+			bitPos |= 56
 		}
 
-		val |= *(*uint64)(unsafe.Add(br.inputBase, br.pos)) << (bitPos & 63)
-		br.pos += int((63 - bitPos) >> 3)
-		bitPos |= 56
 		copyExtra := val & bitMask(copyBits)
 		val >>= copyBits & 63
 		bitPos -= copyBits
@@ -1851,14 +1871,14 @@ commandPostDecodeLiterals:
 			s.updateDistCodesCache()
 			s.distCodesOffset = s.distCodesCache[s.distanceContext]
 		}
-		// Inlined fast path of readDistance to avoid function call overhead
-		// (readDistance exceeds the compiler's inlining budget).
-		if br.checkInputAmount() {
+		// Decode the distance inline because readDistance exceeds the compiler's inline budget.
+		if br.checkInputAmountAndBits(huffmanTableBits) {
 			val, bitPos := br.val, br.bitPos
+			// Load the root entry before the refill.
+			raw := distanceSymbolEntryFast(val, s.distanceHGroup.codes, s.distCodesOffset)
 			val |= *(*uint64)(unsafe.Add(br.inputBase, br.pos)) << (bitPos & 63)
 			br.pos += int((63 - bitPos) >> 3)
 			bitPos |= 56
-			raw := distanceSymbolEntryFast(val, s.distanceHGroup.codes, s.distCodesOffset)
 			drop := uint(raw & 0xFF)
 			code := uint(raw >> 16)
 			if drop > huffmanTableBits {
