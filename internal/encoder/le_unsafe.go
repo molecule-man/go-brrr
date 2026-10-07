@@ -48,15 +48,40 @@ func writeBitsAt(buf []byte, bitOffset, nbits uint, value uint64) uint {
 	return bitOffset + nbits
 }
 
+// writeLiteralBits requires depths of at most 14 bits.
 func (b *bitWriter) writeLiteralBits(input []byte, depths *[256]byte, bits *[256]uint16) {
-	bufBase := unsafe.Pointer(unsafe.SliceData(b.buf))
-	bitOffset := b.bitOffset
-	for _, lit := range input {
-		bytePos := bitOffset >> 3
-		bitOff := bitOffset & 7
-		p := (*uint64)(unsafe.Add(bufBase, bytePos))
-		*p = uint64(*(*byte)(unsafe.Pointer(p))) | uint64(bits[lit])<<bitOff
-		bitOffset += uint(depths[lit])
+	b.bitOffset = writeLiteralBitsAt(b.buf, b.bitOffset, input, depths, bits)
+}
+
+// Four literal codes use at most 56 bits. They fit in one 64-bit store with a seven-bit offset.
+// A large caller spills the loop state to the stack if the compiler inlines this function.
+//
+//go:noinline
+func writeLiteralBitsAt(buf []byte, bitOffset uint, input []byte, depths *[256]byte, bits *[256]uint16) uint {
+	bufBase := unsafe.Pointer(unsafe.SliceData(buf))
+	src := unsafe.Pointer(unsafe.SliceData(input))
+	d, c := depths[:], bits[:]
+	n := uint(len(input))
+	i := uint(0)
+	for ; i+4 <= n; i += 4 {
+		l0 := *(*byte)(unsafe.Add(src, i))
+		l1 := *(*byte)(unsafe.Add(src, i+1))
+		l2 := *(*byte)(unsafe.Add(src, i+2))
+		l3 := *(*byte)(unsafe.Add(src, i+3))
+		n0 := uint(d[l0])
+		n01 := n0 + uint(d[l1])
+		n012 := n01 + uint(d[l2])
+		v := uint64(c[l0]) | uint64(c[l1])<<(n0&63) |
+			uint64(c[l2])<<(n01&63) | uint64(c[l3])<<(n012&63)
+		p := (*uint64)(unsafe.Add(bufBase, bitOffset>>3))
+		*p = uint64(*(*byte)(unsafe.Pointer(p))) | v<<(bitOffset&7)
+		bitOffset += n012 + uint(d[l3])
 	}
-	b.bitOffset = bitOffset
+	for ; i < n; i++ {
+		lit := *(*byte)(unsafe.Add(src, i))
+		p := (*uint64)(unsafe.Add(bufBase, bitOffset>>3))
+		*p = uint64(*(*byte)(unsafe.Pointer(p))) | uint64(c[lit])<<(bitOffset&7)
+		bitOffset += uint(d[lit])
+	}
+	return bitOffset
 }
