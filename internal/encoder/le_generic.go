@@ -27,6 +27,10 @@ func loadU64LE(b []byte, i uint) uint64 {
 		uint64(b[i+4])<<32 | uint64(b[i+5])<<40 | uint64(b[i+6])<<48 | uint64(b[i+7])<<56
 }
 
+func copy16(dst []byte, d uint, src []byte, s uint) {
+	copy(dst[d:d+16], src[s:s+16])
+}
+
 // writeBits packs value into the bitstream and advances the bit position.
 // Up to 56 bits may be written at a time.
 func (b *bitWriter) writeBits(nbits uint, value uint64) {
@@ -56,8 +60,10 @@ func writeBitsAt(buf []byte, bitOffset, nbits uint, value uint64) uint {
 }
 
 func (b *bitWriter) writeLiteralBits(input []byte, depths *[256]byte, bits *[256]uint16) {
-	buf := b.buf
-	bitOffset := b.bitOffset
+	b.bitOffset = writeLiteralBitsAt(b.buf, b.bitOffset, input, depths, bits)
+}
+
+func writeLiteralBitsAt(buf []byte, bitOffset uint, input []byte, depths *[256]byte, bits *[256]uint16) uint {
 	for _, lit := range input {
 		bytePos := bitOffset >> 3
 		bitOff := bitOffset & 7
@@ -66,5 +72,5 @@ func (b *bitWriter) writeLiteralBits(input []byte, depths *[256]byte, bits *[256
 		binary.LittleEndian.PutUint64(p, v)
 		bitOffset += uint(depths[lit])
 	}
-	b.bitOffset = bitOffset
+	return bitOffset
 }

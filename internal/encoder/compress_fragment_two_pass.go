@@ -10,6 +10,8 @@ import (
 	"unsafe"
 )
 
+//go:generate go run ../../cmd/genfixedshift -in compress_fragment_two_pass.go -out compress_fragment_two_pass_table17.go -func createCommandsMinMatch6 -name createCommandsTable17 -bits 17
+
 const twoPassBlockSize = 1 << 17
 
 // sampleRate is the byte sampling interval used by shouldCompress to
@@ -54,6 +56,28 @@ var copyLenCodeQ1Small = func() [134]uint32 {
 		ccode := (nbits << 1) + prefix + 44
 		extra := tail - (prefix << nbits)
 		t[cl] = ccode | extra<<8
+	}
+	return t
+}()
+
+// insertLenCodeQ1Small stores the command word for each insertLen below 130.
+// Bits 0..6 contain the command code.
+var insertLenCodeQ1Small = func() [130]uint32 {
+	var t [130]uint32
+	var h [128]uint32
+	for n := range uint(130) {
+		encodeInsertLen(t[n:], n, &h)
+	}
+	return t
+}()
+
+// copyLenLastDistanceCodeQ1Small stores each single-slot command word below 72.
+// Bits 0..6 contain the command code.
+var copyLenLastDistanceCodeQ1Small = func() [72]uint32 {
+	var t [72]uint32
+	var h [128]uint32
+	for n := uint(4); n < 72; n++ {
+		encodeCopyLenLastDistance(t[n:], n, &h)
 	}
 	return t
 }()
@@ -137,6 +161,9 @@ func (c *twoPassCompressor) createCommands(
 	c.arena.cmdHisto = [128]uint32{}
 
 	if c.minMatch == 6 {
+		if c.tableBits == 17 {
+			return c.createCommandsTable17(input, pos, blockSize, inputSize, commands, literals)
+		}
 		return c.createCommandsMinMatch6(input, pos, blockSize, inputSize, commands, literals)
 	}
 
@@ -147,10 +174,10 @@ func (c *twoPassCompressor) createCommands(
 	nextEmit := pos
 	lastDistance := -1
 	table := c.table
-	minMatch := c.minMatch
+	tbl := unsafe.Pointer(unsafe.SliceData(table))
+	const minMatch = 4
 	cmdPos := 0
 	litPos := 0
-	var nextHash uint32
 
 	if blockSize < inputMarginBytes {
 		goto encodeRemainder
@@ -164,44 +191,13 @@ func (c *twoPassCompressor) createCommands(
 		ipLimit := pos + lenLimit
 
 		ip++
-		nextHash = hashTwoPass4At(input, uint(ip), shift)
 
 		for {
-			// Step 1: Scan forward looking for a match. Skip bytes
-			// heuristically when no matches are found recently.
-			skip := uint32(32)
-			nextIP := ip
 			var candidate int
-
-			for {
-				hash := nextHash
-				bytesBetweenHashLookups := skip >> 5
-				skip++
-				ip = nextIP
-				nextIP = ip + int(bytesBetweenHashLookups)
-				if nextIP > ipLimit {
-					goto encodeRemainder
-				}
-				nextHash = hashTwoPass4At(input, uint(nextIP), shift)
-
-				candidate = ip - lastDistance
-				if candidate >= 0 && candidate < ip &&
-					isMatchTwoPass4At(input, uint(ip), uint(candidate)) {
-					table[hash] = uint32(ip)
-					if ip-candidate <= maxDistance {
-						break
-					}
-					continue
-				}
-
-				candidate = int(table[hash])
-				table[hash] = uint32(ip)
-				if isMatchTwoPass4At(input, uint(ip), uint(candidate)) {
-					if ip-candidate <= maxDistance {
-						break
-					}
-					continue
-				}
+			var found bool
+			ip, candidate, found = findMatchMinMatch4(input, tbl, ip, ipLimit, lastDistance, shift)
+			if !found {
+				goto encodeRemainder
 			}
 
 			// Step 2: Emit the found match together with the literal bytes from
@@ -209,14 +205,26 @@ func (c *twoPassCompressor) createCommands(
 			// afterwards.
 			{
 				base := ip
-				matched := minMatch + matchLen(
-					input[candidate+minMatch:], input[ip+minMatch:], ipEnd-ip-minMatch)
+				matched := minMatch + matchLenAt(
+					input, uint(candidate+minMatch), uint(ip+minMatch), ipEnd-ip-minMatch)
 				distance := base - candidate
 				insert := base - nextEmit
 				ip += matched
 
-				cmdPos += encodeInsertLen(commands[cmdPos:], uint(insert), cmdHisto)
-				copy(literals[litPos:], input[nextEmit:nextEmit+insert])
+				if u := uint(insert); u < 130 {
+					cmd := insertLenCodeQ1Small[u]
+					commands[cmdPos] = cmd
+					cmdHisto[cmd&0x7F]++
+					cmdPos++
+				} else {
+					cmdPos += encodeInsertLen(commands[cmdPos:], u, cmdHisto)
+				}
+				// The scan margin makes the 16-byte source read safe.
+				if insert <= 16 && litPos+16 <= len(literals) {
+					copy16(literals, uint(litPos), input, uint(nextEmit))
+				} else {
+					copy(literals[litPos:], input[nextEmit:nextEmit+insert])
+				}
 				litPos += insert
 				if distance == lastDistance {
 					commands[cmdPos] = 64
@@ -226,7 +234,14 @@ func (c *twoPassCompressor) createCommands(
 					cmdPos += encodeDistance(commands[cmdPos:], uint(distance), cmdHisto)
 					lastDistance = distance
 				}
-				cmdPos += encodeCopyLenLastDistance(commands[cmdPos:], uint(matched), cmdHisto)
+				if cl := uint(matched); cl < 72 {
+					cmd := copyLenLastDistanceCodeQ1Small[cl]
+					commands[cmdPos] = cmd
+					cmdHisto[cmd&0x7F]++
+					cmdPos++
+				} else {
+					cmdPos += encodeCopyLenLastDistance(commands[cmdPos:], cl, cmdHisto)
+				}
 
 				nextEmit = ip
 				if ip >= ipLimit {
@@ -240,8 +255,8 @@ func (c *twoPassCompressor) createCommands(
 			for ip-candidate <= maxDistance &&
 				isMatchTwoPass4At(input, uint(ip), uint(candidate)) {
 				base := ip
-				matched := minMatch + matchLen(
-					input[candidate+minMatch:], input[ip+minMatch:], ipEnd-ip-minMatch)
+				matched := minMatch + matchLenAt(
+					input, uint(candidate+minMatch), uint(ip+minMatch), ipEnd-ip-minMatch)
 				ip += matched
 				lastDistance = base - candidate
 
@@ -278,7 +293,6 @@ func (c *twoPassCompressor) createCommands(
 			}
 
 			ip++
-			nextHash = hashTwoPass4At(input, uint(ip), shift)
 		}
 	} // close block scope for ipLimit, lenLimit
 
@@ -293,6 +307,8 @@ encodeRemainder:
 	return cmdPos, litPos
 }
 
+// genfixedshift uses createCommandsMinMatch6 to generate createCommandsTable17.
+//
 // createCommandsMinMatch6 is the quality-1 large-table path. Keeping the
 // 6-byte minimum match as a constant removes minMatch branches from the hot
 // scan and hash-table update loops used for real large inputs.
@@ -308,10 +324,9 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 	ipEnd := pos + blockSize
 	nextEmit := pos
 	lastDistance := -1
-	table := c.table
+	tbl := unsafe.Pointer(unsafe.SliceData(c.table))
 	cmdPos := 0
 	litPos := 0
-	var nextHash uint32
 
 	if blockSize < inputMarginBytes {
 		goto encodeRemainder
@@ -325,50 +340,13 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 		ipLimit := pos + lenLimit
 
 		ip++
-		nextLoad := loadU64LE(input, uint(ip))
-		nextHash = uint32(((nextLoad << 16) * hashMul32) >> (shift & 63))
 
 		for {
-			// Step 1: Scan forward looking for a match. Skip bytes
-			// heuristically when no matches are found recently.
-			skip := uint32(32)
-			nextIP := ip
 			var candidate int
-
-			for {
-				hash := nextHash
-				// nextLoad caches the loadU64LE(input, ip) computed by the
-				// previous iteration's hash; reuse it in the match check
-				// instead of issuing a second load at the same offset.
-				ipBytes := nextLoad
-				bytesBetweenHashLookups := skip >> 5
-				skip++
-				ip = nextIP
-				nextIP = ip + int(bytesBetweenHashLookups)
-				if nextIP > ipLimit {
-					goto encodeRemainder
-				}
-				nextLoad = loadU64LE(input, uint(nextIP))
-				nextHash = uint32(((nextLoad << 16) * hashMul32) >> (shift & 63))
-
-				candidate = ip - lastDistance
-				if candidate >= 0 && candidate < ip &&
-					(loadU64LE(input, uint(candidate))^ipBytes)<<16 == 0 {
-					table[hash] = uint32(ip)
-					if ip-candidate <= maxDistance {
-						break
-					}
-					continue
-				}
-
-				candidate = int(table[hash])
-				table[hash] = uint32(ip)
-				if (loadU64LE(input, uint(candidate))^ipBytes)<<16 == 0 {
-					if ip-candidate <= maxDistance {
-						break
-					}
-					continue
-				}
+			var found bool
+			ip, candidate, found = findMatchMinMatch6(input, tbl, ip, ipLimit, lastDistance, shift)
+			if !found {
+				goto encodeRemainder
 			}
 
 			// Step 2: Emit the found match together with the literal bytes from
@@ -382,18 +360,20 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 				insert := base - nextEmit
 				ip += matched
 
-				// Fast path for short inserts (the common case on text/HTML):
-				// the < 6 branch of encodeInsertLen is a single store + histogram
-				// bump, so inlining it avoids the non-inlineable function call
-				// for the dominant insert-length bucket.
-				if u := uint(insert); u < 6 {
-					commands[cmdPos] = uint32(u)
-					cmdHisto[u]++
+				if u := uint(insert); u < 130 {
+					cmd := insertLenCodeQ1Small[u]
+					commands[cmdPos] = cmd
+					cmdHisto[cmd&0x7F]++
 					cmdPos++
 				} else {
 					cmdPos += encodeInsertLen(commands[cmdPos:], u, cmdHisto)
 				}
-				copy(literals[litPos:], input[nextEmit:nextEmit+insert])
+				// The scan margin makes the 16-byte source read safe.
+				if insert <= 16 && litPos+16 <= len(literals) {
+					copy16(literals, uint(litPos), input, uint(nextEmit))
+				} else {
+					copy(literals[litPos:], input[nextEmit:nextEmit+insert])
+				}
 				litPos += insert
 				if distance == lastDistance {
 					commands[cmdPos] = 64
@@ -403,7 +383,14 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 					cmdPos += encodeDistance(commands[cmdPos:], uint(distance), cmdHisto)
 					lastDistance = distance
 				}
-				cmdPos += encodeCopyLenLastDistance(commands[cmdPos:], uint(matched), cmdHisto)
+				if cl := uint(matched); cl < 72 {
+					cmd := copyLenLastDistanceCodeQ1Small[cl]
+					commands[cmdPos] = cmd
+					cmdHisto[cmd&0x7F]++
+					cmdPos++
+				} else {
+					cmdPos += encodeCopyLenLastDistance(commands[cmdPos:], cl, cmdHisto)
+				}
 			}
 
 			// Try to find another match immediately.
@@ -413,7 +400,6 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 					goto encodeRemainder
 				}
 
-				tbl := unsafe.Pointer(unsafe.SliceData(table))
 				lo := loadU64LE(input, uint(ip-5))
 				hi := loadU64LE(input, uint(ip-2))
 				*(*uint32)(unsafe.Add(tbl, uintptr(hashBytesAtOffsetTwoPass6(lo, 0, shift))*4)) = uint32(ip - 5)
@@ -460,8 +446,6 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 			}
 
 			ip++
-			nextLoad = loadU64LE(input, uint(ip))
-			nextHash = uint32(((nextLoad << 16) * hashMul32) >> (shift & 63))
 		}
 	} // close block scope for ipLimit, lenLimit
 
@@ -474,6 +458,86 @@ encodeRemainder:
 		litPos += insert
 	}
 	return cmdPos, litPos
+}
+
+// findMatchMinMatch4 returns the first valid 4-byte match at or after ip.
+// It returns false when the scan passes ipLimit.
+// A separate function keeps the scan state in registers.
+//
+//go:noinline
+func findMatchMinMatch4(input []byte, tbl unsafe.Pointer, ip, ipLimit, lastDistance int, shift uint) (matchIP, candidate int, found bool) {
+	nextHash := hashTwoPass4At(input, uint(ip), shift)
+	skip := uint32(32)
+	nextIP := ip
+	for {
+		hash := nextHash
+		ip = nextIP
+		nextIP = ip + int(skip>>5)
+		skip++
+		if nextIP > ipLimit {
+			return 0, 0, false
+		}
+		nextHash = hashTwoPass4At(input, uint(nextIP), shift)
+
+		slot := (*uint32)(unsafe.Add(tbl, uintptr(hash)*4))
+		candidate = ip - lastDistance
+		// The unsigned compare is candidate >= 0 && candidate < ip.
+		if uint(candidate) < uint(ip) && isMatchTwoPass4At(input, uint(ip), uint(candidate)) {
+			*slot = uint32(ip)
+			if ip-candidate <= maxDistance {
+				return ip, candidate, true
+			}
+			continue
+		}
+
+		candidate = int(*slot)
+		*slot = uint32(ip)
+		if isMatchTwoPass4At(input, uint(ip), uint(candidate)) && ip-candidate <= maxDistance {
+			return ip, candidate, true
+		}
+	}
+}
+
+// findMatchMinMatch6 returns the first valid 6-byte match at or after ip.
+// It returns false when the scan passes ipLimit.
+// A separate function keeps the scan state in registers.
+//
+//go:noinline
+func findMatchMinMatch6(input []byte, tbl unsafe.Pointer, ip, ipLimit, lastDistance int, shift uint) (matchIP, candidate int, found bool) {
+	nextLoad := loadU64LE(input, uint(ip))
+	nextHash := uint32(((nextLoad << 16) * hashMul32) >> (shift & 63))
+	skip := uint32(32)
+	nextIP := ip
+	for {
+		hash := nextHash
+		ipBytes := nextLoad
+		ip = nextIP
+		nextIP = ip + int(skip>>5)
+		skip++
+		if nextIP > ipLimit {
+			return 0, 0, false
+		}
+		nextLoad = loadU64LE(input, uint(nextIP))
+		nextHash = uint32(((nextLoad << 16) * hashMul32) >> (shift & 63))
+
+		slot := (*uint32)(unsafe.Add(tbl, uintptr(hash)*4))
+		candidate = ip - lastDistance
+		// The unsigned compare is candidate >= 0 && candidate < ip.
+		if uint(candidate) < uint(ip) &&
+			(loadU64LE(input, uint(candidate))^ipBytes)<<16 == 0 {
+			*slot = uint32(ip)
+			if ip-candidate <= maxDistance {
+				return ip, candidate, true
+			}
+			continue
+		}
+
+		candidate = int(*slot)
+		*slot = uint32(ip)
+		if (loadU64LE(input, uint(candidate))^ipBytes)<<16 == 0 && ip-candidate <= maxDistance {
+			return ip, candidate, true
+		}
+	}
 }
 
 // updateHashTableTwoPass updates the hash table with positions from the last
@@ -521,8 +585,6 @@ func (c *twoPassCompressor) writeCommands(literals []byte, commands []uint32) {
 	b := c.b
 	cmdDepth := s.cmdDepth[:]
 	cmdBits := s.cmdBits[:]
-	litDepth := s.litDepth[:]
-	litBits := s.litBits[:]
 
 	s.resetHistograms()
 
@@ -546,11 +608,8 @@ func (c *twoPassCompressor) writeCommands(literals []byte, commands []uint32) {
 	// compiler can keep them in registers across iterations; the regular
 	// b.writeBits cannot avoid reloading b.bitOffset and re-deriving the
 	// buffer base on every call because writes into b.buf could alias the
-	// bitWriter fields. Literals are packed three at a time into a single
-	// write — the literal Huffman tree is built with a depth limit of 14
-	// (set in encodeHuffmanTree), so 3 codes total at most 42 bits, well
-	// within the 56-bit writeBits limit. This cuts the literal-stream
-	// writeBits call count by ~3x in the common case.
+	// bitWriter fields. writeLiteralBitsAt requires the 14-bit depth limit
+	// that encodeHuffmanTree applies to the literal Huffman tree.
 	bufBase := unsafe.Pointer(unsafe.SliceData(b.buf))
 	bitOffset := b.bitOffset
 	litIdx := 0
@@ -570,38 +629,8 @@ func (c *twoPassCompressor) writeCommands(literals []byte, commands []uint32) {
 		}
 		if code < 24 {
 			j := int(insertOffset[code]) + int(extra)
-			for j > 0 {
-				lit0 := literals[litIdx]
-				n0 := uint(litDepth[lit0])
-				v0 := uint64(litBits[lit0])
-				litIdx++
-				j--
-				if j == 0 {
-					p := (*uint64)(unsafe.Add(bufBase, bitOffset>>3))
-					*p = uint64(*(*byte)(unsafe.Pointer(p))) | v0<<(bitOffset&7)
-					bitOffset += n0
-					break
-				}
-				lit1 := literals[litIdx]
-				n1 := uint(litDepth[lit1])
-				v1 := uint64(litBits[lit1])
-				litIdx++
-				j--
-				if j == 0 {
-					p := (*uint64)(unsafe.Add(bufBase, bitOffset>>3))
-					*p = uint64(*(*byte)(unsafe.Pointer(p))) | (v0|v1<<n0)<<(bitOffset&7)
-					bitOffset += n0 + n1
-					break
-				}
-				lit2 := literals[litIdx]
-				n2 := uint(litDepth[lit2])
-				v2 := uint64(litBits[lit2])
-				litIdx++
-				j--
-				p := (*uint64)(unsafe.Add(bufBase, bitOffset>>3))
-				*p = uint64(*(*byte)(unsafe.Pointer(p))) | (v0|v1<<n0|v2<<(n0+n1))<<(bitOffset&7)
-				bitOffset += n0 + n1 + n2
-			}
+			bitOffset = writeLiteralBitsAt(b.buf, bitOffset, literals[litIdx:litIdx+j], &s.litDepth, &s.litBits)
+			litIdx += j
 		}
 	}
 	b.bitOffset = bitOffset
