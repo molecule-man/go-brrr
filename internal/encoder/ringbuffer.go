@@ -129,3 +129,15 @@ func (e *encodeState) copyInputToRingBuffer(input []byte) {
 		clear(e.data[newPos : newPos+7])
 	}
 }
+
+// ringLimit returns the bound below which a match source at bestLen stays
+// inside the ring buffer. It returns 0, which rejects every source, when the
+// current position is already within bestLen of the ring end. C rejects such
+// candidates, so the match choice must do the same.
+func ringLimit(mask, curMasked, bestLen uint) uint {
+	lim := mask + 1 - bestLen
+	if curMasked >= lim {
+		return 0
+	}
+	return lim
+}

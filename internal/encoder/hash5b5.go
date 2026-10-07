@@ -161,6 +161,8 @@ func (h *h5b5) findLongestMatch(
 	out.len = 0
 	out.lenCodeDelta = 0
 
+	lim := ringLimit(ringBufferMask, curMasked, bestLen)
+
 	// Phase 1: try cached distances.
 	// backward-1 >= maxBackward is a single check replacing both
 	// "prev >= cur" (backward==0) and "backward > maxBackward".
@@ -171,7 +173,7 @@ func (h *h5b5) findLongestMatch(
 		}
 		prev := (cur - backward) & ringBufferMask
 
-		if loadByte(data, curMasked+bestLen) != loadByte(data, prev+bestLen) || max(curMasked, prev)+bestLen > ringBufferMask {
+		if loadByte(data, curMasked+bestLen) != loadByte(data, prev+bestLen) || prev >= lim {
 			continue
 		}
 
@@ -185,6 +187,7 @@ func (h *h5b5) findLongestMatch(
 				if bestScore < score {
 					bestScore = score
 					bestLen = ml
+					lim = ringLimit(ringBufferMask, curMasked, bestLen)
 					out.len = bestLen
 					out.distance = backward
 					out.score = bestScore
@@ -196,6 +199,7 @@ func (h *h5b5) findLongestMatch(
 	// Raise bestLen floor to 3 so phase 2 only accepts length >= 4.
 	if bestLen < 3 {
 		bestLen = 3
+		lim = ringLimit(ringBufferMask, curMasked, bestLen)
 	}
 
 	// Phase 2: scan hash bucket entries.
@@ -220,7 +224,7 @@ func (h *h5b5) findLongestMatch(
 			break
 		}
 		prevMasked := prevRaw & ringBufferMask
-		if curProbe != loadU32LE(data, prevMasked+bestLen-3) || max(curMasked, prevMasked)+bestLen > ringBufferMask {
+		if curProbe != loadU32LE(data, prevMasked+bestLen-3) || prevMasked >= lim {
 			continue
 		}
 
@@ -231,6 +235,7 @@ func (h *h5b5) findLongestMatch(
 			if bestScore < score {
 				bestScore = score
 				bestLen = ml
+				lim = ringLimit(ringBufferMask, curMasked, bestLen)
 				out.len = bestLen
 				out.distance = backward
 				out.score = bestScore
