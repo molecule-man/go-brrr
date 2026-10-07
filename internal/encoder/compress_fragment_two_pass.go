@@ -308,7 +308,7 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 	ipEnd := pos + blockSize
 	nextEmit := pos
 	lastDistance := -1
-	table := c.table
+	tbl := unsafe.Pointer(unsafe.SliceData(c.table))
 	cmdPos := 0
 	litPos := 0
 	var nextHash uint32
@@ -325,8 +325,7 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 		ipLimit := pos + lenLimit
 
 		ip++
-		nextLoad := loadU64LE(input, uint(ip))
-		nextHash = uint32(((nextLoad << 16) * hashMul32) >> (shift & 63))
+		nextHash = uint32(((loadU64LE(input, uint(ip)) << 16) * hashMul32) >> (shift & 63))
 
 		for {
 			// Step 1: Scan forward looking for a match. Skip bytes
@@ -337,10 +336,6 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 
 			for {
 				hash := nextHash
-				// nextLoad caches the loadU64LE(input, ip) computed by the
-				// previous iteration's hash; reuse it in the match check
-				// instead of issuing a second load at the same offset.
-				ipBytes := nextLoad
 				bytesBetweenHashLookups := skip >> 5
 				skip++
 				ip = nextIP
@@ -348,21 +343,24 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 				if nextIP > ipLimit {
 					goto encodeRemainder
 				}
-				nextLoad = loadU64LE(input, uint(nextIP))
-				nextHash = uint32(((nextLoad << 16) * hashMul32) >> (shift & 63))
+				nextHash = uint32(((loadU64LE(input, uint(nextIP)) << 16) * hashMul32) >> (shift & 63))
+				// Load again, not carried from the hash: one register less.
+				ipBytes := loadU64LE(input, uint(ip))
 
+				slot := (*uint32)(unsafe.Add(tbl, uintptr(hash)*4))
 				candidate = ip - lastDistance
-				if candidate >= 0 && candidate < ip &&
+				// The unsigned compare is candidate >= 0 && candidate < ip.
+				if uint(candidate) < uint(ip) &&
 					(loadU64LE(input, uint(candidate))^ipBytes)<<16 == 0 {
-					table[hash] = uint32(ip)
+					*slot = uint32(ip)
 					if ip-candidate <= maxDistance {
 						break
 					}
 					continue
 				}
 
-				candidate = int(table[hash])
-				table[hash] = uint32(ip)
+				candidate = int(*slot)
+				*slot = uint32(ip)
 				if (loadU64LE(input, uint(candidate))^ipBytes)<<16 == 0 {
 					if ip-candidate <= maxDistance {
 						break
@@ -413,7 +411,6 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 					goto encodeRemainder
 				}
 
-				tbl := unsafe.Pointer(unsafe.SliceData(table))
 				lo := loadU64LE(input, uint(ip-5))
 				hi := loadU64LE(input, uint(ip-2))
 				*(*uint32)(unsafe.Add(tbl, uintptr(hashBytesAtOffsetTwoPass6(lo, 0, shift))*4)) = uint32(ip - 5)
@@ -460,8 +457,7 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 			}
 
 			ip++
-			nextLoad = loadU64LE(input, uint(ip))
-			nextHash = uint32(((nextLoad << 16) * hashMul32) >> (shift & 63))
+			nextHash = uint32(((loadU64LE(input, uint(ip)) << 16) * hashMul32) >> (shift & 63))
 		}
 	} // close block scope for ipLimit, lenLimit
 
