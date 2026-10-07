@@ -10,6 +10,7 @@ package encoder
 
 import (
 	"math/bits"
+	"unsafe"
 
 	"github.com/molecule-man/go-brrr/internal/core"
 )
@@ -331,6 +332,10 @@ func (h *h6) findLongestMatch(
 	bucket[slot] = uint32(cur)
 	tags[slot] = tag
 	h.num[key]--
+	if hasPrefetch {
+		next := &h.blocks[h.hash(data, (cur+1)&ringBufferMask)]
+		prefetch2(unsafe.Pointer(&next.tags), unsafe.Pointer(&next.pos[h6BlockMask]))
+	}
 
 	// Phase 3: static dictionary fallback when no hash match was found.
 	if out.score == minScore {
@@ -860,6 +865,10 @@ func (h *h6) findLongestMatchNoWrap(
 	bucket[slot] = uint32(cur)
 	tags[slot] = tag
 	h.num[key]--
+	if hasPrefetch {
+		next := &h.blocks[h.hash(data, cur+1)]
+		prefetch2(unsafe.Pointer(&next.tags), unsafe.Pointer(&next.pos[h6BlockMask]))
+	}
 
 	// Phase 3: static dictionary fallback when no hash match was found.
 	if out.score == minScore {
