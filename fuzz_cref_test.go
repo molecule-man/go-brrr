@@ -71,7 +71,7 @@ func FuzzEncodeCRef(f *testing.F) {
 		goEncoded := encodeChunked(t, data, quality, opts, max(1, len(data)), false)
 		assertCRefDecodes(t, goEncoded, data, nil)
 		assertGoDecodes(t, goEncoded, data, nil, chunkSize, readSize)
-		assertMatchesCRef(t, goEncoded, cEncoded, crefSizeOnly(quality, lgwin, len(data)))
+		assertMatchesCRef(t, goEncoded, cEncoded)
 
 		chunked := encodeChunked(t, data, quality, opts, chunkSize, flush)
 		assertCRefDecodes(t, chunked, data, nil)
@@ -221,7 +221,7 @@ func FuzzEncodeDictWordsCRef(f *testing.F) {
 		if err != nil {
 			t.Fatalf("C Encode (q=%d, lgwin=%d): %v", quality, lgwin, err)
 		}
-		assertMatchesCRef(t, goEncoded, cEncoded, crefSizeOnly(quality, lgwin, len(data)))
+		assertMatchesCRef(t, goEncoded, cEncoded)
 	})
 }
 

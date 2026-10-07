@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -77,7 +76,7 @@ func crefTestCases(t *testing.T) []struct {
 	cases := make([]struct {
 		name  string
 		input []byte
-	}, 0, len(corpusFiles)+5)
+	}, 0, len(corpusFiles)+7)
 
 	for _, name := range corpusFiles {
 		cases = append(cases, tc{
@@ -95,25 +94,15 @@ func crefTestCases(t *testing.T) []struct {
 		tc{"pseudo_random_65536", pseudoRandomBytesCRef(65536, 99)},
 		// Found in silesia/webster. It corrupted q10
 		tc{"webster_dict_words", []byte(" the physical properties of the body bei")},
+		tc{"match_ending_at_ring_end_262144", matchEndingAtRingEndCRef(1 << 18)},
+		tc{"run_heavy_327680", runHeavyCRef(1<<18+1<<16, 118)},
 	)
 
 	return cases
 }
 
-func crefSizeOnly(quality, lgwin, inputLen int) bool {
-	return quality >= 5 && quality <= 9 && lgwin > 16 && inputLen > 1<<(lgwin+1)
-}
-
-func assertMatchesCRef(t *testing.T, goOut, cOut []byte, sizeOnly bool) {
+func assertMatchesCRef(t *testing.T, goOut, cOut []byte) {
 	t.Helper()
-	if sizeOnly {
-		threshold := math.Ceil(float64(len(cOut)) * 1.0002)
-		if float64(len(goOut)) > threshold {
-			t.Errorf("Go output too large: %d bytes (C: %d bytes, threshold: %.0f)",
-				len(goOut), len(cOut), threshold)
-		}
-		return
-	}
 	if !bytes.Equal(goOut, cOut) {
 		t.Errorf("output mismatch: Go produced %d bytes, C produced %d bytes, %s",
 			len(goOut), len(cOut), firstDiff(goOut, cOut))
@@ -208,15 +197,15 @@ func testMatchesCRef(t *testing.T, quality, lgwin int, sizeHint uint) {
 
 			cOut := creftest.BrotliCompress(t, tt.input, quality, lgwin, sizeHint)
 
-			assertMatchesCRef(t, goOut, cOut, crefSizeOnly(quality, lgwin, len(tt.input)))
+			assertMatchesCRef(t, goOut, cOut)
 		})
 	}
 }
 
 // TestMatchesCRef verifies the Go streaming encoder against the C reference
 // across quality levels, window sizes, and size hints. It checks
-// byte-identical output, except for the cases in crefSizeOnly. All qualities
-// verify roundtrip via C and Go decompression.
+// byte-identical output. All qualities verify roundtrip via C and Go
+// decompression.
 func TestMatchesCRef(t *testing.T) {
 	t.Parallel()
 
@@ -229,9 +218,9 @@ func TestMatchesCRef(t *testing.T) {
 		{"1MiB", 1 << 20},
 	}
 
-	lgwinValues := []int{14, 22, 24}
+	lgwinValues := []int{14, 17, 22, 24}
 	if os.Getenv("BRRR_LONG_TESTS") != "" {
-		lgwinValues = []int{10, 14, 18, 22, 24}
+		lgwinValues = []int{10, 14, 17, 18, 22, 24}
 	}
 
 	for _, sh := range sizeHints {
@@ -279,7 +268,7 @@ func TestCompressMatchesCRef(t *testing.T) {
 
 					cOut := creftest.BrotliCompress(t, tt.input, quality, defaultLGWin, uint(len(tt.input)))
 
-					assertMatchesCRef(t, goOut, cOut, crefSizeOnly(quality, defaultLGWin, len(tt.input)))
+					assertMatchesCRef(t, goOut, cOut)
 				})
 			}
 		})
@@ -744,7 +733,50 @@ func TestTagSwitchMatchesCRef(t *testing.T) {
 				t.Fatalf("Close: %v", err)
 			}
 			cOut := creftest.BrotliCompress(t, input, quality, defaultLGWin, uint(len(input)))
-			assertMatchesCRef(t, goBuf.Bytes(), cOut, false)
+			assertMatchesCRef(t, goBuf.Bytes(), cOut)
 		})
 	}
+}
+
+func matchEndingAtRingEndCRef(n int) []byte {
+	rng := rand.New(rand.NewPCG(uint64(n), 7))
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = 'a' + byte(rng.IntN(16))
+	}
+	tail := n - 32
+	copy(b[tail-4999:tail-4999+32], b[tail-9000:tail-9000+32])
+	b[n-4999] = b[0]
+	for i, d := range []int{9000, 7000, 6000, 5000} {
+		at := tail - 800 + i*200
+		copy(b[at:at+200], b[at-d:at-d+200])
+	}
+	copy(b[tail:], b[tail-9000:tail-9000+32])
+	return b
+}
+
+func runHeavyCRef(n int, seed uint64) []byte {
+	rng := rand.New(rand.NewPCG(seed, 5))
+	b := make([]byte, 0, n)
+	for len(b) < n {
+		switch rng.IntN(3) {
+		case 0:
+			c := byte('a' + rng.IntN(2))
+			for k := 1 + rng.IntN(300); k > 0; k-- {
+				b = append(b, c)
+			}
+		case 1:
+			if len(b) > 8 {
+				d := 1 + rng.IntN(min(len(b), 60000))
+				for k := 4 + rng.IntN(300); k > 0; k-- {
+					b = append(b, b[len(b)-d])
+				}
+			}
+		default:
+			for k := 1 + rng.IntN(20); k > 0; k-- {
+				b = append(b, byte('a'+rng.IntN(2)))
+			}
+		}
+	}
+	return b[:n]
 }
