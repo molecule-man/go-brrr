@@ -10,6 +10,8 @@ import (
 	"unsafe"
 )
 
+//go:generate go run ../../cmd/genfixedshift -in compress_fragment_two_pass.go -out compress_fragment_two_pass_table17.go -func createCommandsMinMatch6 -name createCommandsTable17 -bits 17
+
 const twoPassBlockSize = 1 << 17
 
 // sampleRate is the byte sampling interval used by shouldCompress to
@@ -137,6 +139,9 @@ func (c *twoPassCompressor) createCommands(
 	c.arena.cmdHisto = [128]uint32{}
 
 	if c.minMatch == 6 {
+		if c.tableBits == 17 {
+			return c.createCommandsTable17(input, pos, blockSize, inputSize, commands, literals)
+		}
 		return c.createCommandsMinMatch6(input, pos, blockSize, inputSize, commands, literals)
 	}
 
@@ -293,6 +298,8 @@ encodeRemainder:
 	return cmdPos, litPos
 }
 
+// genfixedshift uses createCommandsMinMatch6 to generate createCommandsTable17.
+//
 // createCommandsMinMatch6 is the quality-1 large-table path. Keeping the
 // 6-byte minimum match as a constant removes minMatch branches from the hot
 // scan and hash-table update loops used for real large inputs.

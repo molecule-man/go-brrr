@@ -11,7 +11,7 @@ import (
 	"github.com/molecule-man/go-brrr/internal/core"
 )
 
-//go:generate go run ../../cmd/gencommands15
+//go:generate go run ../../cmd/genfixedshift -in compress_fragment_fast.go -out compress_fragment_fast_table15.go -func writeCommandsAnyTable -name writeCommandsTable15 -bits 15
 
 // maxDistance is the maximum backward reference distance for window size 18.
 // BROTLI_MAX_BACKWARD_LIMIT(18) = (1 << 18) - 16 = 262128.
