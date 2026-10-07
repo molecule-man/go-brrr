@@ -261,7 +261,6 @@ func (h *h5) findLongestMatch(
 	// (the 4-byte quick rejection compares bestLen-3 .. bestLen).
 	if bestLen < 3 {
 		bestLen = 3
-		lim = ringLimit(ringBufferMask, curMasked, bestLen)
 	}
 
 	// Phase 2: scan hash bucket entries.
@@ -279,6 +278,9 @@ func (h *h5) findLongestMatch(
 	}
 	minPrev := cur - maxBackward
 	curProbe := loadU32LE(data, curMasked+bestLen-3)
+	if curMasked+bestLen > ringBufferMask {
+		down = uint(n)
+	}
 	for i := uint(n); i > down; {
 		i--
 		prevRaw := uint(bucket[i&h5BlockMask])
@@ -286,7 +288,7 @@ func (h *h5) findLongestMatch(
 			break
 		}
 		prevMasked := prevRaw & ringBufferMask
-		if curProbe != loadU32LE(data, prevMasked+bestLen-3) || prevMasked >= lim {
+		if curProbe != loadU32LE(data, prevMasked+bestLen-3) || prevMasked+bestLen > ringBufferMask {
 			continue
 		}
 
@@ -297,10 +299,12 @@ func (h *h5) findLongestMatch(
 			if bestScore < score {
 				bestScore = score
 				bestLen = ml
-				lim = ringLimit(ringBufferMask, curMasked, bestLen)
 				out.len = bestLen
 				out.distance = backward
 				out.score = bestScore
+				if curMasked+bestLen > ringBufferMask {
+					break
+				}
 				curProbe = loadU32LE(data, curMasked+bestLen-3)
 			}
 		}

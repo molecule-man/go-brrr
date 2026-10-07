@@ -112,9 +112,8 @@ func (h *h6u) findLongestMatch(
 	}
 
 	// --- fast path: ringBufferMask < len(data) ---
-	// Probes can read the mirrored tail beyond ringBufferMask (see
-	// copyInputToRingBuffer). The ring-end check after each probe rejects
-	// such a source, as C does.
+	// The mirrored tail permits probe loads past the ring end.
+	// The scan rejects those matches after the probe.
 	_ = data[ringBufferMask]
 
 	curMasked := cur & ringBufferMask
@@ -234,11 +233,9 @@ func (h *h6u) findLongestMatch(
 	// (the 4-byte quick rejection compares bestLen-3 .. bestLen).
 	if bestLen < 3 {
 		bestLen = 3
-		lim = ringLimit(ringBufferMask, curMasked, bestLen)
 	}
 
 	// Phase 2: scan hash bucket entries.
-	// Same tail guarantee: ring buffer end checks are omitted for the fast path.
 	// backward == 0 is impossible here: cur is stored after this scan.
 	n := h.num[key]
 	down := uint(0)
@@ -247,6 +244,9 @@ func (h *h6u) findLongestMatch(
 	}
 	minPrev := cur - maxBackward
 	curProbe := loadU32LE(data, curMasked+bestLen-3)
+	if curMasked+bestLen > ringBufferMask {
+		down = uint(n)
+	}
 	for i := uint(n); i > down; {
 		i--
 		prevRaw := uint(bucket[i&h6BlockMask])
@@ -254,7 +254,7 @@ func (h *h6u) findLongestMatch(
 			break
 		}
 		prevMasked := prevRaw & ringBufferMask
-		if curProbe != loadU32LE(data, prevMasked+bestLen-3) || prevMasked >= lim {
+		if curProbe != loadU32LE(data, prevMasked+bestLen-3) || prevMasked+bestLen > ringBufferMask {
 			continue
 		}
 
@@ -265,16 +265,17 @@ func (h *h6u) findLongestMatch(
 			if bestScore < score {
 				bestScore = score
 				bestLen = ml
-				lim = ringLimit(ringBufferMask, curMasked, bestLen)
 				out.len = bestLen
 				out.distance = backward
 				out.score = bestScore
+				if curMasked+bestLen > ringBufferMask {
+					break
+				}
 				curProbe = loadU32LE(data, curMasked+bestLen-3)
 			}
 		}
 	}
 
-	// Store current position in the bucket.
 	h.buckets[uint(h.num[key]&h6BlockMask)+uint(key)<<h6BlockBits] = uint32(cur)
 	h.num[key]++
 
@@ -286,9 +287,8 @@ func (h *h6u) findLongestMatch(
 
 }
 
-// findLongestMatchNoWrap is findLongestMatch before the first ring wrap.
-// cur and all stored positions are below mask+1, so the scan omits masks
-// and ring-end checks.
+// findLongestMatchNoWrap uses direct indexes before the first ring wrap.
+// Both cur and stored positions fit inside the ring.
 func (h *h6u) findLongestMatchNoWrap(
 	data []byte,
 	distCache *[4]uint,
@@ -301,8 +301,7 @@ func (h *h6u) findLongestMatchNoWrap(
 	key := h.hash(data, cur)
 	bucket := h.buckets[uint(key)<<h6BlockBits:]
 
-	// Speculatively load from the next position's bucket to warm the cache.
-	// Placed early so phases 1-3 run while the prefetched data settles.
+	// Load the next bucket early to warm the cache.
 	nextKey := h.hash(data, cur+1)
 	nextBase := uint(nextKey) << h6BlockBits
 	nextN := h.num[nextKey]
@@ -409,7 +408,6 @@ func (h *h6u) findLongestMatchNoWrap(
 	}
 
 	// Phase 2: scan hash bucket entries.
-	// Same tail guarantee: ring buffer end checks are omitted for the fast path.
 	// backward == 0 is impossible here: cur is stored after this scan.
 	n := h.num[key]
 	down := uint(0)
@@ -713,8 +711,7 @@ func (h *h6u) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32)
 	h.countBusyCall()
 }
 
-// createBackwardReferencesNoWrap is createBackwardReferences before the
-// first ring wrap. It calls findLongestMatchNoWrap.
+// createBackwardReferencesNoWrap searches before the first ring wrap.
 func (h *h6u) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos uint32) {
 	data := s.data
 	mask := uint(s.mask)
@@ -763,7 +760,6 @@ func (h *h6u) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos u
 			for {
 				const costDiffLazy = 175
 				var sr2 hasherSearchResult
-				// Quality >= 5: extensive lazy search (sr2.len starts at 0).
 				sr2.score = minScore
 				maxDistance = min(position+1, maxBackwardLimit)
 

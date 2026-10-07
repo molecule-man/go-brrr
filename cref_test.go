@@ -738,9 +738,6 @@ func TestTagSwitchMatchesCRef(t *testing.T) {
 	}
 }
 
-// TestSizeHintedRingWrapMatchesCRef covers the q5–q9 hashers for a size hint
-// of 1 MiB or more after the ring buffer wraps. At lgwin 19 the ring holds
-// 1 MiB, so each input wraps it at least once.
 func TestSizeHintedRingWrapMatchesCRef(t *testing.T) {
 	t.Parallel()
 

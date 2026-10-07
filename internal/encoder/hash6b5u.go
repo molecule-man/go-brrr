@@ -136,9 +136,8 @@ func (h *h6b5u) findLongestMatch(
 	}
 
 	// --- fast path: ringBufferMask < len(data) ---
-	// Probes can read the mirrored tail beyond ringBufferMask (see
-	// copyInputToRingBuffer). The ring-end check after each probe rejects
-	// such a source, as C does.
+	// The mirrored tail permits probe loads past the ring end.
+	// The scan rejects those matches after the probe.
 	_ = data[ringBufferMask]
 
 	curMasked := cur & ringBufferMask
@@ -256,7 +255,6 @@ func (h *h6b5u) findLongestMatch(
 	// Raise bestLen floor to 3 so phase 2 only accepts length >= 4.
 	if bestLen < 3 {
 		bestLen = 3
-		lim = ringLimit(ringBufferMask, curMasked, bestLen)
 	}
 
 	// Phase 2: scan hash bucket entries.
@@ -268,6 +266,9 @@ func (h *h6b5u) findLongestMatch(
 	}
 	minPrev := cur - maxBackward
 	curProbe := loadU32LE(data, curMasked+bestLen-3)
+	if curMasked+bestLen > ringBufferMask {
+		down = uint(n)
+	}
 	for i := uint(n); i > down; {
 		i--
 		prevRaw := uint(bucket[i&h6b5BlockMask])
@@ -275,7 +276,7 @@ func (h *h6b5u) findLongestMatch(
 			break
 		}
 		prevMasked := prevRaw & ringBufferMask
-		if curProbe != loadU32LE(data, prevMasked+bestLen-3) || prevMasked >= lim {
+		if curProbe != loadU32LE(data, prevMasked+bestLen-3) || prevMasked+bestLen > ringBufferMask {
 			continue
 		}
 
@@ -286,10 +287,12 @@ func (h *h6b5u) findLongestMatch(
 			if bestScore < score {
 				bestScore = score
 				bestLen = ml
-				lim = ringLimit(ringBufferMask, curMasked, bestLen)
 				out.len = bestLen
 				out.distance = backward
 				out.score = bestScore
+				if curMasked+bestLen > ringBufferMask {
+					break
+				}
 				curProbe = loadU32LE(data, curMasked+bestLen-3)
 			}
 		}

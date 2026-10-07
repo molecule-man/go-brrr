@@ -284,20 +284,22 @@ func (h *h6b5) findLongestMatch(
 	// Raise bestLen floor to 3 so phase 2 only accepts length >= 4.
 	if bestLen < 3 {
 		bestLen = 3
-		lim = ringLimit(ringBufferMask, curMasked, bestLen)
 	}
 
 	// Phase 2: scan the bucket entries whose tag matches, newest first.
 	// backward == 0 is impossible here: cur is stored after this scan.
 	minPrev := cur - maxBackward
 	curProbe := loadU32LE(data, curMasked+bestLen-3)
+	if curMasked+bestLen > ringBufferMask {
+		matches = 0
+	}
 	for ; matches != 0; matches &= matches - 1 {
 		prevRaw := uint(bucket[(head+uint(bits.TrailingZeros32(matches)))&h6b5BlockMask])
 		if prevRaw < minPrev {
 			break
 		}
 		prevMasked := prevRaw & ringBufferMask
-		if curProbe != loadU32LE(data, prevMasked+bestLen-3) || prevMasked >= lim {
+		if curProbe != loadU32LE(data, prevMasked+bestLen-3) || prevMasked+bestLen > ringBufferMask {
 			continue
 		}
 
@@ -308,10 +310,12 @@ func (h *h6b5) findLongestMatch(
 			if bestScore < score {
 				bestScore = score
 				bestLen = ml
-				lim = ringLimit(ringBufferMask, curMasked, bestLen)
 				out.len = bestLen
 				out.distance = backward
 				out.score = bestScore
+				if curMasked+bestLen > ringBufferMask {
+					break
+				}
 				curProbe = loadU32LE(data, curMasked+bestLen-3)
 			}
 		}

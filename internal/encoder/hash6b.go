@@ -387,19 +387,12 @@ func (h *h6b[B]) findLongestMatch(
 	// Raise bestLen floor to 3 so phase 2 only accepts length >= 4.
 	if bestLen < 3 {
 		bestLen = 3
-		lim = ringLimit(ringBufferMask, curMasked, bestLen)
 	}
 
 	// Phase 2: scan hash bucket entries.
 	// backward == 0 is impossible here: cur is stored after this scan.
-	//
-	// minPrev = cur - maxBackward is equivalent to the backward > maxBackward break
-	// condition but avoids computing backward = cur - prev on every iteration.
-	// maxBackward = min(cur, maxBackwardLimit) <= cur so the subtraction never
-	// wraps. backward is then computed lazily only when ml >= 4 (rare path).
-	//
-	// Do not hoist bucket above phase 1. It spills there, and the reload
-	// lands at the head of the phase 1 loop.
+	// minPrev avoids a subtraction for each bucket entry. maxBackward <= cur.
+	// If bucket moves above phase 1, it spills into phase 1.
 	bucket := bucketRingAt(unsafe.Pointer(&h.buckets), key, blockShift)
 	n := h.num[key]
 	down := uint(0)
@@ -408,6 +401,9 @@ func (h *h6b[B]) findLongestMatch(
 	}
 	minPrev := cur - maxBackward
 	curProbe := loadU32LE(data, curMasked+bestLen-3)
+	if curMasked+bestLen > ringBufferMask {
+		down = uint(n)
+	}
 	for i := uint(n); i > down; {
 		i--
 		prevRaw := uint(bucket.at(i & blockMask))
@@ -415,7 +411,7 @@ func (h *h6b[B]) findLongestMatch(
 			break
 		}
 		prevMasked := prevRaw & ringBufferMask
-		if curProbe != loadU32LE(data, prevMasked+bestLen-3) || prevMasked >= lim {
+		if curProbe != loadU32LE(data, prevMasked+bestLen-3) || prevMasked+bestLen > ringBufferMask {
 			continue
 		}
 
@@ -426,16 +422,17 @@ func (h *h6b[B]) findLongestMatch(
 			if bestScore < score {
 				bestScore = score
 				bestLen = ml
-				lim = ringLimit(ringBufferMask, curMasked, bestLen)
 				out.len = bestLen
 				out.distance = backward
 				out.score = bestScore
+				if curMasked+bestLen > ringBufferMask {
+					break
+				}
 				curProbe = loadU32LE(data, curMasked+bestLen-3)
 			}
 		}
 	}
 
-	// Store current position in the bucket.
 	bucket.put(uint(h.num[key])&blockMask, uint32(cur))
 	h.num[key]++
 
@@ -446,9 +443,8 @@ func (h *h6b[B]) findLongestMatch(
 	}
 }
 
-// findLongestMatchNoWrap is findLongestMatch before the first ring wrap.
-// cur and all stored positions are below mask+1, so the scan omits masks
-// and ring-end checks.
+// findLongestMatchNoWrap uses direct indexes before the first ring wrap.
+// Both cur and stored positions fit inside the ring.
 func (h *h6b[B]) findLongestMatchNoWrap(
 	data []byte,
 	distCache *[16]int,
@@ -456,10 +452,7 @@ func (h *h6b[B]) findLongestMatchNoWrap(
 	dictNumLookups, dictNumMatches *uint,
 	out *hasherSearchResult,
 ) {
-	// Depth, shift and mask fold to constants in each instantiation.
-	// Do not move this into a helper. A generic method that calls a generic
-	// function loads a sub-dictionary on every call, also when the callee
-	// inlines.
+	// Keep this code in the method. A helper loads a generic dictionary per call.
 	blockSize := uint(unsafe.Sizeof(h.buckets)) / h6bBucketSize / 4
 	blockShift := uint(bits.TrailingZeros(blockSize))
 	blockMask := blockSize - 1
@@ -1051,8 +1044,7 @@ func (h *h6b[B]) createBackwardReferences(s *encodeState, bytes, wrappedPos uint
 	s.numCommands += uint(len(s.commands)) - origCmdCount
 }
 
-// createBackwardReferencesNoWrap is createBackwardReferences before the
-// first ring wrap. It calls findLongestMatchNoWrap.
+// createBackwardReferencesNoWrap searches before the first ring wrap.
 func (h *h6b[B]) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos uint32) {
 	data := s.data
 	mask := uint(s.mask)
@@ -1074,7 +1066,7 @@ func (h *h6b[B]) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPo
 
 	origCmdCount := uint(len(s.commands))
 
-	// Expand the 4-entry distance cache to 10 derived entries.
+	// Add six derived distances to the four cache entries.
 	var distCache [16]int
 	for i, d := range s.distCache {
 		distCache[i] = int(d)
@@ -1153,7 +1145,7 @@ func (h *h6b[B]) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPo
 
 			position += sr.len
 
-			// Re-expand distance cache after updating it.
+			// Update the derived distances after a cache change.
 			for i, d := range s.distCache {
 				distCache[i] = int(d)
 			}
