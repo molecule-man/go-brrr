@@ -6,6 +6,7 @@ package encoder
 
 import (
 	"math/bits"
+	"unsafe"
 
 	"github.com/molecule-man/go-brrr/internal/core"
 )
@@ -170,16 +171,14 @@ func (h *h6b5) findLongestMatch(
 	bestScore := out.score
 	bestLen := out.len
 	key, tag := h.hashTag(data, curMasked)
+	next := &h.blocks[h.hash(data, (cur+1)&ringBufferMask)]
 	bucket := h.bucketAt(key)
 	// Bit j of matches: slot (head+j) has the same tag. Bit 0 is the newest entry.
 	n := h.num[key]
 	head := uint(n+1) & h6b5BlockMask
 	tags := h.tagsAt(key)
-	splat := uint64(tag) * 0x0101010101010101
-	matches := bits.RotateLeft32(tagEqualMask8(loadU64LE(tags[:], 0)^splat)|
-		tagEqualMask8(loadU64LE(tags[:], 8)^splat)<<8|
-		tagEqualMask8(loadU64LE(tags[:], 16)^splat)<<16|
-		tagEqualMask8(loadU64LE(tags[:], 24)^splat)<<24, -int(head))
+	matches := bits.RotateLeft32(tagMask32(tags, tag,
+		unsafe.Pointer(&next.tags), unsafe.Pointer(&next.pos[16])), -int(head))
 	// Drop the slots that hold no entry yet.
 	if stored := 0xFFFF - n; stored < h6b5BlockSize {
 		matches &= uint32(1)<<stored - 1
@@ -720,16 +719,14 @@ func (h *h6b5) findLongestMatchNoWrap(
 	bestScore := out.score
 	bestLen := out.len
 	key, tag := h.hashTag(data, cur)
+	next := &h.blocks[h.hash(data, cur+1)]
 	bucket := h.bucketAt(key)
 	// Bit j of matches: slot (head+j) has the same tag. Bit 0 is the newest entry.
 	n := h.num[key]
 	head := uint(n+1) & h6b5BlockMask
 	tags := h.tagsAt(key)
-	splat := uint64(tag) * 0x0101010101010101
-	matches := bits.RotateLeft32(tagEqualMask8(loadU64LE(tags[:], 0)^splat)|
-		tagEqualMask8(loadU64LE(tags[:], 8)^splat)<<8|
-		tagEqualMask8(loadU64LE(tags[:], 16)^splat)<<16|
-		tagEqualMask8(loadU64LE(tags[:], 24)^splat)<<24, -int(head))
+	matches := bits.RotateLeft32(tagMask32(tags, tag,
+		unsafe.Pointer(&next.tags), unsafe.Pointer(&next.pos[16])), -int(head))
 	// Drop the slots that hold no entry yet.
 	if stored := 0xFFFF - n; stored < h6b5BlockSize {
 		matches &= uint32(1)<<stored - 1
