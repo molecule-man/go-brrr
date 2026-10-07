@@ -129,3 +129,13 @@ func (e *encodeState) copyInputToRingBuffer(input []byte) {
 		clear(e.data[newPos : newPos+7])
 	}
 }
+
+// ringLimit returns the exclusive source limit for the byte at offset bestLen.
+// It returns zero when the current probe crosses the ring end.
+func ringLimit(mask, curMasked, bestLen uint) uint {
+	lim := mask + 1 - bestLen
+	if curMasked >= lim {
+		return 0
+	}
+	return lim
+}
