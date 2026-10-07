@@ -60,6 +60,28 @@ var copyLenCodeQ1Small = func() [134]uint32 {
 	return t
 }()
 
+// insertLenCodeQ1Small stores the command word for each insertLen below 130.
+// Bits 0..6 contain the command code.
+var insertLenCodeQ1Small = func() [130]uint32 {
+	var t [130]uint32
+	var h [128]uint32
+	for n := range uint(130) {
+		encodeInsertLen(t[n:], n, &h)
+	}
+	return t
+}()
+
+// copyLenLastDistanceCodeQ1Small stores each single-slot command word below 72.
+// Bits 0..6 contain the command code.
+var copyLenLastDistanceCodeQ1Small = func() [72]uint32 {
+	var t [72]uint32
+	var h [128]uint32
+	for n := uint(4); n < 72; n++ {
+		encodeCopyLenLastDistance(t[n:], n, &h)
+	}
+	return t
+}()
+
 type twoPassCompressor struct {
 	arena      *twoPassArena
 	b          *bitWriter
@@ -387,13 +409,10 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 				insert := base - nextEmit
 				ip += matched
 
-				// Fast path for short inserts (the common case on text/HTML):
-				// the < 6 branch of encodeInsertLen is a single store + histogram
-				// bump, so inlining it avoids the non-inlineable function call
-				// for the dominant insert-length bucket.
-				if u := uint(insert); u < 6 {
-					commands[cmdPos] = uint32(u)
-					cmdHisto[u]++
+				if u := uint(insert); u < 130 {
+					cmd := insertLenCodeQ1Small[u]
+					commands[cmdPos] = cmd
+					cmdHisto[cmd&0x7F]++
 					cmdPos++
 				} else {
 					cmdPos += encodeInsertLen(commands[cmdPos:], u, cmdHisto)
@@ -408,7 +427,14 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 					cmdPos += encodeDistance(commands[cmdPos:], uint(distance), cmdHisto)
 					lastDistance = distance
 				}
-				cmdPos += encodeCopyLenLastDistance(commands[cmdPos:], uint(matched), cmdHisto)
+				if cl := uint(matched); cl < 72 {
+					cmd := copyLenLastDistanceCodeQ1Small[cl]
+					commands[cmdPos] = cmd
+					cmdHisto[cmd&0x7F]++
+					cmdPos++
+				} else {
+					cmdPos += encodeCopyLenLastDistance(commands[cmdPos:], cl, cmdHisto)
+				}
 			}
 
 			// Try to find another match immediately.

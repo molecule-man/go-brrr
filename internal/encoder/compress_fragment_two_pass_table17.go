@@ -92,13 +92,10 @@ func (c *twoPassCompressor) createCommandsTable17(
 				insert := base - nextEmit
 				ip += matched
 
-				// Fast path for short inserts (the common case on text/HTML):
-				// the < 6 branch of encodeInsertLen is a single store + histogram
-				// bump, so inlining it avoids the non-inlineable function call
-				// for the dominant insert-length bucket.
-				if u := uint(insert); u < 6 {
-					commands[cmdPos] = uint32(u)
-					cmdHisto[u]++
+				if u := uint(insert); u < 130 {
+					cmd := insertLenCodeQ1Small[u]
+					commands[cmdPos] = cmd
+					cmdHisto[cmd&0x7F]++
 					cmdPos++
 				} else {
 					cmdPos += encodeInsertLen(commands[cmdPos:], u, cmdHisto)
@@ -113,7 +110,14 @@ func (c *twoPassCompressor) createCommandsTable17(
 					cmdPos += encodeDistance(commands[cmdPos:], uint(distance), cmdHisto)
 					lastDistance = distance
 				}
-				cmdPos += encodeCopyLenLastDistance(commands[cmdPos:], uint(matched), cmdHisto)
+				if cl := uint(matched); cl < 72 {
+					cmd := copyLenLastDistanceCodeQ1Small[cl]
+					commands[cmdPos] = cmd
+					cmdHisto[cmd&0x7F]++
+					cmdPos++
+				} else {
+					cmdPos += encodeCopyLenLastDistance(commands[cmdPos:], cl, cmdHisto)
+				}
 			}
 
 			// Try to find another match immediately.
