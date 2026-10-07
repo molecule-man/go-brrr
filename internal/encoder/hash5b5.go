@@ -171,7 +171,7 @@ func (h *h5b5) findLongestMatch(
 		}
 		prev := (cur - backward) & ringBufferMask
 
-		if max(curMasked, prev)+bestLen > ringBufferMask || loadByte(data, curMasked+bestLen) != loadByte(data, prev+bestLen) {
+		if loadByte(data, curMasked+bestLen) != loadByte(data, prev+bestLen) || max(curMasked, prev)+bestLen > ringBufferMask {
 			continue
 		}
 
@@ -220,10 +220,7 @@ func (h *h5b5) findLongestMatch(
 			break
 		}
 		prevMasked := prevRaw & ringBufferMask
-		if curMasked+bestLen > ringBufferMask {
-			break
-		}
-		if prevMasked+bestLen > ringBufferMask || curProbe != loadU32LE(data, prevMasked+bestLen-3) {
+		if curProbe != loadU32LE(data, prevMasked+bestLen-3) || max(curMasked, prevMasked)+bestLen > ringBufferMask {
 			continue
 		}
 
