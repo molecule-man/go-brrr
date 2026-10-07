@@ -295,6 +295,7 @@ func (h *h6) findLongestMatch(
 	// Phase 2: scan the bucket entries whose tag matches, newest first.
 	// backward == 0 is impossible here: cur is stored after this scan.
 	minPrev := cur - maxBackward
+	first4 := loadU32LE(data, curMasked)
 	curProbe := loadU32LE(data, curMasked+bestLen-3)
 	if curMasked+bestLen > ringBufferMask {
 		matches = 0
@@ -309,21 +310,22 @@ func (h *h6) findLongestMatch(
 			continue
 		}
 
-		ml := uint(matchLenAtNoInline(data, prevMasked, curMasked, int(maxLength)))
-		if ml >= 4 {
-			backward := cur - prevRaw
-			score := backwardReferenceScore(ml, backward)
-			if bestScore < score {
-				bestScore = score
-				bestLen = ml
-				out.len = bestLen
-				out.distance = backward
-				out.score = bestScore
-				if curMasked+bestLen > ringBufferMask {
-					break
-				}
-				curProbe = loadU32LE(data, curMasked+bestLen-3)
+		if first4 != loadU32LE(data, prevMasked) {
+			continue
+		}
+		ml := 4 + uint(matchLenAtNoInline(data, prevMasked+4, curMasked+4, int(maxLength)-4))
+		backward := cur - prevRaw
+		score := backwardReferenceScore(ml, backward)
+		if bestScore < score {
+			bestScore = score
+			bestLen = ml
+			out.len = bestLen
+			out.distance = backward
+			out.score = bestScore
+			if curMasked+bestLen > ringBufferMask {
+				break
 			}
+			curProbe = loadU32LE(data, curMasked+bestLen-3)
 		}
 	}
 
@@ -835,6 +837,7 @@ func (h *h6) findLongestMatchNoWrap(
 
 	// Phase 2: scan the bucket entries whose tag matches, newest first.
 	minPrev := cur - maxBackward
+	first4 := loadU32LE(data, cur)
 	curProbe := loadU32LE(data, cur+bestLen-3)
 	for ; matches != 0; matches &= matches - 1 {
 		prevRaw := uint(bucket[(head+uint(bits.TrailingZeros32(matches)))&h6BlockMask])
@@ -845,18 +848,19 @@ func (h *h6) findLongestMatchNoWrap(
 			continue
 		}
 
-		ml := uint(matchLenAtNoInline(data, prevRaw, cur, int(maxLength)))
-		if ml >= 4 {
-			backward := cur - prevRaw
-			score := backwardReferenceScore(ml, backward)
-			if bestScore < score {
-				bestScore = score
-				bestLen = ml
-				out.len = bestLen
-				out.distance = backward
-				out.score = bestScore
-				curProbe = loadU32LE(data, cur+bestLen-3)
-			}
+		if first4 != loadU32LE(data, prevRaw) {
+			continue
+		}
+		ml := 4 + uint(matchLenAtNoInline(data, prevRaw+4, cur+4, int(maxLength)-4))
+		backward := cur - prevRaw
+		score := backwardReferenceScore(ml, backward)
+		if bestScore < score {
+			bestScore = score
+			bestLen = ml
+			out.len = bestLen
+			out.distance = backward
+			out.score = bestScore
+			curProbe = loadU32LE(data, cur+bestLen-3)
 		}
 	}
 
