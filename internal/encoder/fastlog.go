@@ -1,13 +1,11 @@
 package encoder
 
-import "math"
-
 // Fast integer log2 via lookup table.
 
 // log2Table matches the C reference's kBrotliLog2Table (fast_log.h, 256
 // entries). The C table uses float-suffix literals (e.g. 1.5849625007f) so
 // each value has only float32 mantissa precision. We reproduce that here for
-// bit-exact parity. Values >= 256 fall through to math.Log2.
+// bit-exact parity. Values >= 256 fall through to log2Large.
 var log2Table = [...]float64{
 	0.0000000000000000e+00, 0.0000000000000000e+00, 1.0000000000000000e+00,
 	1.5849624872207642e+00, 2.0000000000000000e+00, 2.3219280242919922e+00,
@@ -102,7 +100,7 @@ func fastLog2(v int) float64 {
 		return log2Table[v]
 	}
 
-	return math.Log2(float64(v))
+	return log2Large(v)
 }
 
 // bitsEntropy computes the Shannon entropy of a population histogram,

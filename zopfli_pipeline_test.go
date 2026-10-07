@@ -42,12 +42,12 @@ func TestQ10MatchesTheCReferenceWhenTheDPSkipsABlockTheMatchCollectorAlreadyHash
 	for _, lgwin := range []int{18, 20} {
 		in := periodicInputWhoseRingBufferWrapBlockIsSkippedByTheDPAloneThenProbed(lgwin)
 		for _, quality := range []int{10, 11} {
-			for _, parallelism := range []int{1, 2} {
-				t.Run(fmt.Sprintf("lgwin%d/q%d/p%d", lgwin, quality, parallelism), func(t *testing.T) {
+			for _, workers := range []bool{false, true} {
+				t.Run(fmt.Sprintf("lgwin%d/q%d/workers=%t", lgwin, quality, workers), func(t *testing.T) {
 					t.Parallel()
 
 					var got bytes.Buffer
-					w, err := NewWriterOptions(&got, quality, WriterOptions{LGWin: lgwin, SizeHint: uint(len(in)), Parallelism: parallelism})
+					w, err := newWriter(&got, quality, WriterOptions{LGWin: lgwin, SizeHint: uint(len(in))}, workers)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -60,9 +60,9 @@ func TestQ10MatchesTheCReferenceWhenTheDPSkipsABlockTheMatchCollectorAlreadyHash
 
 					want := creftest.BrotliCompress(t, in, quality, lgwin, uint(len(in)))
 					if !bytes.Equal(got.Bytes(), want) {
-						t.Fatalf("q%d lgwin %d Parallelism %d output differs from the C reference (%d vs %d bytes): the DP skipped a long "+
+						t.Fatalf("q%d lgwin %d workers=%t output differs from the C reference (%d vs %d bytes): the DP skipped a long "+
 							"copy the match collector did not, so its hasher diverged and the block must be redone serially",
-							quality, lgwin, parallelism, got.Len(), len(want))
+							quality, lgwin, workers, got.Len(), len(want))
 					}
 				})
 			}

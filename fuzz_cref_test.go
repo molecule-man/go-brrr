@@ -4,16 +4,21 @@ package brrr
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/molecule-man/go-brrr/internal/core"
 	"github.com/molecule-man/go-brrr/internal/cref"
 )
 
 const (
 	// Limit expensive high-quality compression and one-byte streaming.
+	// The copies of FuzzEncodeCRef grow a stream to at most 64 times this size.
 	fuzzMaxPlain = 64 << 10
 	// This limits mutation size, not decoded output size.
 	fuzzMaxCompressed = 8 << 10
@@ -27,20 +32,30 @@ func fuzzLGWin(b uint8) int {
 // FuzzEncodeCRef checks encoder equivalence and cross-decoding with C.
 func FuzzEncodeCRef(f *testing.F) {
 	for quality := uint8(0); quality <= 11; quality++ {
-		f.Add([]byte{}, quality, uint8(22), uint16(1), uint16(1), false)
-		f.Add([]byte("hello, brotli fuzzer!"), quality, uint8(10), uint16(3), uint16(5), true)
+		f.Add([]byte{}, quality, uint8(22), uint16(1), uint16(1), false, uint8(0))
+		f.Add([]byte("hello, brotli fuzzer!"), quality, uint8(10), uint16(3), uint16(5), true, uint8(0))
 		f.Add(bytes.Repeat([]byte("the quick brown fox jumps over the lazy dog\n"), 100),
-			quality, uint8(24), uint16(127), uint16(4096), false)
+			quality, uint8(24), uint16(127), uint16(4096), false, uint8(0))
 	}
 	// Cross small-window fragment boundaries with both fast encoders.
-	f.Add(pseudoRandomBytesCRef(32<<10, 42), uint8(0), uint8(10), uint16(700), uint16(1000), false)
-	f.Add(bytes.Repeat([]byte("abcdefgh"), 4096), uint8(1), uint8(10), uint16(701), uint16(1), true)
+	f.Add(pseudoRandomBytesCRef(32<<10, 42), uint8(0), uint8(10), uint16(700), uint16(1000), false, uint8(0))
+	f.Add(bytes.Repeat([]byte("abcdefgh"), 4096), uint8(1), uint8(10), uint16(701), uint16(1), true, uint8(0))
+	// 64 copies of 64 KiB: 4 MiB wraps the 2 MiB ring buffer of lgwin 19, and
+	// the size hint selects the large-input hashers.
+	html, err := os.ReadFile(filepath.Join("testdata", "gh_172KB.html"))
+	if err != nil {
+		f.Fatal(err)
+	}
+	for _, quality := range []uint8{4, 5, 6, 7, 9} {
+		f.Add(html[:fuzzMaxPlain], quality, uint8(19-minLGWin), uint16(32<<10), uint16(32<<10), true, uint8(6))
+	}
 
-	f.Fuzz(func(t *testing.T, data []byte, qualityByte, windowByte uint8, chunkWord, readWord uint16, flush bool) {
-		data = data[:min(len(data), fuzzMaxPlain)]
+	f.Fuzz(func(t *testing.T, data []byte, qualityByte, windowByte uint8, chunkWord, readWord uint16, flush bool, copiesByte uint8) {
+		data = similarCopies(data[:min(len(data), fuzzMaxPlain)], 1<<(copiesByte%7))
 		quality := int(qualityByte) % 12
 		lgwin := fuzzLGWin(windowByte)
-		chunkSize := max(1, int(chunkWord))
+		// At most 4096 writes and flushes per stream.
+		chunkSize := max(1, int(chunkWord), len(data)>>12)
 		readSize := max(1, int(readWord))
 		sizeHint := uint(len(data))
 
@@ -56,11 +71,7 @@ func FuzzEncodeCRef(f *testing.F) {
 		goEncoded := encodeChunked(t, data, quality, opts, max(1, len(data)), false)
 		assertCRefDecodes(t, goEncoded, data, nil)
 		assertGoDecodes(t, goEncoded, data, nil, chunkSize, readSize)
-		// Other settings may choose different valid encodings and compressed sizes.
-		exact := quality < 10 && (quality < 5 || lgwin <= 16)
-		if exact && !bytes.Equal(goEncoded, cEncoded) {
-			t.Fatalf("Go stream differs from C: %s", firstDiff(goEncoded, cEncoded))
-		}
+		assertMatchesCRef(t, goEncoded, cEncoded)
 
 		chunked := encodeChunked(t, data, quality, opts, chunkSize, flush)
 		assertCRefDecodes(t, chunked, data, nil)
@@ -185,6 +196,47 @@ func FuzzCompoundDictCRef(f *testing.F) {
 		assertCRefDecodes(t, chunked, data, dict)
 		assertGoDecodes(t, chunked, data, dict, chunkSize, readSize)
 	})
+}
+
+// FuzzEncodeDictWordsCRef feeds the encoder text made of transformed static
+// dictionary words.
+func FuzzEncodeDictWordsCRef(f *testing.F) {
+	for quality := uint8(0); quality <= 11; quality++ {
+		f.Add([]byte{0, 0, 0, 0, 7, 1, 0, 9}, quality, uint8(22))
+		// " the " + 24-byte word + " of the ": a 32-byte dictionary match.
+		f.Add([]byte{0, 0, 0, 0, 7, 1, 0, 9, 20, 3, 0, 73}, quality, uint8(22))
+	}
+
+	f.Fuzz(func(t *testing.T, recipe []byte, qualityByte, windowByte uint8) {
+		data := dictWordText(recipe, fuzzMaxPlain)
+		quality := int(qualityByte) % 12
+		lgwin := fuzzLGWin(windowByte)
+		opts := WriterOptions{LGWin: lgwin, SizeHint: uint(len(data))}
+
+		goEncoded := encodeChunked(t, data, quality, opts, max(1, len(data)), false)
+		assertCRefDecodes(t, goEncoded, data, nil)
+		assertGoDecodes(t, goEncoded, data, nil, max(1, len(goEncoded)), max(1, len(data)))
+
+		cEncoded, err := cref.Encode(data, quality, lgwin, uint(len(data)))
+		if err != nil {
+			t.Fatalf("C Encode (q=%d, lgwin=%d): %v", quality, lgwin, err)
+		}
+		assertMatchesCRef(t, goEncoded, cEncoded)
+	})
+}
+
+func dictWordText(recipe []byte, limit int) []byte {
+	var out []byte
+	var buf [128]byte // TransformDictionaryWord needs slack after its result.
+	for len(recipe) >= 4 && len(out) < limit {
+		l := core.DictMinWordLength + int(recipe[0])%(core.DictMaxWordLength-core.DictMinWordLength+1)
+		idx := int(binary.LittleEndian.Uint16(recipe[1:])) % (1 << core.DictSizeBitsByLength[l])
+		off := int(core.DictOffsetsByLength[l]) + idx*l
+		n := core.TransformDictionaryWord(buf[:], core.DictData[off:off+l], int(recipe[3])%core.NumTransforms)
+		out = append(out, buf[:n]...)
+		recipe = recipe[4:]
+	}
+	return out
 }
 
 func encodeChunked(t *testing.T, data []byte, quality int, opts WriterOptions, chunkSize int, flush bool) []byte {

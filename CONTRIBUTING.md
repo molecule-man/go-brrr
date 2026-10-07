@@ -154,8 +154,8 @@ limits do not cap decoded output. Go saves failing inputs under
 that is not already captured by a focused regression test or an intentional
 seed. CI runs the seed corpus on every push.
 
-The `Fuzz` workflow runs mutation fuzzing every night. On a failure it uploads
-the failing inputs as an artifact and opens an issue.
+The `Nightly` workflow runs mutation fuzzing every night. On a failure it
+uploads the failing inputs as an artifact.
 
 ## Code style
 

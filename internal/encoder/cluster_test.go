@@ -13,7 +13,7 @@ func TestClusterIdenticalHistograms(t *testing.T) {
 		}
 	}
 	out := make([]uint32, inSize*alphabetSize)
-	outSize, symbols := clusterHistograms(in, inSize, alphabetSize, 256, out, &q10Bufs{})
+	outSize, symbols := clusterHistograms(in, inSize, alphabetSize, 256, out, &clusterBufs{})
 	if outSize != 1 {
 		t.Errorf("identical histograms: outSize = %d, want 1", outSize)
 	}
@@ -37,7 +37,7 @@ func TestClusterDifferentHistograms(t *testing.T) {
 	in[2*alphabetSize+7] = 100
 
 	out := make([]uint32, inSize*alphabetSize)
-	outSize, symbols := clusterHistograms(in, inSize, alphabetSize, 256, out, &q10Bufs{})
+	outSize, symbols := clusterHistograms(in, inSize, alphabetSize, 256, out, &clusterBufs{})
 	if outSize != 3 {
 		t.Errorf("different histograms: outSize = %d, want 3", outSize)
 	}
@@ -71,7 +71,7 @@ func TestClusterSymbolsMapCorrectly(t *testing.T) {
 	}
 
 	out := make([]uint32, inSize*alphabetSize)
-	outSize, symbols := clusterHistograms(in, inSize, alphabetSize, 256, out, &q10Bufs{})
+	outSize, symbols := clusterHistograms(in, inSize, alphabetSize, 256, out, &clusterBufs{})
 	if outSize != 2 {
 		t.Errorf("expected 2 clusters, got %d", outSize)
 	}
@@ -103,7 +103,7 @@ func TestClusterStressLargeInput(t *testing.T) {
 		in[i*alphabetSize+1] = 20
 	}
 	out := make([]uint32, inSize*alphabetSize)
-	outSize, symbols := clusterHistograms(in, inSize, alphabetSize, 256, out, &q10Bufs{})
+	outSize, symbols := clusterHistograms(in, inSize, alphabetSize, 256, out, &clusterBufs{})
 	if outSize != 1 {
 		t.Errorf("expected 1 cluster for identical histograms, got %d", outSize)
 	}
@@ -124,7 +124,7 @@ func TestClusterMaxHistogramsLimit(t *testing.T) {
 		in[i*alphabetSize+(i%alphabetSize)] = 100
 	}
 	out := make([]uint32, inSize*alphabetSize)
-	outSize, symbols := clusterHistograms(in, inSize, alphabetSize, 2, out, &q10Bufs{})
+	outSize, symbols := clusterHistograms(in, inSize, alphabetSize, 2, out, &clusterBufs{})
 	if outSize > 2 {
 		t.Errorf("expected at most 2 clusters, got %d", outSize)
 	}
@@ -162,7 +162,7 @@ func TestClusterSingleHistogram(t *testing.T) {
 	const alphabetSize = 4
 	in := []uint32{10, 20, 30, 40}
 	out := make([]uint32, alphabetSize)
-	outSize, symbols := clusterHistograms(in, 1, alphabetSize, 256, out, &q10Bufs{})
+	outSize, symbols := clusterHistograms(in, 1, alphabetSize, 256, out, &clusterBufs{})
 	if outSize != 1 {
 		t.Errorf("single histogram: outSize = %d, want 1", outSize)
 	}

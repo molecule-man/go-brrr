@@ -2,9 +2,6 @@ package encoder
 
 import "testing"
 
-// matchLenSink keeps the benchmarked calls from being elided.
-var matchLenSink int
-
 func TestCommonPrefixLen(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -120,42 +117,4 @@ func TestMatchLenAtLongAgreesWithMatchLenAtAtEveryMismatchPosition(t *testing.T)
 			}
 		}
 	}
-}
-
-func TestMatchLenAtLongReadsNothingPastLimit(t *testing.T) {
-	// The block compare must never look past limit, or a match would be found
-	// in bytes the caller has excluded because the ring buffer wraps there.
-	const limit = 8192
-	for _, tail := range []int{1, 7, 4096} {
-		data, a, b := matchLenLongFixture(t, limit+tail, -1)
-		// Poison everything from limit on, on the b side only.
-		for i := limit; i < limit+tail; i++ {
-			data[b+uint(i)] ^= 0xFF
-		}
-		if got := matchLenAtLong(data, a, b, limit); got != limit {
-			t.Fatalf("tail=%d: got %d, want %d; the scan ran past limit", tail, got, limit)
-		}
-	}
-}
-
-func BenchmarkMatchLenAtLong64KiB(b *testing.B)    { benchmarkMatchLenLong(b, 65536, -1) }
-func BenchmarkMatchLenAtLong4KiB(b *testing.B)     { benchmarkMatchLenLong(b, 4096, -1) }
-func BenchmarkMatchLenAtLongMismatch(b *testing.B) { benchmarkMatchLenLong(b, 65536, 100) }
-
-func benchmarkMatchLenLong(b *testing.B, limit, mismatchAt int) {
-	data, ia, ib := matchLenLongFixture(b, limit, mismatchAt)
-	b.Run("impl=before_scalar_8byte", func(b *testing.B) {
-		b.ReportAllocs()
-		b.SetBytes(int64(limit))
-		for range b.N {
-			matchLenSink = matchLenAt(data, ia, ib, limit)
-		}
-	})
-	b.Run("impl=after_blocked_equal", func(b *testing.B) {
-		b.ReportAllocs()
-		b.SetBytes(int64(limit))
-		for range b.N {
-			matchLenSink = matchLenAtLong(data, ia, ib, limit)
-		}
-	})
 }

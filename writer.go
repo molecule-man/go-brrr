@@ -26,6 +26,10 @@ type oneshotCompressor struct {
 // Writer compresses data into brotli format.
 //
 // Callers must Close the Writer to finalize the brotli stream.
+//
+// At levels 10 and 11, a Writer uses up to two worker goroutines when
+// GOMAXPROCS is at least 2. This can reduce latency but uses more memory.
+// A Writer does not support concurrent calls.
 type Writer struct {
 	dst      io.Writer
 	err      error
@@ -33,7 +37,7 @@ type Writer struct {
 	dicts    []*PreparedDictionary // from WriterOptions, preserved across Reset
 	quality  int                   // 0 = one-pass, 1 = two-pass, 2+ = streaming
 	lgwin    int
-	sizeHint uint // from WriterOptions, preserved across Reset
+	sizeHint uint // hint for the current stream
 	closed   bool
 	reused   bool // true after first Reset; suppresses pool release on Close
 	parallel bool
@@ -51,6 +55,10 @@ func NewWriter(dst io.Writer, level int) (*Writer, error) {
 // selects the default (22). Compound dictionaries supplied via opts.Dictionaries
 // require level >= 2.
 func NewWriterOptions(dst io.Writer, level int, opts WriterOptions) (*Writer, error) {
+	return newWriter(dst, level, opts, runtime.GOMAXPROCS(0) >= 2)
+}
+
+func newWriter(dst io.Writer, level int, opts WriterOptions, workers bool) (*Writer, error) {
 	if err := checkLevel(level); err != nil {
 		return nil, err
 	}
@@ -70,9 +78,6 @@ func NewWriterOptions(dst io.Writer, level int, opts WriterOptions) (*Writer, er
 	if len(opts.Dictionaries) > 0 && level < 2 {
 		return nil, encoder.ErrQualityTooLow
 	}
-	if opts.Parallelism < 0 {
-		return nil, errors.New("brrr: invalid parallelism: " + strconv.Itoa(opts.Parallelism))
-	}
 
 	w := &Writer{
 		dst:      dst,
@@ -80,7 +85,7 @@ func NewWriterOptions(dst io.Writer, level int, opts WriterOptions) (*Writer, er
 		lgwin:    lgwin,
 		sizeHint: opts.SizeHint,
 		dicts:    opts.Dictionaries,
-		parallel: opts.Parallelism >= 2 && level >= minWorkerLevel,
+		parallel: workers && level >= minWorkerLevel,
 	}
 	w.c = encoder.NewCompressor(w.quality, w.lgwin, w.sizeHint, w.parallel)
 	for _, pd := range w.dicts {
@@ -205,20 +210,31 @@ func (w *Writer) Close() error {
 	return w.err
 }
 
-// Reset discards internal state and switches to writing to dst.
-// This permits reusing a Writer rather than allocating a new one.
-// Compound dictionaries supplied via WriterOptions are preserved.
+// Reset discards the current stream and sets dst for the next stream.
+// It clears the size hint. The encoder estimates size from the first Write.
+// It keeps compound dictionaries from WriterOptions.
 func (w *Writer) Reset(dst io.Writer) {
+	w.reset(dst, 0)
+}
+
+// ResetWithSizeHint discards the current stream and sets dst for the next stream.
+// It uses sizeHint as the expected input size. A zero hint means unknown size.
+func (w *Writer) ResetWithSizeHint(dst io.Writer, sizeHint uint) {
+	w.reset(dst, sizeHint)
+}
+
+func (w *Writer) reset(dst io.Writer, sizeHint uint) {
 	w.dst = dst
 	w.err = nil
 	w.closed = false
 	w.reused = true
+	w.sizeHint = sizeHint
 
 	if w.c == nil {
 		// Compressor was released on a previous Close; re-acquire.
 		w.c = encoder.NewCompressor(w.quality, w.lgwin, w.sizeHint, w.parallel)
 	} else {
-		w.c.Reset()
+		w.c.ResetSizeHint(w.sizeHint)
 	}
 	for _, pd := range w.dicts {
 		_ = w.c.AttachDictionary(pd.impl)

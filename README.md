@@ -14,7 +14,7 @@ Brotli compression library for Go (RFC 7932), with encoder and decoder support.
 
 - **No C toolchain.** Builds with standard Go tooling.
 - **Faster than other pure-Go brotli libraries** at every quality level we measure (see [Benchmarks](#benchmarks)).
-- **Even faster than CGO brotli** on levels 2-9.
+- **Faster than CGO brotli** (cbrotli) in our benchmarks, for compression at q0-q11 and for one-shot decompression.
 - **Compound dictionaries.**
 - **Encoder tuning.** `LGWin` (window size) and `SizeHint` (expected total input size) are exposed via `WriterOptions`. `SizeHint` lets the encoder pick context modeling and hasher parameters tuned for the actual payload size.
 
@@ -141,24 +141,24 @@ The table below measures end-to-end throughput through each package's public Go 
 
 `go-brrr` still benefits from internal reuse in that shape: encoder arenas, hashers, hash tables, and scratch buffers are kept reusable through reset paths and internal `sync.Pool`s. That avoids repeated large allocations and zeroing, which matters for small and mid-size payloads. `cbrotli` uses the C reference encoder underneath, but each payload creates a new `BrotliEncoderState` through `cbrotli.NewWriter` and destroys it on `Close`, paying setup, teardown, cgo, and allocation costs for every stream.
 
-Read these rows as repeated complete-stream compression through the Go APIs. They are not a claim that every pure-Go compression hot path is faster than the C implementation; the same table shows quality levels where `cbrotli` is faster.
+Read these rows as repeated complete-stream compression through the Go APIs. They are not a claim that every pure-Go hot path is faster than the C implementation. Part of the gap comes from per-stream setup and cgo cost in `cbrotli`.
 
 <!-- bench:compress -->
 | | go-brrr (sec/op) | andybalholm (sec/op) | cbrotli (sec/op) |
 | --- | --- | --- | --- |
-| CompressOneshot/q=0/payload=VariedPayloads | 6.515m ± 1% | 12.420m ± 0%   +90.64% (p=0.000 n=8) | 6.847m ± 0%    +5.10% (p=0.000 n=8) |
-| CompressOneshot/q=1/payload=VariedPayloads | 9.797m ± 0% | 20.169m ± 0%  +105.88% (p=0.000 n=8) | 10.808m ± 0%   +10.32% (p=0.000 n=8) |
-| CompressOneshot/q=2/payload=VariedPayloads | 14.68m ± 0% | 38.86m ± 2%  +164.76% (p=0.000 n=8) | 17.93m ± 0%   +22.14% (p=0.000 n=8) |
-| CompressOneshot/q=3/payload=VariedPayloads | 16.06m ± 0% | 44.34m ± 1%  +176.12% (p=0.000 n=8) | 20.85m ± 0%   +29.87% (p=0.000 n=8) |
-| CompressOneshot/q=4/payload=VariedPayloads | 25.68m ± 0% | 61.37m ± 1%  +138.97% (p=0.000 n=8) | 29.96m ± 0%   +16.67% (p=0.000 n=8) |
-| CompressOneshot/q=5/payload=VariedPayloads | 36.41m ± 0% | 80.19m ± 1%  +120.22% (p=0.000 n=8) | 47.13m ± 0%   +29.43% (p=0.000 n=8) |
-| CompressOneshot/q=6/payload=VariedPayloads | 43.87m ± 0% | 90.57m ± 1%  +106.47% (p=0.000 n=8) | 54.78m ± 0%   +24.88% (p=0.000 n=8) |
-| CompressOneshot/q=7/payload=VariedPayloads | 50.34m ± 0% | 127.34m ± 1%  +152.96% (p=0.000 n=8) | 110.24m ± 0%  +119.00% (p=0.000 n=8) |
-| CompressOneshot/q=8/payload=VariedPayloads | 58.95m ± 0% | 146.62m ± 1%  +148.72% (p=0.000 n=8) | 81.03m ± 1%   +37.46% (p=0.000 n=8) |
-| CompressOneshot/q=9/payload=VariedPayloads | 74.02m ± 0% | 209.77m ± 2%  +183.41% (p=0.000 n=8) | 237.70m ± 0%  +221.15% (p=0.000 n=8) |
-| CompressOneshot/q=10/payload=VariedPayloads | 1221.7m ± 2% | 1368.5m ± 1%   +12.01% (p=0.000 n=8) | 864.3m ± 0%   -29.26% (p=0.000 n=8) |
-| CompressOneshot/q=11/payload=VariedPayloads | 2.939 ± 1% | 3.424 ± 1%   +16.51% (p=0.000 n=8) | 2.266 ± 0%   -22.89% (p=0.000 n=8) |
-| **geomean** | 52.96m | 111.1m       +109.76% | 67.47m        +27.40% |
+| CompressOneshot/q=0/payload=VariedPayloads | 6.342m ± 0% | 12.447m ± 1%   +96.25% (p=0.000) | 6.868m ± 0%    +8.29% (p=0.000) |
+| CompressOneshot/q=1/payload=VariedPayloads | 9.530m ± 0% | 20.163m ± 0%  +111.57% (p=0.000) | 10.824m ± 0%   +13.58% (p=0.000) |
+| CompressOneshot/q=2/payload=VariedPayloads | 14.74m ± 0% | 39.29m ± 5%  +166.60% (p=0.000) | 18.09m ± 0%   +22.76% (p=0.000) |
+| CompressOneshot/q=3/payload=VariedPayloads | 15.89m ± 0% | 43.29m ± 5%  +172.39% (p=0.000) | 20.94m ± 0%   +31.77% (p=0.000) |
+| CompressOneshot/q=4/payload=VariedPayloads | 25.07m ± 0% | 62.03m ± 2%  +147.45% (p=0.000) | 30.13m ± 0%   +20.19% (p=0.000) |
+| CompressOneshot/q=5/payload=VariedPayloads | 35.77m ± 0% | 80.57m ± 1%  +125.28% (p=0.000) | 47.34m ± 0%   +32.37% (p=0.000) |
+| CompressOneshot/q=6/payload=VariedPayloads | 43.44m ± 0% | 90.94m ± 1%  +109.32% (p=0.000) | 54.76m ± 0%   +26.05% (p=0.000) |
+| CompressOneshot/q=7/payload=VariedPayloads | 50.07m ± 0% | 125.95m ± 1%  +151.52% (p=0.000) | 107.23m ± 0%  +114.15% (p=0.000) |
+| CompressOneshot/q=8/payload=VariedPayloads | 58.44m ± 1% | 146.65m ± 1%  +150.97% (p=0.000) | 82.10m ± 0%   +40.49% (p=0.000) |
+| CompressOneshot/q=9/payload=VariedPayloads | 73.59m ± 0% | 209.19m ± 1%  +184.26% (p=0.000) | 232.63m ± 0%  +216.11% (p=0.000) |
+| CompressOneshot/q=10/payload=VariedPayloads | 814.9m ± 0% | 1346.7m ± 2%   +65.27% (p=0.000) | 856.2m ± 1%    +5.08% (p=0.000) |
+| CompressOneshot/q=11/payload=VariedPayloads | 1.587 ± 0% | 3.365 ± 1%  +112.05% (p=0.000) | 2.266 ± 0%   +42.77% (p=0.000) |
+| **geomean** | 48.10m | 110.7m       +130.18% | 67.37m        +40.05% |
 <!-- /bench:compress -->
 
 *Streaming* uses `brrr.NewReader` + `io.ReadAll`; *one-shot* uses `brrr.Decompress` on a complete in-memory blob.
@@ -168,13 +168,13 @@ Read these rows as repeated complete-stream compression through the Go APIs. The
 As cbrotli doesn't have the "resettable" API it's not included here.
 
 <!-- bench:decompress -->
-| | go-brrr (sec/op) | andybalholm (sec/op) |
-| --- | --- | --- |
-| Decompress/q=4/payload=VariedPayloads | 5.378m ± 0% | 9.539m ± 0%  +77.36%  |
-| Decompress/q=5/payload=VariedPayloads | 5.302m ± 0% | 9.143m ± 0%  +72.43%  |
-| Decompress/q=6/payload=VariedPayloads | 5.146m ± 0% | 8.881m ± 0%  +72.56%  |
-| Decompress/q=11/payload=VariedPayloads | 5.621m ± 0% | 8.959m ± 0%  +59.37%  |
-| **geomean** | 5.359m | 9.127m       +70.30% |
+| | go-brrr (sec/op) | andybalholm (sec/op) | diff | p |
+| --- | --- | --- | --- | --- |
+| Decompress/q=4/payload=VariedPayloads | 4.373m ± 0% | 9.593m ± 0% | +119.38% | 0.000 |
+| Decompress/q=5/payload=VariedPayloads | 4.181m ± 0% | 9.183m ± 0% | +119.62% | 0.000 |
+| Decompress/q=6/payload=VariedPayloads | 4.052m ± 0% | 8.914m ± 0% | +119.97% | 0.000 |
+| Decompress/q=11/payload=VariedPayloads | 4.645m ± 0% | 8.925m ± 0% | +92.16% | 0.000 |
+| **geomean** | 4.307m | 9.150m | +112.43% |  |
 <!-- /bench:decompress -->
 
 ### One-shot Decompression
@@ -182,11 +182,11 @@ As cbrotli doesn't have the "resettable" API it's not included here.
 <!-- bench:decompresso -->
 | | go-brrr (sec/op) | andybalholm (sec/op) | cbrotli (sec/op) | google-brotli (sec/op) |
 | --- | --- | --- | --- | --- |
-| DecompressOneshot/q=4/payload=VariedPayloads | 5.458m ± 0% | 10.042m ± 0%  +84.01%  | 5.191m ±  2%   -4.89%  | 10.595m ± 0%  +94.13%  |
-| DecompressOneshot/q=5/payload=VariedPayloads | 5.458m ± 1% | 9.609m ± 0%  +76.07%  | 5.022m ± 11%        ~  | 10.541m ± 0%  +93.14%  |
-| DecompressOneshot/q=6/payload=VariedPayloads | 5.329m ± 1% | 9.384m ± 0%  +76.11%  | 4.916m ±  4%   -7.74%  | 10.240m ± 1%  +92.17%  |
-| DecompressOneshot/q=11/payload=VariedPayloads | 5.816m ± 1% | 9.540m ± 0%  +64.03%  | 6.981m ±  1%  +20.03%  | **crashed** |
-| **geomean** | 5.512m | 9.641m       +74.91% | 5.469m         -0.78% | 10.46m       +93.14%                 |
+| DecompressOneshot/q=4/payload=VariedPayloads | 4.549m ± 0% | 10.082m ± 0%  +121.63% (p=0.000) | 5.286m ± 2%  +16.21% (p=0.000) | 10.470m ± 0%  +130.16% (p=0.000) |
+| DecompressOneshot/q=5/payload=VariedPayloads | 4.433m ± 0% | 9.611m ± 0%  +116.82% (p=0.000) | 5.023m ± 1%  +13.32% (p=0.000) | 10.549m ± 0%  +137.98% (p=0.000) |
+| DecompressOneshot/q=6/payload=VariedPayloads | 4.318m ± 0% | 9.415m ± 0%  +118.05% (p=0.000) | 4.936m ± 1%  +14.31% (p=0.000) | 10.176m ± 0%  +135.69% (p=0.000) |
+| DecompressOneshot/q=11/payload=VariedPayloads | 4.904m ± 0% | 9.377m ± 0%   +91.22% (p=0.000) | 6.534m ± 0%  +33.25% (p=0.000 | **crashed** |
+| **geomean** | 4.546m | 9.617m       +111.57% | 5.410m       +19.01% | 10.40m       +134.59%                 |
 <!-- /bench:decompresso -->
 
 

@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"testing/iotest"
@@ -68,16 +68,18 @@ func crefTestCases(t *testing.T) []struct {
 		corpusFiles = append(corpusFiles, "bb.binast")
 	}
 
+	type tc struct {
+		name  string
+		input []byte
+	}
+
 	cases := make([]struct {
 		name  string
 		input []byte
 	}, 0, len(corpusFiles)+7)
 
 	for _, name := range corpusFiles {
-		cases = append(cases, struct {
-			name  string
-			input []byte
-		}{
+		cases = append(cases, tc{
 			name:  name,
 			input: readTestdata(t, filepath.Join("brotli-ref", "tests", "testdata", name)),
 		})
@@ -85,42 +87,28 @@ func crefTestCases(t *testing.T) []struct {
 
 	// Synthetic cases that exercise patterns the corpus doesn't cover.
 	cases = append(cases,
-		struct {
-			name  string
-			input []byte
-		}{"hello_world", []byte("Hello, World!")},
-		struct {
-			name  string
-			input []byte
-		}{"repeated_a_1000", bytes.Repeat([]byte("a"), 1000)},
-		struct {
-			name  string
-			input []byte
-		}{"pseudo_random_2048", pseudoRandomBytesCRef(2048, 42)},
-		struct {
-			name  string
-			input []byte
-		}{"multi_block_130000", bytes.Repeat([]byte("abcdefghijklmnopqrstuvwxyz"), 5000)},
-		struct {
-			name  string
-			input []byte
-		}{"pseudo_random_65536", pseudoRandomBytesCRef(65536, 99)},
-		struct {
-			name  string
-			input []byte
-		}{"match_ending_at_ring_end_262144", matchEndingAtRingEndCRef(1 << 18)},
-		struct {
-			name  string
-			input []byte
-		}{"run_heavy_327680", runHeavyCRef(1<<18+1<<16, 118)},
+		tc{"hello_world", []byte("Hello, World!")},
+		tc{"repeated_a_1000", bytes.Repeat([]byte("a"), 1000)},
+		tc{"pseudo_random_2048", pseudoRandomBytesCRef(2048, 42)},
+		tc{"multi_block_130000", bytes.Repeat([]byte("abcdefghijklmnopqrstuvwxyz"), 5000)},
+		tc{"pseudo_random_65536", pseudoRandomBytesCRef(65536, 99)},
+		// Found in silesia/webster. It corrupted q10
+		tc{"webster_dict_words", []byte(" the physical properties of the body bei")},
+		tc{"match_ending_at_ring_end_262144", matchEndingAtRingEndCRef(1 << 18)},
+		tc{"run_heavy_327680", runHeavyCRef(1<<18+1<<16, 118)},
 	)
 
 	return cases
 }
 
-// testMatchesCRef verifies that the Go streaming encoder at the given quality,
-// window size, and size hint produces byte-identical output to the C reference
-// encoder.
+func assertMatchesCRef(t *testing.T, goOut, cOut []byte) {
+	t.Helper()
+	if !bytes.Equal(goOut, cOut) {
+		t.Errorf("output mismatch: Go produced %d bytes, C produced %d bytes, %s",
+			len(goOut), len(cOut), firstDiff(goOut, cOut))
+	}
+}
+
 func testMatchesCRef(t *testing.T, quality, lgwin int, sizeHint uint) {
 	t.Helper()
 
@@ -137,7 +125,7 @@ func testMatchesCRef(t *testing.T, quality, lgwin int, sizeHint uint) {
 	for _, tt := range crefTestCases(t) {
 		t.Run(tt.name, func(t *testing.T) {
 			goBuf.Reset()
-			w.Reset(&goBuf)
+			w.ResetWithSizeHint(&goBuf, sizeHint)
 			if _, err := w.Write(tt.input); err != nil {
 				t.Fatalf("Write: %v", err)
 			}
@@ -209,42 +197,15 @@ func testMatchesCRef(t *testing.T, quality, lgwin int, sizeHint uint) {
 
 			cOut := creftest.BrotliCompress(t, tt.input, quality, lgwin, sizeHint)
 
-			// Conditions where Go output may differ from C but both are valid:
-			//   - Q10+: rounding differences between Go's math.Log2 and the
-			//     C math library's log2 can change Zopfli command choices.
-			// Allow 0.02% above C's size, rounded up to avoid a zero-byte
-			// allowance on small streams. Both decoders verify the output above.
-			if quality >= 10 {
-				goLen := len(goOut)
-				cLen := len(cOut)
-				threshold := math.Ceil(float64(cLen) * 1.0002)
-				if float64(goLen) > threshold {
-					t.Errorf("Go output too large: %d bytes (C: %d bytes, threshold: %.0f)",
-						goLen, cLen, threshold)
-				}
-			} else {
-				if !bytes.Equal(goOut, cOut) {
-					t.Errorf("output mismatch: Go produced %d bytes, C produced %d bytes",
-						len(goOut), len(cOut))
-					minLen := min(len(goOut), len(cOut))
-					for i := range minLen {
-						if goOut[i] != cOut[i] {
-							t.Errorf("first difference at byte %d: Go=0x%02x C=0x%02x",
-								i, goOut[i], cOut[i])
-							break
-						}
-					}
-				}
-			}
+			assertMatchesCRef(t, goOut, cOut)
 		})
 	}
 }
 
 // TestMatchesCRef verifies the Go streaming encoder against the C reference
-// across quality levels, window sizes, and size hints. For Q10–11 it checks
-// roundtrip correctness and that compressed size is within 0.02% of C. Other
-// combinations check byte-identical output. All qualities verify roundtrip via
-// C and Go decompression.
+// across quality levels, window sizes, and size hints. It checks
+// byte-identical output. All qualities verify roundtrip via C and Go
+// decompression.
 func TestMatchesCRef(t *testing.T) {
 	t.Parallel()
 
@@ -307,26 +268,7 @@ func TestCompressMatchesCRef(t *testing.T) {
 
 					cOut := creftest.BrotliCompress(t, tt.input, quality, defaultLGWin, uint(len(tt.input)))
 
-					if quality >= 5 {
-						threshold := math.Ceil(float64(len(cOut)) * 1.0002)
-						if float64(len(goOut)) > threshold {
-							t.Errorf("Go output too large: %d bytes (C: %d bytes, threshold: %.0f)",
-								len(goOut), len(cOut), threshold)
-						}
-						return
-					}
-					if !bytes.Equal(goOut, cOut) {
-						t.Errorf("output mismatch: Go produced %d bytes, C produced %d bytes",
-							len(goOut), len(cOut))
-						minLen := min(len(goOut), len(cOut))
-						for i := range minLen {
-							if goOut[i] != cOut[i] {
-								t.Errorf("first difference at byte %d: Go=0x%02x C=0x%02x",
-									i, goOut[i], cOut[i])
-								break
-							}
-						}
-					}
+					assertMatchesCRef(t, goOut, cOut)
 				})
 			}
 		})
@@ -378,6 +320,26 @@ func TestPositionWrap(t *testing.T) {
 				t.Fatalf("roundtrip mismatch: decoded %d bytes, want %d",
 					len(decoded), len(data))
 			}
+		})
+	}
+}
+
+func TestFlushedStreamBeyondTheDefaultWindowDecodes(t *testing.T) {
+	t.Parallel()
+
+	html := readTestdata(t, filepath.Join("testdata", "gh_172KB.html"))
+	js := readTestdata(t, filepath.Join("testdata", "reactcore_187KB.js"))
+	events := readTestdata(t, filepath.Join("testdata", "github_events_8k.json"))
+	src := slices.Concat(html, js, events)
+	stream := similarCopies(src, (9<<20)/len(src)+1)
+	const message = 32 << 10
+
+	for quality := 0; quality <= 11; quality++ {
+		t.Run(fmt.Sprintf("q%d", quality), func(t *testing.T) {
+			t.Parallel()
+			encoded := encodeChunked(t, stream, quality, WriterOptions{LGWin: defaultLGWin}, message, true)
+			assertCRefDecodes(t, encoded, stream, nil)
+			assertGoDecodes(t, encoded, stream, nil, message, message)
 		})
 	}
 }
@@ -506,8 +468,7 @@ func testCompoundDictMatchesCRef(t *testing.T, quality, lgwin int, sizeHint uint
 }
 
 // TestCompoundDictMatchesCRef verifies compound dictionary output across
-// quality levels, window sizes, and size hints. For Q<=9 it checks
-// byte-identical output; for Q10+ it checks roundtrip and size within 0.05% of C.
+// quality levels, window sizes, and size hints. It checks byte-identical output.
 func TestCompoundDictMatchesCRef(t *testing.T) {
 	t.Parallel()
 
@@ -716,6 +677,22 @@ func TestCompoundDictDecoderSmallBuffer(t *testing.T) {
 	}
 }
 
+func similarCopies(data []byte, n int) []byte {
+	if n <= 1 || len(data) == 0 {
+		return data
+	}
+	out := make([]byte, 0, n*len(data))
+	rng := rand.New(rand.NewPCG(uint64(len(data)), uint64(n)))
+	for k := range n {
+		start := len(out)
+		out = append(out, data...)
+		for range min(k, 4) {
+			out[start+rng.IntN(len(data))] ^= byte(1 + rng.IntN(255))
+		}
+	}
+	return out
+}
+
 func pseudoRandomBytesCRef(n int, seed uint64) []byte {
 	rng := rand.New(rand.NewPCG(seed, 0))
 	b := make([]byte, n)
@@ -723,6 +700,42 @@ func pseudoRandomBytesCRef(n int, seed uint64) []byte {
 		b[i] = byte(rng.IntN(256))
 	}
 	return b
+}
+
+// TestTagSwitchMatchesCRef covers the q5/q6 large-input hashers after they
+// switch to tags. The first part is binary, so that the encoder switches.
+// The rest copies pieces of it, so that matches use the rebuilt tags.
+func TestTagSwitchMatchesCRef(t *testing.T) {
+	t.Parallel()
+
+	const binaryLen = 768 << 10
+	input := pseudoRandomBytesCRef(binaryLen, 11)
+	rng := rand.New(rand.NewPCG(11, 12))
+	for len(input) < 2<<20 {
+		off := rng.IntN(binaryLen - 2048)
+		input = append(input, input[off:off+8+rng.IntN(2040)]...)
+		input = append(input, pseudoRandomBytesCRef(rng.IntN(64), rng.Uint64())...)
+	}
+
+	for _, quality := range []int{5, 6} {
+		t.Run(fmt.Sprintf("q%d", quality), func(t *testing.T) {
+			t.Parallel()
+
+			var goBuf bytes.Buffer
+			w, err := NewWriterOptions(&goBuf, quality, WriterOptions{SizeHint: uint(len(input))})
+			if err != nil {
+				t.Fatalf("NewWriter: %v", err)
+			}
+			if _, err := w.Write(input); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+			if err := w.Close(); err != nil {
+				t.Fatalf("Close: %v", err)
+			}
+			cOut := creftest.BrotliCompress(t, input, quality, defaultLGWin, uint(len(input)))
+			assertMatchesCRef(t, goBuf.Bytes(), cOut)
+		})
+	}
 }
 
 func matchEndingAtRingEndCRef(n int) []byte {

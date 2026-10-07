@@ -11,7 +11,7 @@ package encoder
 // length and non-strictly increasing distance.
 type backwardMatch struct {
 	distance      uint32
-	lengthAndCode uint32 // length << 5 | (length ^ lengthCode)
+	lengthAndCode uint32 // length << 5 | lengthCode, or 0 when lengthCode == length
 }
 
 // newBackwardMatch creates a match with the given backward distance and
@@ -27,9 +27,13 @@ func newBackwardMatch(distance, length uint) backwardMatch {
 // entry. The length code may differ from the length when a dictionary
 // transform omits trailing bytes.
 func newDictionaryBackwardMatch(distance, length, lenCode uint) backwardMatch {
+	code := lenCode
+	if lenCode == length {
+		code = 0
+	}
 	return backwardMatch{
 		distance:      uint32(distance),
-		lengthAndCode: uint32((length << 5) | (length ^ lenCode)),
+		lengthAndCode: uint32((length << 5) | code),
 	}
 }
 
@@ -41,6 +45,8 @@ func (m backwardMatch) matchLength() uint {
 // matchLengthCode returns the length code, which equals the match length
 // for normal matches but may differ for dictionary matches with transforms.
 func (m backwardMatch) matchLengthCode() uint {
-	code := uint(m.lengthAndCode) & 31
-	return uint(m.lengthAndCode>>5) ^ code
+	if code := uint(m.lengthAndCode) & 31; code != 0 {
+		return code
+	}
+	return uint(m.lengthAndCode >> 5)
 }
