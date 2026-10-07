@@ -136,10 +136,9 @@ func (h *h6b5u) findLongestMatch(
 	}
 
 	// --- fast path: ringBufferMask < len(data) ---
-	// The ring buffer has a mirrored tail beyond ringBufferMask
-	// (see copyInputToRingBuffer). Since bestLen <= maxLength <= tailSize,
-	// data[curMasked+bestLen] and data[prev+bestLen] are always within
-	// len(data), so per-iteration wrap-around bounds guards are not needed.
+	// Probes can read the mirrored tail beyond ringBufferMask (see
+	// copyInputToRingBuffer). The ring-end check after each probe rejects
+	// such a source, as C does.
 	_ = data[ringBufferMask]
 
 	curMasked := cur & ringBufferMask

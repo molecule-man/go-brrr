@@ -738,6 +738,48 @@ func TestTagSwitchMatchesCRef(t *testing.T) {
 	}
 }
 
+// TestSizeHintedRingWrapMatchesCRef covers the q5–q9 hashers for a size hint
+// of 1 MiB or more after the ring buffer wraps. At lgwin 19 the ring holds
+// 1 MiB, so each input wraps it at least once.
+func TestSizeHintedRingWrapMatchesCRef(t *testing.T) {
+	t.Parallel()
+
+	const lgwin = 19
+	var text []byte
+	for _, name := range []string{"plrabn12.txt", "lcet10.txt", "mapsdatazrh", "alice29.txt", "plrabn12.txt", "lcet10.txt"} {
+		text = append(text, readTestdata(t, filepath.Join("brotli-ref", "tests", "testdata", name))...)
+	}
+	inputs := []struct {
+		name  string
+		input []byte
+	}{
+		{"text", text},
+		{"run_heavy", runHeavyCRef(5<<19, 119)},
+	}
+
+	for _, in := range inputs {
+		for quality := 5; quality <= 9; quality++ {
+			t.Run(fmt.Sprintf("%s/q%d", in.name, quality), func(t *testing.T) {
+				t.Parallel()
+
+				var goBuf bytes.Buffer
+				w, err := NewWriterOptions(&goBuf, quality, WriterOptions{LGWin: lgwin, SizeHint: uint(len(in.input))})
+				if err != nil {
+					t.Fatalf("NewWriter: %v", err)
+				}
+				if _, err := w.Write(in.input); err != nil {
+					t.Fatalf("Write: %v", err)
+				}
+				if err := w.Close(); err != nil {
+					t.Fatalf("Close: %v", err)
+				}
+				cOut := creftest.BrotliCompress(t, in.input, quality, lgwin, uint(len(in.input)))
+				assertMatchesCRef(t, goBuf.Bytes(), cOut)
+			})
+		}
+	}
+}
+
 func matchEndingAtRingEndCRef(n int) []byte {
 	rng := rand.New(rand.NewPCG(uint64(n), 7))
 	b := make([]byte, n)
