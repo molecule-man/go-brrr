@@ -521,8 +521,6 @@ func (c *twoPassCompressor) writeCommands(literals []byte, commands []uint32) {
 	b := c.b
 	cmdDepth := s.cmdDepth[:]
 	cmdBits := s.cmdBits[:]
-	litDepth := s.litDepth[:]
-	litBits := s.litBits[:]
 
 	s.resetHistograms()
 
@@ -546,11 +544,8 @@ func (c *twoPassCompressor) writeCommands(literals []byte, commands []uint32) {
 	// compiler can keep them in registers across iterations; the regular
 	// b.writeBits cannot avoid reloading b.bitOffset and re-deriving the
 	// buffer base on every call because writes into b.buf could alias the
-	// bitWriter fields. Literals are packed three at a time into a single
-	// write — the literal Huffman tree is built with a depth limit of 14
-	// (set in encodeHuffmanTree), so 3 codes total at most 42 bits, well
-	// within the 56-bit writeBits limit. This cuts the literal-stream
-	// writeBits call count by ~3x in the common case.
+	// bitWriter fields. writeLiteralBitsAt requires the 14-bit depth limit
+	// that encodeHuffmanTree applies to the literal Huffman tree.
 	bufBase := unsafe.Pointer(unsafe.SliceData(b.buf))
 	bitOffset := b.bitOffset
 	litIdx := 0
@@ -570,38 +565,8 @@ func (c *twoPassCompressor) writeCommands(literals []byte, commands []uint32) {
 		}
 		if code < 24 {
 			j := int(insertOffset[code]) + int(extra)
-			for j > 0 {
-				lit0 := literals[litIdx]
-				n0 := uint(litDepth[lit0])
-				v0 := uint64(litBits[lit0])
-				litIdx++
-				j--
-				if j == 0 {
-					p := (*uint64)(unsafe.Add(bufBase, bitOffset>>3))
-					*p = uint64(*(*byte)(unsafe.Pointer(p))) | v0<<(bitOffset&7)
-					bitOffset += n0
-					break
-				}
-				lit1 := literals[litIdx]
-				n1 := uint(litDepth[lit1])
-				v1 := uint64(litBits[lit1])
-				litIdx++
-				j--
-				if j == 0 {
-					p := (*uint64)(unsafe.Add(bufBase, bitOffset>>3))
-					*p = uint64(*(*byte)(unsafe.Pointer(p))) | (v0|v1<<n0)<<(bitOffset&7)
-					bitOffset += n0 + n1
-					break
-				}
-				lit2 := literals[litIdx]
-				n2 := uint(litDepth[lit2])
-				v2 := uint64(litBits[lit2])
-				litIdx++
-				j--
-				p := (*uint64)(unsafe.Add(bufBase, bitOffset>>3))
-				*p = uint64(*(*byte)(unsafe.Pointer(p))) | (v0|v1<<n0|v2<<(n0+n1))<<(bitOffset&7)
-				bitOffset += n0 + n1 + n2
-			}
+			bitOffset = writeLiteralBitsAt(b.buf, bitOffset, literals[litIdx:litIdx+j], &s.litDepth, &s.litBits)
+			litIdx += j
 		}
 	}
 	b.bitOffset = bitOffset
