@@ -174,10 +174,10 @@ func (c *twoPassCompressor) createCommands(
 	nextEmit := pos
 	lastDistance := -1
 	table := c.table
+	tbl := unsafe.Pointer(unsafe.SliceData(table))
 	const minMatch = 4
 	cmdPos := 0
 	litPos := 0
-	var nextHash uint32
 
 	if blockSize < inputMarginBytes {
 		goto encodeRemainder
@@ -191,44 +191,13 @@ func (c *twoPassCompressor) createCommands(
 		ipLimit := pos + lenLimit
 
 		ip++
-		nextHash = hashTwoPass4At(input, uint(ip), shift)
 
 		for {
-			// Step 1: Scan forward looking for a match. Skip bytes
-			// heuristically when no matches are found recently.
-			skip := uint32(32)
-			nextIP := ip
 			var candidate int
-
-			for {
-				hash := nextHash
-				bytesBetweenHashLookups := skip >> 5
-				skip++
-				ip = nextIP
-				nextIP = ip + int(bytesBetweenHashLookups)
-				if nextIP > ipLimit {
-					goto encodeRemainder
-				}
-				nextHash = hashTwoPass4At(input, uint(nextIP), shift)
-
-				candidate = ip - lastDistance
-				if candidate >= 0 && candidate < ip &&
-					isMatchTwoPass4At(input, uint(ip), uint(candidate)) {
-					table[hash] = uint32(ip)
-					if ip-candidate <= maxDistance {
-						break
-					}
-					continue
-				}
-
-				candidate = int(table[hash])
-				table[hash] = uint32(ip)
-				if isMatchTwoPass4At(input, uint(ip), uint(candidate)) {
-					if ip-candidate <= maxDistance {
-						break
-					}
-					continue
-				}
+			var found bool
+			ip, candidate, found = findMatchMinMatch4(input, tbl, ip, ipLimit, lastDistance, shift)
+			if !found {
+				goto encodeRemainder
 			}
 
 			// Step 2: Emit the found match together with the literal bytes from
@@ -324,7 +293,6 @@ func (c *twoPassCompressor) createCommands(
 			}
 
 			ip++
-			nextHash = hashTwoPass4At(input, uint(ip), shift)
 		}
 	} // close block scope for ipLimit, lenLimit
 
@@ -490,6 +458,44 @@ encodeRemainder:
 		litPos += insert
 	}
 	return cmdPos, litPos
+}
+
+// findMatchMinMatch4 returns the first valid 4-byte match at or after ip.
+// It returns false when the scan passes ipLimit.
+// A separate function keeps the scan state in registers.
+//
+//go:noinline
+func findMatchMinMatch4(input []byte, tbl unsafe.Pointer, ip, ipLimit, lastDistance int, shift uint) (matchIP, candidate int, found bool) {
+	nextHash := hashTwoPass4At(input, uint(ip), shift)
+	skip := uint32(32)
+	nextIP := ip
+	for {
+		hash := nextHash
+		ip = nextIP
+		nextIP = ip + int(skip>>5)
+		skip++
+		if nextIP > ipLimit {
+			return 0, 0, false
+		}
+		nextHash = hashTwoPass4At(input, uint(nextIP), shift)
+
+		slot := (*uint32)(unsafe.Add(tbl, uintptr(hash)*4))
+		candidate = ip - lastDistance
+		// The unsigned compare is candidate >= 0 && candidate < ip.
+		if uint(candidate) < uint(ip) && isMatchTwoPass4At(input, uint(ip), uint(candidate)) {
+			*slot = uint32(ip)
+			if ip-candidate <= maxDistance {
+				return ip, candidate, true
+			}
+			continue
+		}
+
+		candidate = int(*slot)
+		*slot = uint32(ip)
+		if isMatchTwoPass4At(input, uint(ip), uint(candidate)) && ip-candidate <= maxDistance {
+			return ip, candidate, true
+		}
+	}
 }
 
 // findMatchMinMatch6 returns the first valid 6-byte match at or after ip.
