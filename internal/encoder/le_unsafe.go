@@ -22,6 +22,14 @@ func loadU64LE(b []byte, i uint) uint64 {
 	return *(*uint64)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(b)), i))
 }
 
+// copy16 copies 16 bytes from src[s:] to dst[d:]. The caller checks the bounds.
+func copy16(dst []byte, d uint, src []byte, s uint) {
+	sp := unsafe.Add(unsafe.Pointer(unsafe.SliceData(src)), s)
+	dp := unsafe.Add(unsafe.Pointer(unsafe.SliceData(dst)), d)
+	*(*uint64)(dp) = *(*uint64)(sp)
+	*(*uint64)(unsafe.Add(dp, 8)) = *(*uint64)(unsafe.Add(sp, 8))
+}
+
 // writeBits packs value into the bitstream and advances the bit position.
 // Up to 56 bits may be written at a time.
 func (b *bitWriter) writeBits(nbits uint, value uint64) {
