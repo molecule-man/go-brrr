@@ -277,7 +277,6 @@ func (h *h6) findLongestMatch(
 					if bestScore < score {
 						bestScore = score
 						bestLen = ml
-						lim = ringLimit(ringBufferMask, curMasked, bestLen)
 						out.len = bestLen
 						out.distance = backward
 						out.score = bestScore

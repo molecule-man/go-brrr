@@ -742,10 +742,12 @@ func TestSizeHintedRingWrapMatchesCRef(t *testing.T) {
 	t.Parallel()
 
 	const lgwin = 19
-	var text []byte
-	for _, name := range []string{"plrabn12.txt", "lcet10.txt", "mapsdatazrh", "alice29.txt", "plrabn12.txt", "lcet10.txt"} {
-		text = append(text, readTestdata(t, filepath.Join("brotli-ref", "tests", "testdata", name))...)
+	names := []string{"plrabn12.txt", "lcet10.txt", "mapsdatazrh", "alice29.txt", "plrabn12.txt", "lcet10.txt"}
+	parts := make([][]byte, len(names))
+	for i, name := range names {
+		parts[i] = readTestdata(t, filepath.Join("brotli-ref", "tests", "testdata", name))
 	}
+	text := slices.Concat(parts...)
 	inputs := []struct {
 		name  string
 		input []byte
