@@ -340,7 +340,6 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 	tbl := unsafe.Pointer(unsafe.SliceData(c.table))
 	cmdPos := 0
 	litPos := 0
-	var nextHash uint32
 
 	if blockSize < inputMarginBytes {
 		goto encodeRemainder
@@ -354,48 +353,13 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 		ipLimit := pos + lenLimit
 
 		ip++
-		nextHash = uint32(((loadU64LE(input, uint(ip)) << 16) * hashMul32) >> (shift & 63))
 
 		for {
-			// Step 1: Scan forward looking for a match. Skip bytes
-			// heuristically when no matches are found recently.
-			skip := uint32(32)
-			nextIP := ip
 			var candidate int
-
-			for {
-				hash := nextHash
-				bytesBetweenHashLookups := skip >> 5
-				skip++
-				ip = nextIP
-				nextIP = ip + int(bytesBetweenHashLookups)
-				if nextIP > ipLimit {
-					goto encodeRemainder
-				}
-				nextHash = uint32(((loadU64LE(input, uint(nextIP)) << 16) * hashMul32) >> (shift & 63))
-				// Load again, not carried from the hash: one register less.
-				ipBytes := loadU64LE(input, uint(ip))
-
-				slot := (*uint32)(unsafe.Add(tbl, uintptr(hash)*4))
-				candidate = ip - lastDistance
-				// The unsigned compare is candidate >= 0 && candidate < ip.
-				if uint(candidate) < uint(ip) &&
-					(loadU64LE(input, uint(candidate))^ipBytes)<<16 == 0 {
-					*slot = uint32(ip)
-					if ip-candidate <= maxDistance {
-						break
-					}
-					continue
-				}
-
-				candidate = int(*slot)
-				*slot = uint32(ip)
-				if (loadU64LE(input, uint(candidate))^ipBytes)<<16 == 0 {
-					if ip-candidate <= maxDistance {
-						break
-					}
-					continue
-				}
+			var found bool
+			ip, candidate, found = findMatchMinMatch6(input, tbl, ip, ipLimit, lastDistance, shift)
+			if !found {
+				goto encodeRemainder
 			}
 
 			// Step 2: Emit the found match together with the literal bytes from
@@ -495,7 +459,6 @@ func (c *twoPassCompressor) createCommandsMinMatch6(
 			}
 
 			ip++
-			nextHash = uint32(((loadU64LE(input, uint(ip)) << 16) * hashMul32) >> (shift & 63))
 		}
 	} // close block scope for ipLimit, lenLimit
 
@@ -508,6 +471,48 @@ encodeRemainder:
 		litPos += insert
 	}
 	return cmdPos, litPos
+}
+
+// findMatchMinMatch6 returns the first valid 6-byte match at or after ip.
+// It returns false when the scan passes ipLimit.
+// A separate function keeps the scan state in registers.
+//
+//go:noinline
+func findMatchMinMatch6(input []byte, tbl unsafe.Pointer, ip, ipLimit, lastDistance int, shift uint) (matchIP, candidate int, found bool) {
+	nextLoad := loadU64LE(input, uint(ip))
+	nextHash := uint32(((nextLoad << 16) * hashMul32) >> (shift & 63))
+	skip := uint32(32)
+	nextIP := ip
+	for {
+		hash := nextHash
+		ipBytes := nextLoad
+		ip = nextIP
+		nextIP = ip + int(skip>>5)
+		skip++
+		if nextIP > ipLimit {
+			return 0, 0, false
+		}
+		nextLoad = loadU64LE(input, uint(nextIP))
+		nextHash = uint32(((nextLoad << 16) * hashMul32) >> (shift & 63))
+
+		slot := (*uint32)(unsafe.Add(tbl, uintptr(hash)*4))
+		candidate = ip - lastDistance
+		// The unsigned compare is candidate >= 0 && candidate < ip.
+		if uint(candidate) < uint(ip) &&
+			(loadU64LE(input, uint(candidate))^ipBytes)<<16 == 0 {
+			*slot = uint32(ip)
+			if ip-candidate <= maxDistance {
+				return ip, candidate, true
+			}
+			continue
+		}
+
+		candidate = int(*slot)
+		*slot = uint32(ip)
+		if (loadU64LE(input, uint(candidate))^ipBytes)<<16 == 0 && ip-candidate <= maxDistance {
+			return ip, candidate, true
+		}
+	}
 }
 
 // updateHashTableTwoPass updates the hash table with positions from the last

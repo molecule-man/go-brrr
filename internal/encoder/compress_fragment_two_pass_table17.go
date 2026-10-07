@@ -23,7 +23,6 @@ func (c *twoPassCompressor) createCommandsTable17(
 	tbl := unsafe.Pointer(unsafe.SliceData(c.table))
 	cmdPos := 0
 	litPos := 0
-	var nextHash uint32
 
 	if blockSize < inputMarginBytes {
 		goto encodeRemainder
@@ -37,48 +36,13 @@ func (c *twoPassCompressor) createCommandsTable17(
 		ipLimit := pos + lenLimit
 
 		ip++
-		nextHash = uint32(((loadU64LE(input, uint(ip)) << 16) * hashMul32) >> (shift & 63))
 
 		for {
-			// Step 1: Scan forward looking for a match. Skip bytes
-			// heuristically when no matches are found recently.
-			skip := uint32(32)
-			nextIP := ip
 			var candidate int
-
-			for {
-				hash := nextHash
-				bytesBetweenHashLookups := skip >> 5
-				skip++
-				ip = nextIP
-				nextIP = ip + int(bytesBetweenHashLookups)
-				if nextIP > ipLimit {
-					goto encodeRemainder
-				}
-				nextHash = uint32(((loadU64LE(input, uint(nextIP)) << 16) * hashMul32) >> (shift & 63))
-				// Load again, not carried from the hash: one register less.
-				ipBytes := loadU64LE(input, uint(ip))
-
-				slot := (*uint32)(unsafe.Add(tbl, uintptr(hash)*4))
-				candidate = ip - lastDistance
-				// The unsigned compare is candidate >= 0 && candidate < ip.
-				if uint(candidate) < uint(ip) &&
-					(loadU64LE(input, uint(candidate))^ipBytes)<<16 == 0 {
-					*slot = uint32(ip)
-					if ip-candidate <= maxDistance {
-						break
-					}
-					continue
-				}
-
-				candidate = int(*slot)
-				*slot = uint32(ip)
-				if (loadU64LE(input, uint(candidate))^ipBytes)<<16 == 0 {
-					if ip-candidate <= maxDistance {
-						break
-					}
-					continue
-				}
+			var found bool
+			ip, candidate, found = findMatchMinMatch6(input, tbl, ip, ipLimit, lastDistance, shift)
+			if !found {
+				goto encodeRemainder
 			}
 
 			// Step 2: Emit the found match together with the literal bytes from
@@ -178,7 +142,6 @@ func (c *twoPassCompressor) createCommandsTable17(
 			}
 
 			ip++
-			nextHash = uint32(((loadU64LE(input, uint(ip)) << 16) * hashMul32) >> (shift & 63))
 		}
 	} // close block scope for ipLimit, lenLimit
 
