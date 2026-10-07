@@ -174,7 +174,7 @@ func (c *twoPassCompressor) createCommands(
 	nextEmit := pos
 	lastDistance := -1
 	table := c.table
-	minMatch := c.minMatch
+	const minMatch = 4
 	cmdPos := 0
 	litPos := 0
 	var nextHash uint32
@@ -236,14 +236,26 @@ func (c *twoPassCompressor) createCommands(
 			// afterwards.
 			{
 				base := ip
-				matched := minMatch + matchLen(
-					input[candidate+minMatch:], input[ip+minMatch:], ipEnd-ip-minMatch)
+				matched := minMatch + matchLenAt(
+					input, uint(candidate+minMatch), uint(ip+minMatch), ipEnd-ip-minMatch)
 				distance := base - candidate
 				insert := base - nextEmit
 				ip += matched
 
-				cmdPos += encodeInsertLen(commands[cmdPos:], uint(insert), cmdHisto)
-				copy(literals[litPos:], input[nextEmit:nextEmit+insert])
+				if u := uint(insert); u < 130 {
+					cmd := insertLenCodeQ1Small[u]
+					commands[cmdPos] = cmd
+					cmdHisto[cmd&0x7F]++
+					cmdPos++
+				} else {
+					cmdPos += encodeInsertLen(commands[cmdPos:], u, cmdHisto)
+				}
+				// The scan margin makes the 16-byte source read safe.
+				if insert <= 16 && litPos+16 <= len(literals) {
+					copy16(literals, uint(litPos), input, uint(nextEmit))
+				} else {
+					copy(literals[litPos:], input[nextEmit:nextEmit+insert])
+				}
 				litPos += insert
 				if distance == lastDistance {
 					commands[cmdPos] = 64
@@ -253,7 +265,14 @@ func (c *twoPassCompressor) createCommands(
 					cmdPos += encodeDistance(commands[cmdPos:], uint(distance), cmdHisto)
 					lastDistance = distance
 				}
-				cmdPos += encodeCopyLenLastDistance(commands[cmdPos:], uint(matched), cmdHisto)
+				if cl := uint(matched); cl < 72 {
+					cmd := copyLenLastDistanceCodeQ1Small[cl]
+					commands[cmdPos] = cmd
+					cmdHisto[cmd&0x7F]++
+					cmdPos++
+				} else {
+					cmdPos += encodeCopyLenLastDistance(commands[cmdPos:], cl, cmdHisto)
+				}
 
 				nextEmit = ip
 				if ip >= ipLimit {
@@ -267,8 +286,8 @@ func (c *twoPassCompressor) createCommands(
 			for ip-candidate <= maxDistance &&
 				isMatchTwoPass4At(input, uint(ip), uint(candidate)) {
 				base := ip
-				matched := minMatch + matchLen(
-					input[candidate+minMatch:], input[ip+minMatch:], ipEnd-ip-minMatch)
+				matched := minMatch + matchLenAt(
+					input, uint(candidate+minMatch), uint(ip+minMatch), ipEnd-ip-minMatch)
 				ip += matched
 				lastDistance = base - candidate
 
