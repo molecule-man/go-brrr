@@ -100,7 +100,12 @@ func (c *twoPassCompressor) createCommandsTable17(
 				} else {
 					cmdPos += encodeInsertLen(commands[cmdPos:], u, cmdHisto)
 				}
-				copy(literals[litPos:], input[nextEmit:nextEmit+insert])
+				// The scan margin makes the 16-byte source read safe.
+				if insert <= 16 && litPos+16 <= len(literals) {
+					copy16(literals, uint(litPos), input, uint(nextEmit))
+				} else {
+					copy(literals[litPos:], input[nextEmit:nextEmit+insert])
+				}
 				litPos += insert
 				if distance == lastDistance {
 					commands[cmdPos] = 64

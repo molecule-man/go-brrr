@@ -27,6 +27,10 @@ func loadU64LE(b []byte, i uint) uint64 {
 		uint64(b[i+4])<<32 | uint64(b[i+5])<<40 | uint64(b[i+6])<<48 | uint64(b[i+7])<<56
 }
 
+func copy16(dst []byte, d uint, src []byte, s uint) {
+	copy(dst[d:d+16], src[s:s+16])
+}
+
 // writeBits packs value into the bitstream and advances the bit position.
 // Up to 56 bits may be written at a time.
 func (b *bitWriter) writeBits(nbits uint, value uint64) {
