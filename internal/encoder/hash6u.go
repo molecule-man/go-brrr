@@ -14,7 +14,7 @@ import "github.com/molecule-man/go-brrr/internal/core"
 // positions outside lazy match searches.
 const (
 	h6uBusyRatio  = 5
-	h6uBusyCalls  = 3
+	h6uBusyCalls  = 1
 	h6uSampleRate = 256
 )
 
