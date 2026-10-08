@@ -60,12 +60,6 @@ const reverseBitsWidth = 8
 // reverseBitsHigh is the highest bit in a reverseBitsWidth-wide field.
 const reverseBitsHigh = uint64(1) << (reverseBitsWidth - 1)
 
-// HuffmanCode is a single entry in a Huffman lookup table.
-type HuffmanCode struct {
-	Bits  byte
-	Value uint16
-}
-
 // SymbolList provides access to a uint16 slice with a base offset,
 // supporting the negative-index linked-list pattern used during Huffman table
 // construction.

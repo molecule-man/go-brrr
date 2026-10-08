@@ -307,7 +307,8 @@ func (d *PreparedDictionary) findCompoundMatch(
 		return
 	}
 	maxValidOffset := sourceSize - bestLen
-	curProbe := loadU32LE(data, curMasked+bestLen-3)
+	// Match the native byte order of the source probe.
+	curProbe := le32(loadU32LE(data, curMasked+bestLen-3))
 	// Hoist the per-iteration `offset + bestLen - 3` address computation by
 	// folding `bestLen - 3` into a base pointer over source. Inside the loop
 	// the probe load becomes a single `MOV` with `[srcProbeBase + offset*1]`
@@ -350,7 +351,7 @@ func (d *PreparedDictionary) findCompoundMatch(
 						}
 						maxValidOffset = sourceSize - bestLen
 						srcProbeBase = unsafe.Add(sourcePtr, bestLen-3)
-						curProbe = loadU32LE(data, curMasked+bestLen-3)
+						curProbe = le32(loadU32LE(data, curMasked+bestLen-3))
 					}
 				}
 			}

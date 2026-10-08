@@ -105,7 +105,7 @@ func (br *bitReader) checkInputAmountAndBits(n uint) bool {
 func (br *bitReader) fillBitWindow(nBits uint) {
 	_ = nBits // used for documentation; the 64-bit path handles up to 32
 	if br.bitPos < 32 {
-		br.val |= uint64(*(*uint32)(unsafe.Add(br.inputBase, br.pos))) << br.bitPos
+		br.val |= uint64(le32(*(*uint32)(unsafe.Add(br.inputBase, br.pos)))) << br.bitPos
 		br.bitPos += 32
 		br.pos += 4
 	}
