@@ -9,10 +9,10 @@ import (
 
 // h6FindInBucket runs phase 2 of h6 findLongestMatch. See the amd64 version.
 // This target does not prefetch next.
-func h6FindInBucket(h *h6, data unsafe.Pointer, keyTag, curMasked, mask,
-	minPrev, maxLength, bestLen, bestScore uint,
-	_ *h6Block,
-) (length, distance, score uint) {
+func h6FindInBucket(h *h6, data unsafe.Pointer, keyTag, cur, curMasked,
+	mask, minPrev, maxLength, bestLen, bestScore uint,
+	_ *h6Block, out *hasherSearchResult,
+) {
 	load32 := func(i uint) uint32 { return *(*uint32)(unsafe.Add(data, i)) }
 	key, tag := keyTag>>8&(h6BucketSize-1), uint8(keyTag)
 	block := &h.blocks[key]
@@ -28,9 +28,9 @@ func h6FindInBucket(h *h6, data unsafe.Pointer, keyTag, curMasked, mask,
 		matches &= uint32(1)<<stored - 1
 	}
 
-	score = bestScore
+	score := bestScore
 	if curMasked+bestLen > mask {
-		return length, distance, score
+		matches = 0
 	}
 	first4 := load32(curMasked)
 	curProbe := load32(curMasked + bestLen - 3)
@@ -50,14 +50,20 @@ func h6FindInBucket(h *h6, data unsafe.Pointer, keyTag, curMasked, mask,
 		// backward < window, so the mask gives cur-prevRaw.
 		backward := (curMasked - prevMasked) & mask
 		if s := backwardReferenceScore(ml, backward); s > score {
-			score, bestLen, length, distance = s, ml, ml, backward
+			score, bestLen = s, ml
+			out.len, out.distance, out.score = ml, backward, s
 			if curMasked+bestLen > mask {
 				break
 			}
 			curProbe = load32(curMasked + bestLen - 3)
 		}
 	}
-	return length, distance, score
+
+	// Store cur in slot n&15, the oldest entry, after the scan.
+	slot := n & h6BlockMask
+	block.pos[slot] = uint32(cur)
+	block.tags[slot] = tag
+	h.num[key]--
 }
 
 // matchLenUnsafe returns the number of equal bytes at data+a and data+b, at

@@ -3,9 +3,9 @@
 #include "go_asm.h"
 #include "textflag.h"
 
-// func h6FindInBucket(h *h6, data unsafe.Pointer, keyTag, curMasked, mask,
-//	minPrev, maxLength, bestLen, bestScore uint,
-//	next *h6Block) (length, distance, score uint)
+// func h6FindInBucket(h *h6, data unsafe.Pointer, keyTag, cur, curMasked,
+//	mask, minPrev, maxLength, bestLen, bestScore uint,
+//	next *h6Block, out *hasherSearchResult)
 //
 // Registers: SI data, DI positions of block, AX matches, R9 curMasked, R10 mask,
 // R11 first 4 bytes at cur, R12 bestScore, R13 bestLen, R14 probe at
@@ -13,8 +13,8 @@
 // costs store-buffer entries.
 // TZCNT runs as BSF on CPUs without BMI1. Both give the same result for a
 // non-zero input.
-TEXT ·h6FindInBucket(SB), NOSPLIT|NOFRAME, $0-104
-	MOVQ       next+72(FP), BX
+TEXT ·h6FindInBucket(SB), NOSPLIT|NOFRAME, $0-96
+	MOVQ       next+80(FP), BX
 	PREFETCHT0 (BX)
 	PREFETCHT0 76(BX)
 
@@ -55,11 +55,10 @@ TEXT ·h6FindInBucket(SB), NOSPLIT|NOFRAME, $0-104
 allstored:
 	ADDQ  $16, DI
 	MOVQ  data+8(FP), SI
-	MOVQ  curMasked+24(FP), R9
-	MOVQ  mask+32(FP), R10
-	MOVQ  bestLen+56(FP), R13
-	MOVQ  bestScore+64(FP), R12
-	MOVQ  R12, score+96(FP)
+	MOVQ  curMasked+32(FP), R9
+	MOVQ  mask+40(FP), R10
+	MOVQ  bestLen+64(FP), R13
+	MOVQ  bestScore+72(FP), R12
 	MOVL  (SI)(R9*1), R11
 	LEAQ  (R9)(R13*1), CX
 	CMPQ  CX, R10
@@ -74,7 +73,7 @@ loop:
 	ADDL   R15, CX
 	ANDL   $15, CX
 	MOVL   (DI)(CX*4), BX
-	CMPQ   BX, minPrev+40(FP)
+	CMPQ   BX, minPrev+48(FP)
 	JCS    done
 	ANDQ   R10, BX
 	LEAQ   (BX)(R13*1), CX
@@ -89,7 +88,7 @@ loop:
 	// CX and R8 move together, so R8-CX stays curMasked-prevMasked.
 	LEAQ 4(SI)(BX*1), CX
 	LEAQ 4(SI)(R9*1), R8
-	MOVQ maxLength+48(FP), BX
+	MOVQ maxLength+56(FP), BX
 	SUBQ $4, BX
 
 len8:
@@ -122,7 +121,7 @@ lentail:
 
 lendone:
 	// DX length, R8 backward. backward < window, so the mask gives cur-prevRaw.
-	MOVQ maxLength+48(FP), DX
+	MOVQ maxLength+56(FP), DX
 	SUBQ BX, DX
 	SUBQ CX, R8
 	ANDQ R10, R8
@@ -137,9 +136,10 @@ lendone:
 	JLS    next
 	MOVQ   BX, R12
 	MOVQ   DX, R13
-	MOVQ   DX, length+80(FP)
-	MOVQ   R8, distance+88(FP)
-	MOVQ   BX, score+96(FP)
+	MOVQ   out+88(FP), CX
+	MOVQ   DX, hasherSearchResult_len(CX)
+	MOVQ   R8, hasherSearchResult_distance(CX)
+	MOVQ   BX, hasherSearchResult_score(CX)
 	LEAQ   (R9)(R13*1), CX
 	CMPQ   CX, R10
 	JHI    done
@@ -151,4 +151,14 @@ next:
 	JNZ  loop
 
 done:
+	// Store cur in slot n&15, the oldest entry, after the scan.
+	LEAL    15(R15), CX
+	ANDL    $15, CX
+	MOVQ    cur+24(FP), BX
+	MOVL    BX, (DI)(CX*4)
+	MOVQ    keyTag+16(FP), BX
+	MOVB    BL, -16(DI)(CX*1)
+	SHRQ    $8, BX
+	MOVQ    h+0(FP), CX
+	DECW    h6_num(CX)(BX*2)
 	RET
