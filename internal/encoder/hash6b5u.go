@@ -120,18 +120,17 @@ func (h *h6b5u) stitchToPreviousBlock(numBytes, position uint, ringBuffer []byte
 //     bucket. Reject candidates with a 4-byte quick comparison, accept
 //     length >= 4.
 //  3. Static dictionary fallback: when neither phase produced a match,
-//     search the static dictionary with shallow=false (deep search).
+//     the caller searches the static dictionary with shallow=false
+//     (deep search).
 func (h *h6b5u) findLongestMatch(
 	data []byte, ringBufferMask uint,
 	distCache *[4]uint,
-	cur, maxLength, maxBackward, dictDistance uint,
-	dictNumLookups, dictNumMatches *uint,
+	cur, maxLength, maxBackward uint,
 	out *hasherSearchResult,
 ) {
 	if ringBufferMask >= uint(len(data)) {
 		h.findLongestMatchSmallBuf(data, ringBufferMask, distCache,
-			cur, maxLength, maxBackward, dictDistance,
-			dictNumLookups, dictNumMatches, out)
+			cur, maxLength, maxBackward, out)
 		return
 	}
 
@@ -144,17 +143,6 @@ func (h *h6b5u) findLongestMatch(
 	bestScore := out.score
 	bestLen := out.len
 	key := h.hash(data, curMasked)
-	bucket := h.bucketAt(key)
-
-	// Speculatively load from the next position's bucket to warm the cache.
-	nextKey := h.hash(data, (cur+1)&ringBufferMask)
-	nextBucket := h.bucketAt(nextKey)
-	nextN := h.num[nextKey]
-	h.nextBucket = nextBucket[0]
-	if nextN > 0 {
-		p := uint(nextBucket[(nextN-1)&h6b5BlockMask]) & ringBufferMask
-		h.nextBucket = uint32(data[p])
-	}
 
 	out.len = 0
 	out.lenCodeDelta = 0
@@ -168,7 +156,7 @@ func (h *h6b5u) findLongestMatch(
 	if backward-1 < maxBackward {
 		prev := (cur - backward) & ringBufferMask
 		if curByte == loadByte(data, prev+bestLen) && prev < lim {
-			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+			ml := uint(matchLenAt(data, prev, curMasked, int(maxLength)))
 			if ml >= 3 || ml == 2 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
 				if bestScore < score {
@@ -188,7 +176,7 @@ func (h *h6b5u) findLongestMatch(
 	if backward-1 < maxBackward {
 		prev := (cur - backward) & ringBufferMask
 		if curByte == loadByte(data, prev+bestLen) && prev < lim {
-			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+			ml := uint(matchLenAt(data, prev, curMasked, int(maxLength)))
 			if ml >= 3 || ml == 2 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
 				if bestScore < score {
@@ -211,7 +199,7 @@ func (h *h6b5u) findLongestMatch(
 	if backward-1 < maxBackward {
 		prev := (cur - backward) & ringBufferMask
 		if curByte == loadByte(data, prev+bestLen) && prev < lim {
-			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+			ml := uint(matchLenAt(data, prev, curMasked, int(maxLength)))
 			if ml >= 3 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
 				if bestScore < score {
@@ -234,7 +222,7 @@ func (h *h6b5u) findLongestMatch(
 	if backward-1 < maxBackward {
 		prev := (cur - backward) & ringBufferMask
 		if curByte == loadByte(data, prev+bestLen) && prev < lim {
-			ml := uint(matchLenAtNoInline(data, prev, curMasked, int(maxLength)))
+			ml := uint(matchLenAt(data, prev, curMasked, int(maxLength)))
 			if ml >= 3 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
 				if bestScore < score {
@@ -258,55 +246,12 @@ func (h *h6b5u) findLongestMatch(
 
 	// Phase 2: scan hash bucket entries.
 	// backward == 0 is impossible here: cur is stored after this scan.
-	n := h.num[key]
-	down := uint(0)
-	if uint(n) > h6b5BlockSize {
-		down = uint(n) - h6b5BlockSize
-	}
+	// Last action: no value is live after the call, so the function
+	// spills no registers.
 	minPrev := cur - maxBackward
-	first4 := loadU32LE(data, curMasked)
-	curProbe := loadU32LE(data, curMasked+bestLen-3)
-	if curMasked+bestLen > ringBufferMask {
-		down = uint(n)
-	}
-	for i := uint(n); i > down; {
-		i--
-		prevRaw := uint(bucket[i&h6b5BlockMask])
-		if prevRaw < minPrev {
-			break
-		}
-		prevMasked := prevRaw & ringBufferMask
-		if curProbe != loadU32LE(data, prevMasked+bestLen-3) || prevMasked+bestLen > ringBufferMask {
-			continue
-		}
-		if first4 != loadU32LE(data, prevMasked) {
-			continue
-		}
-		ml := 4 + uint(matchLenAtNoInline(data, prevMasked+4, curMasked+4, int(maxLength)-4))
-		backward := cur - prevRaw
-		score := backwardReferenceScore(ml, backward)
-		if bestScore < score {
-			bestScore = score
-			bestLen = ml
-			out.len = bestLen
-			out.distance = backward
-			out.score = bestScore
-			if curMasked+bestLen > ringBufferMask {
-				break
-			}
-			curProbe = loadU32LE(data, curMasked+bestLen-3)
-		}
-	}
-
-	// Store current position in the bucket.
-	bucket[h.num[key]&h6b5BlockMask] = uint32(cur)
-	h.num[key]++
-
-	// Phase 3: static dictionary fallback when no hash match was found.
-	if out.score == minScore {
-		searchStaticDictionaryDeep(data[curMasked:], maxLength, dictDistance, maxBackwardDistance,
-			dictNumLookups, dictNumMatches, out)
-	}
+	h6b5uFindInBucket(h, unsafe.Pointer(unsafe.SliceData(data)), uint(key),
+		cur, curMasked, ringBufferMask, minPrev, maxLength, bestLen, bestScore,
+		uint(h.hash(data, (cur+1)&ringBufferMask)), out)
 }
 
 // findLongestMatchSmallBuf is the generic version of findLongestMatch used
@@ -314,8 +259,7 @@ func (h *h6b5u) findLongestMatch(
 func (h *h6b5u) findLongestMatchSmallBuf(
 	data []byte, ringBufferMask uint,
 	distCache *[4]uint,
-	cur, maxLength, maxBackward, dictDistance uint,
-	dictNumLookups, dictNumMatches *uint,
+	cur, maxLength, maxBackward uint,
 	out *hasherSearchResult,
 ) {
 	curMasked := cur & ringBufferMask
@@ -419,12 +363,6 @@ func (h *h6b5u) findLongestMatchSmallBuf(
 	// Store current position in the bucket.
 	bucket[h.num[key]&h6b5BlockMask] = uint32(cur)
 	h.num[key]++
-
-	// Phase 3: static dictionary fallback when no hash match was found.
-	if out.score == minScore {
-		searchStaticDictionaryDeep(data[curMasked:], maxLength, dictDistance, maxBackwardDistance,
-			dictNumLookups, dictNumMatches, out)
-	}
 }
 
 // sampleRejects adds to h.rejects the bucket entries with another tag
@@ -529,9 +467,11 @@ func (h *h6b5u) createBackwardReferences(s *encodeState, bytes, wrappedPos uint3
 		if position%h6b5uSampleRate == 0 {
 			h.sampleRejects(data, mask, position&mask)
 		}
-		h.findLongestMatch(data, mask, distCache,
-			position, maxLength, maxDistance, maxDistance+gap,
-			&s.dictNumLookups, &s.dictNumMatches, &sr)
+		h.findLongestMatch(data, mask, distCache, position, maxLength, maxDistance, &sr)
+		if sr.score == minScore {
+			searchStaticDictionaryDeep(data[position&mask:], maxLength, maxDistance+gap, maxBackwardDistance,
+				&s.dictNumLookups, &s.dictNumMatches, &sr)
+		}
 		if hasCompound {
 			s.compound.lookupMatch(data, mask,
 				&s.distCache, position, maxLength,
@@ -547,9 +487,11 @@ func (h *h6b5u) createBackwardReferences(s *encodeState, bytes, wrappedPos uint3
 				sr2.score = minScore
 				maxDistance = min(position+1, maxBackwardLimit)
 
-				h.findLongestMatch(data, mask, distCache,
-					position+1, maxLength, maxDistance, maxDistance+gap,
-					&s.dictNumLookups, &s.dictNumMatches, &sr2)
+				h.findLongestMatch(data, mask, distCache, position+1, maxLength, maxDistance, &sr2)
+				if sr2.score == minScore {
+					searchStaticDictionaryDeep(data[(position+1)&mask:], maxLength, maxDistance+gap, maxBackwardDistance,
+						&s.dictNumLookups, &s.dictNumMatches, &sr2)
+				}
 				if hasCompound {
 					s.compound.lookupMatch(data, mask,
 						&s.distCache, position+1, maxLength,
@@ -659,9 +601,11 @@ func (h *h6b5u) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos
 		if position%h6b5uSampleRate == 0 {
 			h.sampleRejects(data, mask, position&mask)
 		}
-		h.findLongestMatchNoWrap(data, distCache,
-			position, maxLength, maxDistance, maxDistance+gap,
-			&s.dictNumLookups, &s.dictNumMatches, &sr)
+		h.findLongestMatchNoWrap(data, distCache, position, maxLength, maxDistance, &sr)
+		if sr.score == minScore {
+			searchStaticDictionaryDeep(data[position:], maxLength, maxDistance+gap, maxBackwardDistance,
+				&s.dictNumLookups, &s.dictNumMatches, &sr)
+		}
 		if hasCompound {
 			s.compound.lookupMatch(data, mask,
 				&s.distCache, position, maxLength,
@@ -677,9 +621,11 @@ func (h *h6b5u) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos
 				sr2.score = minScore
 				maxDistance = min(position+1, maxBackwardLimit)
 
-				h.findLongestMatchNoWrap(data, distCache,
-					position+1, maxLength, maxDistance, maxDistance+gap,
-					&s.dictNumLookups, &s.dictNumMatches, &sr2)
+				h.findLongestMatchNoWrap(data, distCache, position+1, maxLength, maxDistance, &sr2)
+				if sr2.score == minScore {
+					searchStaticDictionaryDeep(data[position+1:], maxLength, maxDistance+gap, maxBackwardDistance,
+						&s.dictNumLookups, &s.dictNumMatches, &sr2)
+				}
 				if hasCompound {
 					s.compound.lookupMatch(data, mask,
 						&s.distCache, position+1, maxLength,
@@ -756,27 +702,16 @@ func (h *h6b5u) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos
 
 // findLongestMatchNoWrap searches before the first ring wrap.
 // Current and stored positions fit within the ring, so the scan omits masks.
+// The caller runs the static dictionary fallback.
 func (h *h6b5u) findLongestMatchNoWrap(
 	data []byte,
 	distCache *[4]uint,
-	cur, maxLength, maxBackward, dictDistance uint,
-	dictNumLookups, dictNumMatches *uint,
+	cur, maxLength, maxBackward uint,
 	out *hasherSearchResult,
 ) {
 	bestScore := out.score
 	bestLen := out.len
 	key := h.hash(data, cur)
-	bucket := h.bucketAt(key)
-
-	// Speculatively load from the next position's bucket to warm the cache.
-	nextKey := h.hash(data, cur+1)
-	nextBucket := h.bucketAt(nextKey)
-	nextN := h.num[nextKey]
-	h.nextBucket = nextBucket[0]
-	if nextN > 0 {
-		p := uint(nextBucket[(nextN-1)&h6b5BlockMask])
-		h.nextBucket = uint32(data[p])
-	}
 
 	out.len = 0
 	out.lenCodeDelta = 0
@@ -787,7 +722,7 @@ func (h *h6b5u) findLongestMatchNoWrap(
 	if backward-1 < maxBackward {
 		prev := cur - backward
 		if loadByte(data, cur+bestLen) == loadByte(data, prev+bestLen) {
-			ml := uint(matchLenAtNoInline(data, prev, cur, int(maxLength)))
+			ml := uint(matchLenAt(data, prev, cur, int(maxLength)))
 			if ml >= 3 || ml == 2 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
 				if bestScore < score {
@@ -805,7 +740,7 @@ func (h *h6b5u) findLongestMatchNoWrap(
 	if backward-1 < maxBackward {
 		prev := cur - backward
 		if loadByte(data, cur+bestLen) == loadByte(data, prev+bestLen) {
-			ml := uint(matchLenAtNoInline(data, prev, cur, int(maxLength)))
+			ml := uint(matchLenAt(data, prev, cur, int(maxLength)))
 			if ml >= 3 || ml == 2 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
 				if bestScore < score {
@@ -826,7 +761,7 @@ func (h *h6b5u) findLongestMatchNoWrap(
 	if backward-1 < maxBackward {
 		prev := cur - backward
 		if loadByte(data, cur+bestLen) == loadByte(data, prev+bestLen) {
-			ml := uint(matchLenAtNoInline(data, prev, cur, int(maxLength)))
+			ml := uint(matchLenAt(data, prev, cur, int(maxLength)))
 			if ml >= 3 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
 				if bestScore < score {
@@ -847,7 +782,7 @@ func (h *h6b5u) findLongestMatchNoWrap(
 	if backward-1 < maxBackward {
 		prev := cur - backward
 		if loadByte(data, cur+bestLen) == loadByte(data, prev+bestLen) {
-			ml := uint(matchLenAtNoInline(data, prev, cur, int(maxLength)))
+			ml := uint(matchLenAt(data, prev, cur, int(maxLength)))
 			if ml >= 3 {
 				score := backwardReferenceScoreUsingLastDistance(ml)
 				if bestScore < score {
@@ -870,46 +805,10 @@ func (h *h6b5u) findLongestMatchNoWrap(
 	}
 
 	// Phase 2: scan hash bucket entries.
-	n := h.num[key]
-	down := uint(0)
-	if uint(n) > h6b5BlockSize {
-		down = uint(n) - h6b5BlockSize
-	}
+	// Last action: no value is live after the call, so the function
+	// spills no registers.
 	minPrev := cur - maxBackward
-	first4 := loadU32LE(data, cur)
-	curProbe := loadU32LE(data, cur+bestLen-3)
-	for i := uint(n); i > down; {
-		i--
-		prevRaw := uint(bucket[i&h6b5BlockMask])
-		if prevRaw < minPrev {
-			break
-		}
-		if curProbe != loadU32LE(data, prevRaw+bestLen-3) {
-			continue
-		}
-		if first4 != loadU32LE(data, prevRaw) {
-			continue
-		}
-		ml := 4 + uint(matchLenAtNoInline(data, prevRaw+4, cur+4, int(maxLength)-4))
-		backward := cur - prevRaw
-		score := backwardReferenceScore(ml, backward)
-		if bestScore < score {
-			bestScore = score
-			bestLen = ml
-			out.len = bestLen
-			out.distance = backward
-			out.score = bestScore
-			curProbe = loadU32LE(data, cur+bestLen-3)
-		}
-	}
-
-	// Store current position in the bucket.
-	bucket[h.num[key]&h6b5BlockMask] = uint32(cur)
-	h.num[key]++
-
-	// Phase 3: static dictionary fallback when no hash match was found.
-	if out.score == minScore {
-		searchStaticDictionaryDeep(data[cur:], maxLength, dictDistance, maxBackwardDistance,
-			dictNumLookups, dictNumMatches, out)
-	}
+	h6b5uFindInBucket(h, unsafe.Pointer(unsafe.SliceData(data)), uint(key),
+		cur, cur, ^uint(0), minPrev, maxLength, bestLen, bestScore,
+		uint(h.hash(data, cur+1)), out)
 }
