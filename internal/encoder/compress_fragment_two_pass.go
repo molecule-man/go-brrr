@@ -623,8 +623,8 @@ func (c *twoPassCompressor) writeCommands(literals []byte, commands []uint32) {
 		{
 			nbits := depth + numExtraBits[code]
 			value := uint64(cmdBits[code]) | extra<<depth
-			p := (*uint64)(unsafe.Add(bufBase, bitOffset>>3))
-			*p = uint64(*(*byte)(unsafe.Pointer(p))) | value<<(bitOffset&7)
+			p := unsafe.Add(bufBase, bitOffset>>3)
+			storeU64LEPtr(p, uint64(*(*byte)(p))|value<<(bitOffset&7))
 			bitOffset += nbits
 		}
 		if code < 24 {

@@ -1343,7 +1343,7 @@ func (s *decodeState) readSymbolCodeLengths(alphabetSize uint) decoderResult {
 				if brPos > br.fastEnd {
 					break
 				}
-				val |= uint64(*(*uint32)(unsafe.Add(inputBase, brPos))) << bitPos
+				val |= uint64(le32(*(*uint32)(unsafe.Add(inputBase, brPos)))) << bitPos
 				bitPos += 32
 				brPos += 4
 			}
@@ -1593,7 +1593,7 @@ commandBegin:
 	if br.checkInputAmountAndBits(huffmanTableBits) {
 		val, bitPos := br.val, br.bitPos
 		idx := val & huffmanTableMask
-		val |= *(*uint64)(unsafe.Add(br.inputBase, br.pos)) << (bitPos & 63)
+		val |= le64(*(*uint64)(unsafe.Add(br.inputBase, br.pos))) << (bitPos & 63)
 		br.pos += int((63 - bitPos) >> 3)
 		bitPos |= 56
 		// Decode the command inline to avoid a call and bounds checks.
@@ -1633,7 +1633,7 @@ commandBegin:
 			insertLenExtra = val & bitMask(insertBits)
 			val >>= insertBits & 63
 			bitPos -= insertBits
-			val |= *(*uint64)(unsafe.Add(br.inputBase, br.pos)) << (bitPos & 63)
+			val |= le64(*(*uint64)(unsafe.Add(br.inputBase, br.pos))) << (bitPos & 63)
 			br.pos += int((63 - bitPos) >> 3)
 			bitPos |= 56
 		}
@@ -1876,7 +1876,7 @@ commandPostDecodeLiterals:
 			val, bitPos := br.val, br.bitPos
 			// Load the root entry before the refill.
 			raw := distanceSymbolEntryFast(val, s.distanceHGroup.codes, s.distCodesOffset)
-			val |= *(*uint64)(unsafe.Add(br.inputBase, br.pos)) << (bitPos & 63)
+			val |= le64(*(*uint64)(unsafe.Add(br.inputBase, br.pos))) << (bitPos & 63)
 			br.pos += int((63 - bitPos) >> 3)
 			bitPos |= 56
 			drop := uint(raw & 0xFF)
@@ -2241,7 +2241,7 @@ func decodeLiteralsBatch(dst []byte, n int, table []core.HuffmanCode, br *bitRea
 
 	for j := range n {
 		if bitPos < core.HuffmanMaxCodeLength {
-			val |= *(*uint64)(unsafe.Add(inputBase, brPos)) << (bitPos & 63)
+			val |= le64(*(*uint64)(unsafe.Add(inputBase, brPos))) << (bitPos & 63)
 			brPos += int((63 - bitPos) >> 3)
 			bitPos |= 56
 		}
@@ -2291,7 +2291,7 @@ func decodeLiteralsContextBatch(
 	for n > 0 {
 		n--
 		if bitPos < core.HuffmanMaxCodeLength {
-			val |= *(*uint64)(unsafe.Add(inputBase, brPos)) << (bitPos & 63)
+			val |= le64(*(*uint64)(unsafe.Add(inputBase, brPos))) << (bitPos & 63)
 			brPos += int((63 - bitPos) >> 3)
 			bitPos |= 56
 		}
