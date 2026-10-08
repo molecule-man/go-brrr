@@ -180,17 +180,8 @@ func (h *h6) findLongestMatch(
 	bestLen := out.len
 	key, tag := h.hashTag(data, curMasked)
 	bucket := h.bucketAt(key)
-	// Bit j of matches: slot (head+j) has the same tag. Bit 0 is the newest entry.
 	n := h.num[key]
-	head := uint(n+1) & h6BlockMask
 	tags := h.tagsAt(key)
-	splat := uint64(tag) * 0x0101010101010101
-	matches := uint32(bits.RotateLeft16(uint16(tagEqualMask8(loadU64LE(tags[:], 0)^splat)|
-		tagEqualMask8(loadU64LE(tags[:], 8)^splat)<<8), -int(head)))
-	// Drop the slots that hold no entry yet.
-	if stored := 0xFFFF - n; stored < h6BlockSize {
-		matches &= uint32(1)<<stored - 1
-	}
 
 	out.len = 0
 	out.lenCodeDelta = 0
@@ -295,49 +286,18 @@ func (h *h6) findLongestMatch(
 	// Phase 2: scan the bucket entries whose tag matches, newest first.
 	// backward == 0 is impossible here: cur is stored after this scan.
 	minPrev := cur - maxBackward
-	first4 := loadU32LE(data, curMasked)
-	curProbe := loadU32LE(data, curMasked+bestLen-3)
-	if curMasked+bestLen > ringBufferMask {
-		matches = 0
-	}
-	for ; matches != 0; matches &= matches - 1 {
-		prevRaw := uint(bucket[(head+uint(bits.TrailingZeros32(matches)))&h6BlockMask])
-		if prevRaw < minPrev {
-			break
-		}
-		prevMasked := prevRaw & ringBufferMask
-		if curProbe != loadU32LE(data, prevMasked+bestLen-3) || prevMasked+bestLen > ringBufferMask {
-			continue
-		}
-
-		if first4 != loadU32LE(data, prevMasked) {
-			continue
-		}
-		ml := 4 + uint(matchLenAtNoInline(data, prevMasked+4, curMasked+4, int(maxLength)-4))
-		backward := cur - prevRaw
-		score := backwardReferenceScore(ml, backward)
-		if bestScore < score {
-			bestScore = score
-			bestLen = ml
-			out.len = bestLen
-			out.distance = backward
-			out.score = bestScore
-			if curMasked+bestLen > ringBufferMask {
-				break
-			}
-			curProbe = loadU32LE(data, curMasked+bestLen-3)
-		}
+	l, d, sc := h6FindInBucket(unsafe.Pointer(unsafe.SliceData(data)), &h.blocks[key&(h6BucketSize-1)], tag,
+		uint(n), cur, curMasked, ringBufferMask, minPrev, maxLength, bestLen, bestScore,
+		&h.blocks[h.hash(data, (cur+1)&ringBufferMask)])
+	if sc > bestScore {
+		out.len, out.distance, out.score = l, d, sc
 	}
 
 	// Store current position in the bucket.
-	slot := uint(h.num[key]) & h6BlockMask
+	slot := uint(n) & h6BlockMask
 	bucket[slot] = uint32(cur)
 	tags[slot] = tag
 	h.num[key]--
-	if hasPrefetch {
-		next := &h.blocks[h.hash(data, (cur+1)&ringBufferMask)]
-		prefetch2(unsafe.Pointer(&next.tags), unsafe.Pointer(&next.pos[h6BlockMask]))
-	}
 
 	// Phase 3: static dictionary fallback when no hash match was found.
 	if out.score == minScore {
@@ -732,17 +692,8 @@ func (h *h6) findLongestMatchNoWrap(
 	bestLen := out.len
 	key, tag := h.hashTag(data, cur)
 	bucket := h.bucketAt(key)
-	// Bit j of matches: slot (head+j) has the same tag. Bit 0 is the newest entry.
 	n := h.num[key]
-	head := uint(n+1) & h6BlockMask
 	tags := h.tagsAt(key)
-	splat := uint64(tag) * 0x0101010101010101
-	matches := uint32(bits.RotateLeft16(uint16(tagEqualMask8(loadU64LE(tags[:], 0)^splat)|
-		tagEqualMask8(loadU64LE(tags[:], 8)^splat)<<8), -int(head)))
-	// Drop the slots that hold no entry yet.
-	if stored := 0xFFFF - n; stored < h6BlockSize {
-		matches &= uint32(1)<<stored - 1
-	}
 
 	out.len = 0
 	out.lenCodeDelta = 0
@@ -837,42 +788,18 @@ func (h *h6) findLongestMatchNoWrap(
 
 	// Phase 2: scan the bucket entries whose tag matches, newest first.
 	minPrev := cur - maxBackward
-	first4 := loadU32LE(data, cur)
-	curProbe := loadU32LE(data, cur+bestLen-3)
-	for ; matches != 0; matches &= matches - 1 {
-		prevRaw := uint(bucket[(head+uint(bits.TrailingZeros32(matches)))&h6BlockMask])
-		if prevRaw < minPrev {
-			break
-		}
-		if curProbe != loadU32LE(data, prevRaw+bestLen-3) {
-			continue
-		}
-
-		if first4 != loadU32LE(data, prevRaw) {
-			continue
-		}
-		ml := 4 + uint(matchLenAtNoInline(data, prevRaw+4, cur+4, int(maxLength)-4))
-		backward := cur - prevRaw
-		score := backwardReferenceScore(ml, backward)
-		if bestScore < score {
-			bestScore = score
-			bestLen = ml
-			out.len = bestLen
-			out.distance = backward
-			out.score = bestScore
-			curProbe = loadU32LE(data, cur+bestLen-3)
-		}
+	l, d, sc := h6FindInBucket(unsafe.Pointer(unsafe.SliceData(data)), &h.blocks[key&(h6BucketSize-1)], tag,
+		uint(n), cur, cur, ^uint(0), minPrev, maxLength, bestLen, bestScore,
+		&h.blocks[h.hash(data, cur+1)])
+	if sc > bestScore {
+		out.len, out.distance, out.score = l, d, sc
 	}
 
 	// Store current position in the bucket.
-	slot := uint(h.num[key]) & h6BlockMask
+	slot := uint(n) & h6BlockMask
 	bucket[slot] = uint32(cur)
 	tags[slot] = tag
 	h.num[key]--
-	if hasPrefetch {
-		next := &h.blocks[h.hash(data, cur+1)]
-		prefetch2(unsafe.Pointer(&next.tags), unsafe.Pointer(&next.pos[h6BlockMask]))
-	}
 
 	// Phase 3: static dictionary fallback when no hash match was found.
 	if out.score == minScore {
