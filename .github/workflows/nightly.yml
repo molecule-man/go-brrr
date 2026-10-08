@@ -83,6 +83,35 @@ jobs:
           if-no-files-found: ignore
           retention-days: 90
 
+  big-endian:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GOTOOLCHAIN: local
+    strategy:
+      fail-fast: false
+      matrix:
+        tags: ["", "purego"]
+    name: test (s390x under qemu${{ matrix.tags && format(', {0}', matrix.tags) || '' }})
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install qemu and the s390x C toolchain
+        run: >
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends
+          qemu-user-static gcc-s390x-linux-gnu libc6-dev-s390x-cross
+
+      - name: Test
+        env:
+          TAGS: ${{ matrix.tags }}
+        run: scripts/test-s390x.sh
+
   race:
     runs-on: ubuntu-latest
     timeout-minutes: 30
