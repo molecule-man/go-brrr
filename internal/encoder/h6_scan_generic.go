@@ -7,13 +7,12 @@ import (
 	"unsafe"
 )
 
-// h6FindInBucket runs phase 2 of h6 findLongestMatch. See the amd64 version.
-// This target does not prefetch next.
+// h6FindInBucket scans matching tags newest first, then stores cur.
 func h6FindInBucket(h *h6, data unsafe.Pointer, keyTag, cur, curMasked,
 	mask, minPrev, maxLength, bestLen, bestScore uint,
 	_ *h6Block, out *hasherSearchResult,
 ) {
-	load32 := func(i uint) uint32 { return *(*uint32)(unsafe.Add(data, i)) }
+	load32 := func(i uint) uint32 { return loadU32LEPtr(unsafe.Add(data, i)) }
 	key, tag := keyTag>>8&(h6BucketSize-1), uint8(keyTag)
 	block := &h.blocks[key]
 	n := uint(h.num[key])
@@ -23,7 +22,7 @@ func h6FindInBucket(h *h6, data unsafe.Pointer, keyTag, cur, curMasked,
 	splat := uint64(tag) * 0x0101010101010101
 	matches := uint32(bits.RotateLeft16(uint16(tagEqualMask8(loadU64LE(block.tags[:], 0)^splat)|
 		tagEqualMask8(loadU64LE(block.tags[:], 8)^splat)<<8), -int(head)))
-	// Drop the slots that hold no entry yet.
+	// Mask the empty slots.
 	if stored := 0xFFFF - n; stored < h6BlockSize {
 		matches &= uint32(1)<<stored - 1
 	}
@@ -46,7 +45,19 @@ func h6FindInBucket(h *h6, data unsafe.Pointer, keyTag, cur, curMasked,
 		if first4 != load32(prevMasked) {
 			continue
 		}
-		ml := 4 + uint(matchLenUnsafe(data, prevMasked+4, curMasked+4, int(maxLength)-4))
+		// Keep this loop here: a helper exceeds the inline budget.
+		ml, limit := uint(4), maxLength
+		for ml+8 <= limit {
+			xor := loadU64LEPtr(unsafe.Add(data, prevMasked+ml)) ^ loadU64LEPtr(unsafe.Add(data, curMasked+ml))
+			if xor != 0 {
+				ml += uint(bits.TrailingZeros64(xor) / 8)
+				break
+			}
+			ml += 8
+		}
+		for ml < limit && *(*byte)(unsafe.Add(data, prevMasked+ml)) == *(*byte)(unsafe.Add(data, curMasked+ml)) {
+			ml++
+		}
 		// backward < window, so the mask gives cur-prevRaw.
 		backward := (curMasked - prevMasked) & mask
 		if s := backwardReferenceScore(ml, backward); s > score {
@@ -59,24 +70,22 @@ func h6FindInBucket(h *h6, data unsafe.Pointer, keyTag, cur, curMasked,
 		}
 	}
 
-	// Store cur in slot n&15, the oldest entry, after the scan.
+	// Store cur after the scan so its distance cannot be zero.
 	slot := n & h6BlockMask
 	block.pos[slot] = uint32(cur)
 	block.tags[slot] = tag
 	h.num[key]--
 }
 
-// matchLenUnsafe returns the number of equal bytes at data+a and data+b, at
-// most limit.
-func matchLenUnsafe(data unsafe.Pointer, a, b uint, limit int) int {
-	i := 0
-	for ; i <= limit-8; i += 8 {
-		xor := *(*uint64)(unsafe.Add(data, a+uint(i))) ^ *(*uint64)(unsafe.Add(data, b+uint(i)))
-		if xor != 0 {
-			return i + bits.TrailingZeros64(xor)/8
-		}
-	}
-	for ; i < limit && *(*byte)(unsafe.Add(data, a+uint(i))) == *(*byte)(unsafe.Add(data, b+uint(i))); i++ {
-	}
-	return i
+// loadU32LEPtr reads unaligned bytes in little-endian order.
+func loadU32LEPtr(p unsafe.Pointer) uint32 {
+	b := (*[4]byte)(p)
+	return uint32(b[0]) | uint32(b[1])<<8 | uint32(b[2])<<16 | uint32(b[3])<<24
+}
+
+// loadU64LEPtr reads unaligned bytes in little-endian order.
+func loadU64LEPtr(p unsafe.Pointer) uint64 {
+	b := (*[8]byte)(p)
+	return uint64(b[0]) | uint64(b[1])<<8 | uint64(b[2])<<16 | uint64(b[3])<<24 |
+		uint64(b[4])<<32 | uint64(b[5])<<40 | uint64(b[6])<<48 | uint64(b[7])<<56
 }

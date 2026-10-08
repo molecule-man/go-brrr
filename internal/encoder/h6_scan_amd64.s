@@ -7,10 +7,7 @@
 //	mask, minPrev, maxLength, bestLen, bestScore uint,
 //	next *h6Block, out *hasherSearchResult)
 //
-// Registers: SI data, DI positions of block, AX matches, R9 curMasked, R10 mask,
-// R11 first 4 bytes at cur, R12 bestScore, R13 bestLen, R14 probe at
-// cur+bestLen-3, R15 head. No frame and no stack locals: each stack store
-// costs store-buffer entries.
+// No stack frame or local spills: each store consumes a store-buffer entry.
 // TZCNT runs as BSF on CPUs without BMI1. Both give the same result for a
 // non-zero input.
 TEXT ·h6FindInBucket(SB), NOSPLIT|NOFRAME, $0-96
@@ -18,7 +15,6 @@ TEXT ·h6FindInBucket(SB), NOSPLIT|NOFRAME, $0-96
 	PREFETCHT0 (BX)
 	PREFETCHT0 76(BX)
 
-	// Block and n of the key.
 	MOVQ    h+0(FP), DI
 	MOVQ    keyTag+16(FP), CX
 	MOVBLZX CL, AX
@@ -42,7 +38,7 @@ TEXT ·h6FindInBucket(SB), NOSPLIT|NOFRAME, $0-96
 	RORW      CX, AX
 	MOVWLZX   AX, AX
 
-	// Drop the slots that hold no entry yet: 0xFFFF-n entries are stored.
+	// The bucket holds 0xFFFF-n entries. Mask the empty slots.
 	MOVL  $0xFFFF, CX
 	SUBL  DX, CX
 	CMPL  CX, $16
@@ -84,8 +80,7 @@ loop:
 	CMPL   (SI)(BX*1), R11
 	JNE    next
 
-	// Match length from byte 4. BX counts the bytes left to maxLength-4.
-	// CX and R8 move together, so R8-CX stays curMasked-prevMasked.
+	// Start at byte 4. BX counts the bytes left. R8-CX stays curMasked-prevMasked.
 	LEAQ 4(SI)(BX*1), CX
 	LEAQ 4(SI)(R9*1), R8
 	MOVQ maxLength+56(FP), BX
@@ -120,7 +115,7 @@ lentail:
 	JMP     lentail
 
 lendone:
-	// DX length, R8 backward. backward < window, so the mask gives cur-prevRaw.
+	// The distance fits in the window, so the mask gives cur-prevRaw.
 	MOVQ maxLength+56(FP), DX
 	SUBQ BX, DX
 	SUBQ CX, R8
@@ -151,7 +146,7 @@ next:
 	JNZ  loop
 
 done:
-	// Store cur in slot n&15, the oldest entry, after the scan.
+	// Store cur after the scan so its distance cannot be zero.
 	LEAL    15(R15), CX
 	ANDL    $15, CX
 	MOVQ    cur+24(FP), BX

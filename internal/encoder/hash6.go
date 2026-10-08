@@ -145,16 +145,15 @@ func (h *h6) stitchToPreviousBlock(numBytes, position uint, ringBuffer []byte, r
 // findLongestMatch searches for the best backward reference at position cur
 // in the ring buffer, then stores cur in the hash table.
 //
-// The search has three phases:
+// The search has two phases:
 //  1. Distance cache: try the last 4 cached distances (and 6 derived
 //     near-miss distances for the first two). Accept length >= 3, or
 //     length == 2 for the first two cache entries.
 //  2. Hash bucket scan: walk the up to 16 positions of the bucket whose
 //     tag matches, newest first. Reject candidates with a 4-byte quick
 //     comparison, accept length >= 4.
-//  3. Static dictionary fallback: when neither phase produced a match,
-//     the caller searches the static dictionary with shallow=false
-//     (deep search).
+//
+// The caller searches the static dictionary if neither phase finds a match.
 func (h *h6) findLongestMatch(
 	data []byte, ringBufferMask uint,
 	distCache *[4]uint,
@@ -282,8 +281,7 @@ func (h *h6) findLongestMatch(
 	// Phase 2: scan the bucket entries whose tag matches, newest first.
 	// backward == 0 is impossible here: cur is stored after this scan.
 	minPrev := cur - maxBackward
-	// Last action: no value is live after the call, so the function
-	// spills no registers.
+	// Keep this call last to avoid register spills.
 	h6FindInBucket(h, unsafe.Pointer(unsafe.SliceData(data)), uint(key)<<8|uint(tag),
 		cur, curMasked, ringBufferMask, minPrev, maxLength, bestLen, bestScore,
 		&h.blocks[h.hash(data, (cur+1)&ringBufferMask)], out)
@@ -665,7 +663,6 @@ func (h *h6) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos ui
 
 // findLongestMatchNoWrap searches before the first ring wrap.
 // Current and stored positions fit within the ring, so the scan omits masks.
-// The caller runs the static dictionary fallback.
 func (h *h6) findLongestMatchNoWrap(
 	data []byte,
 	distCache *[4]uint,
@@ -769,8 +766,7 @@ func (h *h6) findLongestMatchNoWrap(
 
 	// Phase 2: scan the bucket entries whose tag matches, newest first.
 	minPrev := cur - maxBackward
-	// Last action: no value is live after the call, so the function
-	// spills no registers.
+	// Keep this call last to avoid register spills.
 	h6FindInBucket(h, unsafe.Pointer(unsafe.SliceData(data)), uint(key)<<8|uint(tag),
 		cur, cur, ^uint(0), minPrev, maxLength, bestLen, bestScore,
 		&h.blocks[h.hash(data, cur+1)], out)
