@@ -286,8 +286,8 @@ func (h *h6) findLongestMatch(
 	// Phase 2: scan the bucket entries whose tag matches, newest first.
 	// backward == 0 is impossible here: cur is stored after this scan.
 	minPrev := cur - maxBackward
-	l, d, sc := h6FindInBucket(unsafe.Pointer(unsafe.SliceData(data)), &h.blocks[key&(h6BucketSize-1)], tag,
-		uint(n), cur, curMasked, ringBufferMask, minPrev, maxLength, bestLen, bestScore,
+	l, d, sc := h6FindInBucket(h, unsafe.Pointer(unsafe.SliceData(data)), uint(key)<<8|uint(tag),
+		curMasked, ringBufferMask, minPrev, maxLength, bestLen, bestScore,
 		&h.blocks[h.hash(data, (cur+1)&ringBufferMask)])
 	if sc > bestScore {
 		out.len, out.distance, out.score = l, d, sc
@@ -788,8 +788,8 @@ func (h *h6) findLongestMatchNoWrap(
 
 	// Phase 2: scan the bucket entries whose tag matches, newest first.
 	minPrev := cur - maxBackward
-	l, d, sc := h6FindInBucket(unsafe.Pointer(unsafe.SliceData(data)), &h.blocks[key&(h6BucketSize-1)], tag,
-		uint(n), cur, cur, ^uint(0), minPrev, maxLength, bestLen, bestScore,
+	l, d, sc := h6FindInBucket(h, unsafe.Pointer(unsafe.SliceData(data)), uint(key)<<8|uint(tag),
+		cur, ^uint(0), minPrev, maxLength, bestLen, bestScore,
 		&h.blocks[h.hash(data, cur+1)])
 	if sc > bestScore {
 		out.len, out.distance, out.score = l, d, sc

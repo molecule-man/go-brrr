@@ -9,11 +9,14 @@ import (
 
 // h6FindInBucket runs phase 2 of h6 findLongestMatch. See the amd64 version.
 // This target does not prefetch next.
-func h6FindInBucket(data unsafe.Pointer, block *h6Block, tag uint8,
-	n, cur, curMasked, mask, minPrev, maxLength, bestLen, bestScore uint,
+func h6FindInBucket(h *h6, data unsafe.Pointer, keyTag, curMasked, mask,
+	minPrev, maxLength, bestLen, bestScore uint,
 	_ *h6Block,
 ) (length, distance, score uint) {
 	load32 := func(i uint) uint32 { return *(*uint32)(unsafe.Add(data, i)) }
+	key, tag := keyTag>>8&(h6BucketSize-1), uint8(keyTag)
+	block := &h.blocks[key]
+	n := uint(h.num[key])
 
 	// Bit j of matches: slot (head+j) has the same tag. Bit 0 is the newest entry.
 	head := (n + 1) & h6BlockMask
@@ -44,7 +47,8 @@ func h6FindInBucket(data unsafe.Pointer, block *h6Block, tag uint8,
 			continue
 		}
 		ml := 4 + uint(matchLenUnsafe(data, prevMasked+4, curMasked+4, int(maxLength)-4))
-		backward := cur - prevRaw
+		// backward < window, so the mask gives cur-prevRaw.
+		backward := (curMasked - prevMasked) & mask
 		if s := backwardReferenceScore(ml, backward); s > score {
 			score, bestLen, length, distance = s, ml, ml, backward
 			if curMasked+bestLen > mask {

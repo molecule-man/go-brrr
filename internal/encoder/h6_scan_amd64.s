@@ -1,25 +1,34 @@
 //go:build amd64 && !purego
 
+#include "go_asm.h"
 #include "textflag.h"
 
-// func h6FindInBucket(data unsafe.Pointer, block *h6Block, tag uint8,
-//	n, cur, curMasked, mask, minPrev, maxLength, bestLen, bestScore uint,
+// func h6FindInBucket(h *h6, data unsafe.Pointer, keyTag, curMasked, mask,
+//	minPrev, maxLength, bestLen, bestScore uint,
 //	next *h6Block) (length, distance, score uint)
 //
 // Registers: SI data, DI positions of block, AX matches, R9 curMasked, R10 mask,
 // R11 first 4 bytes at cur, R12 bestScore, R13 bestLen, R14 probe at
-// cur+bestLen-3. 0(SP) holds prevRaw and 8(SP) matches during a match,
-// 16(SP) holds head.
+// cur+bestLen-3, R15 head. No frame and no stack locals: each stack store
+// costs store-buffer entries.
 // TZCNT runs as BSF on CPUs without BMI1. Both give the same result for a
 // non-zero input.
-TEXT ·h6FindInBucket(SB), NOSPLIT, $24-120
-	MOVQ       next+88(FP), BX
+TEXT ·h6FindInBucket(SB), NOSPLIT|NOFRAME, $0-104
+	MOVQ       next+72(FP), BX
 	PREFETCHT0 (BX)
 	PREFETCHT0 76(BX)
 
+	// Block and n of the key.
+	MOVQ    h+0(FP), DI
+	MOVQ    keyTag+16(FP), CX
+	MOVBLZX CL, AX
+	SHRQ    $8, CX
+	MOVWLZX h6_num(DI)(CX*2), DX
+	LEAQ    (CX)(CX*4), CX
+	SHLQ    $4, CX
+	LEAQ    h6_blocks(DI)(CX*1), DI
+
 	// Tag mask of the block, rotated so bit 0 is the newest slot.
-	MOVQ      block+8(FP), DI
-	MOVBLZX   tag+16(FP), AX
 	MOVD      AX, X0
 	PUNPCKLBW X0, X0
 	PSHUFLW   $0, X0, X0
@@ -27,10 +36,9 @@ TEXT ·h6FindInBucket(SB), NOSPLIT, $24-120
 	MOVOU     (DI), X1
 	PCMPEQB   X0, X1
 	PMOVMSKB  X1, AX
-	MOVQ      n+24(FP), DX
-	LEAL      1(DX), CX
-	ANDL      $15, CX
-	MOVQ      CX, 16(SP)
+	LEAL      1(DX), R15
+	ANDL      $15, R15
+	MOVL      R15, CX
 	RORW      CX, AX
 	MOVWLZX   AX, AX
 
@@ -45,94 +53,93 @@ TEXT ·h6FindInBucket(SB), NOSPLIT, $24-120
 	ANDL  DX, AX
 
 allstored:
-	ADDQ $16, DI
-	MOVQ data+0(FP), SI
-	MOVQ curMasked+40(FP), R9
-	MOVQ mask+48(FP), R10
-	MOVQ bestLen+72(FP), R13
-	MOVQ bestScore+80(FP), R12
-	MOVQ R12, score+112(FP)
-	MOVL (SI)(R9*1), R11
-	LEAQ (R9)(R13*1), CX
-	CMPQ CX, R10
-	JHI  done
-	MOVL -3(SI)(CX*1), R14
+	ADDQ  $16, DI
+	MOVQ  data+8(FP), SI
+	MOVQ  curMasked+24(FP), R9
+	MOVQ  mask+32(FP), R10
+	MOVQ  bestLen+56(FP), R13
+	MOVQ  bestScore+64(FP), R12
+	MOVQ  R12, score+96(FP)
+	MOVL  (SI)(R9*1), R11
+	LEAQ  (R9)(R13*1), CX
+	CMPQ  CX, R10
+	JHI   done
+	MOVL  -3(SI)(CX*1), R14
 	TESTL AX, AX
-	JZ   done
+	JZ    done
 
 loop:
 	XORL   CX, CX
 	TZCNTL AX, CX
-	ADDQ   16(SP), CX
+	ADDL   R15, CX
 	ANDL   $15, CX
 	MOVL   (DI)(CX*4), BX
-	CMPQ   BX, minPrev+56(FP)
+	CMPQ   BX, minPrev+40(FP)
 	JCS    done
-	MOVQ   BX, DX
-	ANDQ   R10, DX
-	LEAQ   (DX)(R13*1), CX
+	ANDQ   R10, BX
+	LEAQ   (BX)(R13*1), CX
 	CMPL   -3(SI)(CX*1), R14
 	JNE    next
 	CMPQ   CX, R10
 	JHI    next
-	CMPL   (SI)(DX*1), R11
+	CMPL   (SI)(BX*1), R11
 	JNE    next
 
-	// Match length from byte 4, limit maxLength-4.
-	MOVQ BX, 0(SP)
-	MOVL AX, 8(SP)
-	LEAQ 4(SI)(DX*1), CX
+	// Match length from byte 4. BX counts the bytes left to maxLength-4.
+	// CX and R8 move together, so R8-CX stays curMasked-prevMasked.
+	LEAQ 4(SI)(BX*1), CX
 	LEAQ 4(SI)(R9*1), R8
-	MOVQ maxLength+64(FP), DX
-	SUBQ $12, DX
-	XORL BX, BX
+	MOVQ maxLength+48(FP), BX
+	SUBQ $4, BX
 
 len8:
-	CMPQ BX, DX
-	JGT  lentail
-	MOVQ (CX)(BX*1), AX
-	XORQ (R8)(BX*1), AX
+	CMPQ BX, $8
+	JLT  lentail
+	MOVQ (CX), DX
+	XORQ (R8), DX
 	JNZ  lendiff
-	ADDQ $8, BX
+	ADDQ $8, CX
+	ADDQ $8, R8
+	SUBQ $8, BX
 	JMP  len8
 
 lendiff:
-	TZCNTQ AX, AX
-	SHRQ   $3, AX
-	ADDQ   AX, BX
+	TZCNTQ DX, DX
+	SHRQ   $3, DX
+	SUBQ   DX, BX
 	JMP    lendone
 
 lentail:
-	ADDQ $8, DX
-
-lentailloop:
-	CMPQ    BX, DX
-	JGE     lendone
-	MOVBLZX (CX)(BX*1), AX
-	CMPB    AL, (R8)(BX*1)
+	CMPQ    BX, $0
+	JLE     lendone
+	MOVBLZX (CX), DX
+	CMPB    DL, (R8)
 	JNE     lendone
-	INCQ    BX
-	JMP     lentailloop
+	INCQ    CX
+	INCQ    R8
+	DECQ    BX
+	JMP     lentail
 
 lendone:
-	ADDQ $4, BX
+	// DX length, R8 backward. backward < window, so the mask gives cur-prevRaw.
+	MOVQ maxLength+48(FP), DX
+	SUBQ BX, DX
+	SUBQ CX, R8
+	ANDQ R10, R8
 
 	// score = 1920 + 135*len - 30*floor(log2(backward)); backward > 0.
-	MOVQ   cur+32(FP), CX
-	SUBQ   0(SP), CX
-	BSRQ   CX, DX
-	IMUL3Q $30, DX, DX
-	IMUL3Q $135, BX, R8
-	ADDQ   $1920, R8
-	SUBQ   DX, R8
-	MOVL   8(SP), AX
-	CMPQ   R8, R12
+	BSRQ   R8, CX
+	IMUL3Q $30, CX, CX
+	IMUL3Q $135, DX, BX
+	ADDQ   $1920, BX
+	SUBQ   CX, BX
+	CMPQ   BX, R12
 	JLS    next
-	MOVQ   R8, R12
-	MOVQ   BX, R13
-	MOVQ   BX, length+96(FP)
-	MOVQ   CX, distance+104(FP)
-	MOVQ   R8, score+112(FP)
+	MOVQ   BX, R12
+	MOVQ   DX, R13
+	MOVQ   DX, length+80(FP)
+	MOVQ   R8, distance+88(FP)
+	MOVQ   BX, score+96(FP)
 	LEAQ   (R9)(R13*1), CX
 	CMPQ   CX, R10
 	JHI    done
