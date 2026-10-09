@@ -136,8 +136,9 @@ func (h *h2) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 			curMasked := position & mask
 			// sr.len == 0 at entry → bestLenIn == 0; guardByte is the byte at
 			// curMasked, and match-tail checks use prev+0.
-			guardByte := loadByte(data, curMasked)
-			key := hashBytes(data, curMasked)
+			curWord := loadU64LE(data, curMasked)
+			guardByte := byte(curWord)
+			key := uint32((curWord * hashMul64Shifted) >> (64 - bucketBits))
 			bestScore := sr.score // minScore
 
 			lastDistanceHit := false
@@ -146,7 +147,13 @@ func (h *h2) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 				if prev < position {
 					prev &= mask
 					if guardByte == loadByte(data, prev) {
-						length := matchLenAt(data, prev, curMasked, int(maxLength))
+						length := 0
+						xor := loadU64LE(data, prev) ^ curWord
+						if xor != 0 {
+							length = bits.TrailingZeros64(xor) / 8
+						} else {
+							length = 8 + matchLenAt(data, prev+8, curMasked+8, int(maxLength)-8)
+						}
 						if length >= 4 {
 							score := backwardReferenceScoreUsingLastDistance(uint(length))
 							if bestScore < score {
@@ -169,7 +176,13 @@ func (h *h2) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 				prev &= mask
 				if guardByte == loadByte(data, prev) && backward != 0 && backward <= maxDistance {
 					dictEligible = true
-					length := matchLenAt(data, prev, curMasked, int(maxLength))
+					length := 0
+					xor := loadU64LE(data, prev) ^ curWord
+					if xor != 0 {
+						length = bits.TrailingZeros64(xor) / 8
+					} else {
+						length = 8 + matchLenAt(data, prev+8, curMasked+8, int(maxLength)-8)
+					}
 					if length >= 4 {
 						score := backwardReferenceScore(uint(length), backward)
 						if bestScore < score {
@@ -214,7 +227,8 @@ func (h *h2) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 					curMasked := cur2 & mask
 					bestLen := sr2.len
 					guardByte := loadByte(data, curMasked+bestLen)
-					key := hashBytes(data, curMasked)
+					curWord := loadU64LE(data, curMasked)
+					key := uint32((curWord * hashMul64Shifted) >> (64 - bucketBits))
 					bestScore := sr2.score // minScore
 
 					lastDistanceHit := false
@@ -223,7 +237,13 @@ func (h *h2) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 						if prev < cur2 {
 							prev &= mask
 							if guardByte == loadByte(data, prev+bestLen) {
-								length := matchLenAt(data, prev, curMasked, int(maxLength))
+								length := 0
+								xor := loadU64LE(data, prev) ^ curWord
+								if xor != 0 {
+									length = bits.TrailingZeros64(xor) / 8
+								} else {
+									length = 8 + matchLenAt(data, prev+8, curMasked+8, int(maxLength)-8)
+								}
 								if length >= 4 {
 									score := backwardReferenceScoreUsingLastDistance(uint(length))
 									if bestScore < score {
@@ -245,7 +265,13 @@ func (h *h2) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 						prev &= mask
 						if guardByte == loadByte(data, prev+bestLen) && backward != 0 && backward <= maxDistance {
 							dictEligible2 = true
-							length := matchLenAt(data, prev, curMasked, int(maxLength))
+							length := 0
+							xor := loadU64LE(data, prev) ^ curWord
+							if xor != 0 {
+								length = bits.TrailingZeros64(xor) / 8
+							} else {
+								length = 8 + matchLenAt(data, prev+8, curMasked+8, int(maxLength)-8)
+							}
 							if length >= 4 {
 								score := backwardReferenceScore(uint(length), backward)
 								if bestScore < score {
