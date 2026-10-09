@@ -4,8 +4,8 @@ package encoder
 
 import "unsafe"
 
-// h6b5uFindInBucket scans the bucket of key newest first and stores cur. It
-// prefetches the bucket of nextKey and the data at its newest entry.
+// h6b5uFindInBucket scans the bucket of key from newest to oldest, then stores cur.
+// It prefetches the bucket of nextKey and data at slot (num[nextKey]-1)&31.
 // It updates out only when the score exceeds bestScore.
 // Before the first wrap, mask is ^uint(0).
 //

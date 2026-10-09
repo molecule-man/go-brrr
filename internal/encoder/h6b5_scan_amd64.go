@@ -4,7 +4,8 @@ package encoder
 
 import "unsafe"
 
-// h6b5FindInBucket scans matching tags newest first, stores cur, and prefetches next.
+// h6b5FindInBucket scans matching tags from newest to oldest, then stores cur.
+// It prefetches next.
 // It updates out only when the score exceeds bestScore.
 // keyTag packs the bucket key above the tag. Before the first wrap, mask is ^uint(0).
 //

@@ -7,12 +7,10 @@
 //	mask, minPrev, maxLength, bestLen, bestScore uint,
 //	nextKey uint, out *hasherSearchResult)
 //
-// No stack frame or local spills: each store consumes a store-buffer entry.
-// TZCNT runs as BSF on CPUs without BMI1. Both give the same result for a
-// non-zero input.
+// No local spills: each store consumes a store-buffer entry.
+// TZCNT acts as BSF on CPUs without BMI1. Both give the same result for nonzero input.
 TEXT ·h6b5uFindInBucket(SB), NOSPLIT|NOFRAME, $0-96
-	// Prefetch the bucket row of the next position and the data at its
-	// newest entry.
+	// Prefetch the next bucket and data at slot (num[nextKey]-1)&31.
 	MOVQ       h+0(FP), DI
 	MOVQ       nextKey+80(FP), CX
 	MOVWLZX    h6b5u_num(DI)(CX*2), DX

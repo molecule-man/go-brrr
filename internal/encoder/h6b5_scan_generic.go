@@ -7,11 +7,14 @@ import (
 	"unsafe"
 )
 
-// h6b5FindInBucket scans matching tags newest first, then stores cur.
+// h6b5FindInBucket scans matching tags from newest to oldest, then stores cur.
 func h6b5FindInBucket(h *h6b5, data unsafe.Pointer, keyTag, cur, curMasked,
 	mask, minPrev, maxLength, bestLen, bestScore uint,
-	_ *h6b5Block, out *hasherSearchResult,
+	next *h6b5Block, out *hasherSearchResult,
 ) {
+	// This target has no prefetch. Load the next block to warm the cache.
+	h.nextWarm = uint32(next.tags[0]) + next.pos[16]
+
 	load32 := func(i uint) uint32 { return loadU32LEPtr(unsafe.Add(data, i)) }
 	key, tag := keyTag>>8&(h6b5BucketSize-1), uint8(keyTag)
 	block := &h.blocks[key]

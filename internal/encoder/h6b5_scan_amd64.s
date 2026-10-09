@@ -7,9 +7,8 @@
 //	mask, minPrev, maxLength, bestLen, bestScore uint,
 //	next *h6b5Block, out *hasherSearchResult)
 //
-// No stack frame or local spills: each store consumes a store-buffer entry.
-// TZCNT runs as BSF on CPUs without BMI1. Both give the same result for a
-// non-zero input.
+// No local spills: each store consumes a store-buffer entry.
+// TZCNT acts as BSF on CPUs without BMI1. Both give the same result for nonzero input.
 TEXT ·h6b5FindInBucket(SB), NOSPLIT|NOFRAME, $0-96
 	MOVQ       next+80(FP), BX
 	PREFETCHT0 (BX)
@@ -42,7 +41,7 @@ TEXT ·h6b5FindInBucket(SB), NOSPLIT|NOFRAME, $0-96
 	MOVL      R15, CX
 	RORL      CX, AX
 
-	// The bucket holds 0xFFFF-n entries. Mask the empty slots.
+	// Mask empty slots before the bucket fills.
 	MOVL  $0xFFFF, CX
 	SUBL  DX, CX
 	CMPL  CX, $32

@@ -112,16 +112,15 @@ func (h *h6b5u) stitchToPreviousBlock(numBytes, position uint, ringBuffer []byte
 // findLongestMatch searches for the best backward reference at position cur
 // in the ring buffer, then stores cur in the hash table.
 //
-// The search has three phases:
+// The search has two phases:
 //  1. Distance cache: try the last 4 cached distances (and 6 derived
 //     near-miss distances for the first two). Accept length >= 3, or
 //     length == 2 for the first two cache entries.
 //  2. Hash bucket scan: walk the ring buffer of up to 32 positions for the
 //     bucket. Reject candidates with a 4-byte quick comparison, accept
 //     length >= 4.
-//  3. Static dictionary fallback: when neither phase produced a match,
-//     the caller searches the static dictionary with shallow=false
-//     (deep search).
+//
+// The caller searches the static dictionary if neither phase finds a match.
 func (h *h6b5u) findLongestMatch(
 	data []byte, ringBufferMask uint,
 	distCache *[4]uint,
@@ -246,8 +245,7 @@ func (h *h6b5u) findLongestMatch(
 
 	// Phase 2: scan hash bucket entries.
 	// backward == 0 is impossible here: cur is stored after this scan.
-	// Last action: no value is live after the call, so the function
-	// spills no registers.
+	// Keep the scan last so no values remain live across the call.
 	minPrev := cur - maxBackward
 	h6b5uFindInBucket(h, unsafe.Pointer(unsafe.SliceData(data)), uint(key),
 		cur, curMasked, ringBufferMask, minPrev, maxLength, bestLen, bestScore,
@@ -702,7 +700,7 @@ func (h *h6b5u) createBackwardReferencesNoWrap(s *encodeState, bytes, wrappedPos
 
 // findLongestMatchNoWrap searches before the first ring wrap.
 // Current and stored positions fit within the ring, so the scan omits masks.
-// The caller runs the static dictionary fallback.
+// The caller searches the static dictionary if this search finds no match.
 func (h *h6b5u) findLongestMatchNoWrap(
 	data []byte,
 	distCache *[4]uint,
@@ -805,8 +803,7 @@ func (h *h6b5u) findLongestMatchNoWrap(
 	}
 
 	// Phase 2: scan hash bucket entries.
-	// Last action: no value is live after the call, so the function
-	// spills no registers.
+	// Keep the scan last so no values remain live across the call.
 	minPrev := cur - maxBackward
 	h6b5uFindInBucket(h, unsafe.Pointer(unsafe.SliceData(data)), uint(key),
 		cur, cur, ^uint(0), minPrev, maxLength, bestLen, bestScore,
