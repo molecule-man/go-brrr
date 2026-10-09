@@ -117,7 +117,6 @@ func (h *h2) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 	const directStoreRangeMinBytes = 4096
 	directStoreRange := bytes >= directStoreRangeMinBytes
 
-	warm := uint32(0)
 	for position+hashTypeLength < posEnd {
 		maxLength := posEnd - position
 		maxDistance := min(position, maxBackwardLimit)
@@ -141,13 +140,6 @@ func (h *h2) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 			guardByte := byte(curWord)
 			key := uint32((curWord * hashMul64Shifted) >> (64 - bucketBits))
 			bestScore := sr.score // minScore
-			{
-				// Warm the candidate data of position+1 and the bucket of position+2.
-				key1 := uint32(((curWord >> 8) * hashMul64Shifted) >> (64 - bucketBits))
-				key2 := uint32(((curWord >> 16) * hashMul64Shifted) >> (64 - bucketBits))
-				prev1 := uint(buckets[key1]) & mask
-				warm += uint32(loadByte(data, prev1)) + buckets[key2]
-			}
 
 			lastDistanceHit := false
 			{
@@ -412,7 +404,6 @@ func (h *h2) createBackwardReferences(s *encodeState, bytes, wrappedPos uint32) 
 		}
 	}
 
-	h.nextBucket += warm
 	insertLength += posEnd - position
 	s.lastInsertLen = insertLength
 	s.numCommands += uint(len(s.commands)) - origCmdCount
