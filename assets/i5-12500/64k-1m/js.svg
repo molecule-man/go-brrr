@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"  standalone="no"?>
-<svg  onload="if (typeof(gnuplot_svg)!='undefined') gnuplot_svg.Init(evt)"
+<svg
  width="600" height="600"
  viewBox="0 0 600 600"
  xmlns="http://www.w3.org/2000/svg"
@@ -9,881 +9,9 @@
 <title>Gnuplot</title>
 <desc>Produced by GNUPLOT 6.0 patchlevel 5 </desc>
 
-<script type="text/javascript" > <![CDATA[
-// From:	Marko Karjalainen <markokarjalainen@kolumbus.fi>
-// Date:	27 Aug 2018
-// Experimental gnuplot plugin for svg
-//
-// All svg elements on page get own gnuplot plugin attached by js, so no conflict with global variables.
-//
-// Javascript variables are read from second script tag and converted to json for import to plugin.
-// Inline events are removed from xml and new ones are attached with addEventListener function.
-// Inline events should be removed from xml and xml should have better id/class names to attach events from js.
-//
-// Improved mouseover text and image handling
-//   content changed to xml only if it really changed and bouncing is calculated once.
-//
-// Convert functions are same as before, maybe renamed better.
-//
-// Javascript routines for mouse and keyboard interaction with
-// SVG documents produced by gnuplot SVG terminal driver.
+<g id="gnuplot_canvas">
 
-// TODO do not create inline events to svg and give id or classes for getting elements
-// TODO make own svg layer x/y range sized for coordinates?
-
-if (window) {
-    window.addEventListener('load', function () {
-        // Find svg elements
-        var svg = document.querySelectorAll('svg');
-        for (var i = 0; i < svg.length; i++) {
-            // Init plugin
-            if (!svg[i].gnuplot) {
-                // Check if gnuplot generated svg
-                if(svg[i].getElementById('gnuplot_canvas')){
-                    svg[i].gnuplot = new gnuplot_svg(svg[i]);
-                }
-            }
-        }
-    });
-}
-
-gnuplot_svg = function (svgElement) {
-
-    var version = '17 February 2025';
-
-    var settings = {};
-
-    var viewBoxResetValue = [];
-
-    var drag = {
-        'enabled': false,
-        'offset': { 'x': 0, 'y': 0 },
-        'change': svgElement.createSVGPoint(),
-        'timeout': null
-    };
-
-    var coordinateText = {
-        'enabled': false,
-        'element': svgElement.getElementById('coord_text')
-    };
-
-    var popoverContainer = {
-        'element': null,
-        'content': null,
-    };
-
-    var popoverImage = {
-        'element': null,
-        'content': null,
-        'width': 300,
-        'height': 200,
-        'defaultWidth': 300,
-        'defaultHeight': 200,
-    };
-
-    var popoverText = {
-        'element': null,
-        'content': null,
-        'width': 11,
-        'height': 16,
-        'defaultWidth': 11,
-        'defaultHeight': 16,
-    };
-
-    var point = svgElement.createSVGPoint();
-
-    var axisDate = new Date();
-
-    var gridEnabled = false;
-
-    // Get plot boundaries and axis scaling information for mousing from current object script tag
-    // TODO add these to svg xml custom attribute for reading(json format)
-    var parseSettings = function () {
-        var script = svgElement.querySelectorAll('script');
-        if (script && script[1]) {
-            // Chrome may break the original CDATA section into more than one piece,
-            // which will lead to failure if we don't combine them back into a single section.
-            var scriptText = script[1].innerHTML.replaceAll("<!\[CDATA\[", "").replaceAll("\]\]>", "")
-            // Remove inline comments
-            scriptText = scriptText.replace(/^\s*\/\/.*\n/g, '');
-            // Change prefix to "
-            scriptText = scriptText.replace(/gnuplot_svg\./g, '"');
-            // Change = to " :
-            scriptText = scriptText.replace(/ = /g, '" : ');
-            // Change line endings to comma
-            scriptText = scriptText.replace(/;\n|\n/g, ',');
-            // Remove last comma
-            scriptText = scriptText.replace(/,+$/, '');
-            // Parse as json string
-            settings = JSON.parse("{\n" + scriptText + "\n}");
-        }
-    };
-
-    // Add interactive events
-    var addEvents = function () {
-        var i;
-
-        // Get keyentry elements
-        var toggleVisibility = svgElement.querySelectorAll('g[id$="_keyentry"]');
-        for (i = 0; i < toggleVisibility.length; i++) {
-            // ------- Remove inline events
-            toggleVisibility[i].removeAttribute('onclick');
-            // -------
-
-            // Add keyentry event to toggle visibility
-            toggleVisibility[i].addEventListener('click', key.bind(null, toggleVisibility[i].getAttribute('id'), null));
-        }
-
-        // ------- Remove inline events from bounding box
-        var boundingBox = svgElement.querySelector('rect[onclick^="gnuplot_svg.toggleCoordBox"]');
-        if (boundingBox) {
-            boundingBox.removeAttribute('onclick');
-            boundingBox.removeAttribute('onmousemove');
-        }
-        // ------- Remove inline events from canvas
-        var canvas = svgElement.getElementById('gnuplot_canvas');
-        if (canvas) {
-            canvas.removeAttribute('onclick');
-            canvas.removeAttribute('onmousemove');
-        }
-        // -------
-
-        // Get grid image
-        var toggleGrid = svgElement.querySelector('image[onclick^="gnuplot_svg.toggleGrid"]');
-        if (toggleGrid) {
-            // ------- Remove inline events
-            toggleGrid.removeAttribute('onclick');
-            // -------
-
-            // Add Toggle grid image event
-            toggleGrid.addEventListener('click', function (evt) {
-                grid();
-                evt.preventDefault();
-                evt.stopPropagation();
-            });
-        }
-
-        // Get hypertexts
-        var hyperText = svgElement.querySelectorAll('g[onmousemove^="gnuplot_svg.showHypertext"]');
-
-        // Set view element variables
-        if (hyperText.length) {
-            popoverContainer.element = svgElement.getElementById('hypertextbox');
-            popoverText.element = svgElement.getElementById('hypertext');
-            popoverImage.element = svgElement.getElementById('hyperimage');
-            popoverImage.defaultWidth = popoverImage.element.getAttribute('width');
-            popoverImage.defaultHeight = popoverImage.element.getAttribute('height');
-        }
-
-        for (i = 0; i < hyperText.length; i++) {
-            // Get text from attr uggly way, svg has empty title element
-            var text = hyperText[i].getAttribute('onmousemove').substr(31).slice(0, -2);
-
-            // ------- Remove inline events
-            hyperText[i].removeAttribute('onmousemove');
-            hyperText[i].removeAttribute('onmouseout');
-            // -------
-
-            // Add event
-            hyperText[i].addEventListener('mousemove', popover.bind(null, text, true));
-            hyperText[i].addEventListener('mouseout', popover.bind(null, null, false));
-        }
-
-        // Toggle coordinates visibility on left click on boundingBox element
-        svgElement.addEventListener('click', function (evt) {
-            if (!drag.enabled) {
-                // TODO check if inside data area, own layer for this is needed?
-                coordinate();
-                setCoordinateLabel(evt);
-            }
-        });
-
-        // Save move start position, enable drag after delay
-        svgElement.addEventListener('mousedown', function (evt) {
-
-            drag.offset = { 'x': evt.clientX, 'y': evt.clientY };
-
-            // Delay for moving, so not move accidentally if only click
-            drag.timeout = setTimeout(function () {
-                drag.enabled = true;
-            }, 250);
-
-            // Cancel draggable
-            evt.stopPropagation();
-            evt.preventDefault();
-            return false;
-        });
-
-        // Disable drag
-        svgElement.addEventListener('mouseup', function (evt) {
-            drag.enabled = false;
-            clearTimeout(drag.timeout);
-        });
-
-        // Mouse move
-        svgElement.addEventListener('mousemove', function (evt) {
-
-            // Drag svg element
-            if (evt.buttons == 1 && drag.enabled) {
-
-                // Position change
-                drag.change.x = evt.clientX - drag.offset.x;
-                drag.change.y = evt.clientY - drag.offset.y;
-
-                // Set current mouse position
-                drag.offset.x = evt.clientX;
-                drag.offset.y = evt.clientY;
-
-                // Convert to svg position
-                drag.change.matrixTransform(svgElement.getScreenCTM().inverse());
-
-                var viewBoxValues = getViewBox();
-
-                viewBoxValues[0] -= drag.change.x;
-                viewBoxValues[1] -= drag.change.y;
-
-                setViewBox(viewBoxValues);
-            }
-
-            // View coordinates on mousemove over svg element
-            if (coordinateText.enabled) {
-                // TODO check if inside data area, own layer for this is needed?
-                setCoordinateLabel(evt);
-            }
-
-        });
-
-        // Zoom with wheel
-        svgElement.addEventListener('wheel', function (evt) {
-            // x or y scroll zoom both axels
-            var delta = Math.max(-1, Math.min(1, (evt.deltaY || evt.deltaX)));
-
-            if (delta > 0) {
-                setViewBox(zoom('in'));
-            }
-            else {
-                setViewBox(zoom('out'));
-            }
-
-            // Disable scroll the entire webpage
-            evt.stopPropagation();
-            evt.preventDefault();
-            return false;
-        });
-
-        // Reset on right click or hold tap
-        svgElement.addEventListener('contextmenu', function (evt) {
-
-            setViewBox(viewBoxResetValue);
-
-            // Disable native context menu
-            evt.stopPropagation();
-            evt.preventDefault();
-            return false;
-        });
-
-        // Keyboard actions, old svg version not support key events so must listen window
-        window.addEventListener('keydown', function (evt) {
-
-            // Not capture event from inputs
-            // body = svg inline in page, svg = plain svg file, window = delegated events to object
-            if (evt.target.nodeName != 'BODY' && evt.target.nodeName != 'svg' && evt.target != window) {
-                return true;
-            }
-
-            var viewBoxValues = [];
-
-            switch (evt.key) {
-                // Move, Edge sends without Arrow word
-                case 'ArrowLeft':
-                case 'Left':
-                case 'ArrowRight':
-                case 'Right':
-                case 'ArrowUp':
-                case 'Up':
-                case 'ArrowDown':
-                case 'Down':
-                    viewBoxValues = pan(evt.key.replace('Arrow', '').toLowerCase());
-                    break;
-                // Zoom in
-                case '+':
-                case 'Add':
-                    viewBoxValues = zoom('in');
-                    break;
-                // Zoom out
-                case '-':
-                case 'Subtract':
-                    viewBoxValues = zoom('out');
-                    break;
-                // Reset
-                case 'Home':
-                    viewBoxValues = viewBoxResetValue;
-                    break;
-                // Toggle grid
-                case '#':
-                    grid();
-                    break;
-            }
-
-            if (viewBoxValues.length) {
-                setViewBox(viewBoxValues);
-            }
-        });
-    };
-
-    // Get svg viewbox details
-    var getViewBox = function () {
-        var viewBoxValues = svgElement.getAttribute('viewBox').split(' ');
-        viewBoxValues[0] = parseFloat(viewBoxValues[0]);
-        viewBoxValues[1] = parseFloat(viewBoxValues[1]);
-        viewBoxValues[2] = parseFloat(viewBoxValues[2]);
-        viewBoxValues[3] = parseFloat(viewBoxValues[3]);
-        return viewBoxValues;
-    };
-
-    // Set svg viewbox details
-    var setViewBox = function (viewBoxValues) {
-        svgElement.setAttribute('viewBox', viewBoxValues.join(' '));
-    };
-
-    // Set coordinate label position and text
-    var setCoordinateLabel = function (evt) {
-        var position = convertDOMToSVG({ 'x': evt.clientX, 'y': evt.clientY });
-
-        // Set coordinate label position
-        coordinateText.element.setAttribute('x', position.x);
-        coordinateText.element.setAttribute('y', position.y);
-
-        // Do not echo mouse coordinates for 3D plots
-        if (settings.plot_is_not_2D) {
-            coordinateText.element.textContent = '';
-            return;
-        }
-
-        // Echo coordinates only if mouse is in the active plot
-        // Allow one pixel of slop because exact mouse placement is hard
-        if ((position.x < settings.plot_xmin-1 || position.x > settings.plot_xmax+1)
-        ||  (position.y > settings.plot_ybot+1 || position.y < settings.plot_ytop-1)) {
-            coordinateText.element.textContent = '⇩';
-            return;
-        }
-
-        // Convert svg position to plot coordinates
-        var plotcoord = convertSVGToPlot(position);
-
-        // Parse label to view
-        var label = parseCoordinateLabel(plotcoord);
-
-        // Set coordinate label text
-        coordinateText.element.textContent = label.x + ' ' + label.y;
-    };
-
-    // Convert position DOM to SVG
-    var convertDOMToSVG = function (position) {
-        point.x = position.x;
-        point.y = position.y;
-        return point.matrixTransform(svgElement.getScreenCTM().inverse());
-    };
-
-    // Convert position SVG to Plot
-    var convertSVGToPlot = function (position) {
-        var plotcoord = {};
-        var plotx = position.x - settings.plot_xmin;
-        var ploty = position.y - settings.plot_ybot;
-        var x, y;
-
-        if (settings.plot_logaxis_x !== 0) {
-            x = Math.log(settings.plot_axis_xmax)
-                - Math.log(settings.plot_axis_xmin);
-            x = x * (plotx / (settings.plot_xmax - settings.plot_xmin))
-                + Math.log(settings.plot_axis_xmin);
-            x = Math.exp(x);
-        } else {
-            x = settings.plot_axis_xmin + (plotx / (settings.plot_xmax - settings.plot_xmin)) * (settings.plot_axis_xmax - settings.plot_axis_xmin);
-        }
-
-        if (settings.plot_logaxis_y !== 0) {
-            y = Math.log(settings.plot_axis_ymax)
-                - Math.log(settings.plot_axis_ymin);
-            y = y * (ploty / (settings.plot_ytop - settings.plot_ybot))
-                + Math.log(settings.plot_axis_ymin);
-            y = Math.exp(y);
-        } else {
-            y = settings.plot_axis_ymin + (ploty / (settings.plot_ytop - settings.plot_ybot)) * (settings.plot_axis_ymax - settings.plot_axis_ymin);
-        }
-
-        plotcoord.x = x;
-        plotcoord.y = y;
-        return plotcoord;
-    };
-
-    // Parse plot x/y values to label
-    var parseCoordinateLabel = function (plotcoord) {
-        var label = { 'x': 0, 'y': 0 };
-
-        if (settings.plot_timeaxis_x == 'DMS' || settings.plot_timeaxis_y == 'DMS') {
-            if (settings.plot_timeaxis_x == 'DMS') {
-                label.x = convertToDMS(plotcoord.x);
-            }
-            else {
-                label.x = plotcoord.x.toFixed(2);
-            }
-
-            if (settings.plot_timeaxis_y == 'DMS') {
-                label.y = convertToDMS(plotcoord.y);
-            }
-            else {
-                label.y = plotcoord.y.toFixed(2);
-            }
-
-        } else if (settings.polar_mode) {
-            polar = convertToPolar(plotcoord.x, plotcoord.y);
-            label.x = 'ang= ' + polar.ang.toPrecision(4);
-            label.y = 'R= ' + polar.r.toPrecision(4);
-
-        } else if (settings.plot_timeaxis_x == 'Date') {
-            axisDate.setTime(1000 * plotcoord.x);
-            var year = axisDate.getUTCFullYear();
-            var month = axisDate.getUTCMonth();
-            var date = axisDate.getUTCDate();
-            label.x = (' ' + date).slice(-2) + '/' + ('0' + (month + 1)).slice(-2) + '/' + year;
-            label.y = plotcoord.y.toFixed(2);
-        } else if (settings.plot_timeaxis_x == 'Time') {
-            axisDate.setTime(1000 * plotcoord.x);
-            var hour = axisDate.getUTCHours();
-            var minute = axisDate.getUTCMinutes();
-            var second = axisDate.getUTCSeconds();
-            label.x = ('0' + hour).slice(-2) + ':' + ('0' + minute).slice(-2) + ':' + ('0' + second).slice(-2);
-            label.y = plotcoord.y.toFixed(2);
-        } else if (settings.plot_timeaxis_x == 'DateTime') {
-            axisDate.setTime(1000 * plotcoord.x);
-            label.x = axisDate.toUTCString();
-            label.y = plotcoord.y.toFixed(2);
-        } else {
-            label.x = plotcoord.x.toFixed(2);
-            label.y = plotcoord.y.toFixed(2);
-        }
-
-        return label;
-    };
-
-    // Convert position to Polar
-    var convertToPolar = function (x, y) {
-        polar = {};
-        var phi, r;
-        phi = Math.atan2(y, x);
-        if (settings.plot_logaxis_r) {
-            r = Math.exp((x / Math.cos(phi) + Math.log(settings.plot_axis_rmin) / Math.LN10) * Math.LN10);
-        }
-        else if (settings.plot_axis_rmin > settings.plot_axis_rmax) {
-            r = settings.plot_axis_rmin - x / Math.cos(phi);
-        } else {
-            r = settings.plot_axis_rmin + x / Math.cos(phi);
-        }
-        phi = phi * (180 / Math.PI);
-        if (settings.polar_sense < 0) {
-            phi = -phi;
-        }
-        if (settings.polar_theta0 !== undefined) {
-            phi = phi + settings.polar_theta0;
-        }
-        if (phi > 180) { phi = phi - 360; }
-        polar.r = r;
-        polar.ang = phi;
-        return polar;
-    };
-
-    // Convert position to DMS
-    var convertToDMS = function (x) {
-        var dms = { d: 0, m: 0, s: 0 };
-        var deg = Math.abs(x);
-        dms.d = Math.floor(deg);
-        dms.m = Math.floor((deg - dms.d) * 60);
-        dms.s = Math.floor((deg - dms.d) * 3600 - dms.m * 60);
-        fmt = ((x < 0) ? '-' : ' ') + dms.d.toFixed(0) + '°' + dms.m.toFixed(0) + '"' + dms.s.toFixed(0) + "'";
-        return fmt;
-    };
-
-    // Set popover text to show
-    var setPopoverText = function (content) {
-
-        // Minimum length
-        popoverText.width = popoverText.defaultWidth;
-
-        // Remove old texts
-        while (null !== popoverText.element.firstChild) {
-            popoverText.element.removeChild(popoverText.element.firstChild);
-        }
-
-        var lines = content.split(/\n|\\n/g);
-
-        // Single line
-        if (lines.length <= 1) {
-            popoverText.element.textContent = content;
-            popoverText.width = popoverText.element.getComputedTextLength() + 8;
-        }
-        // Multiple lines
-        else {
-            var lineWidth = 0;
-            var tspanElement;
-
-            for (var l = 0; l < lines.length; l++) {
-                tspanElement = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
-                // Y relative position
-                if (l > 0) {
-                    tspanElement.setAttribute('dy', popoverText.defaultHeight);
-                }
-                // Append text
-                tspanElement.appendChild(document.createTextNode(lines[l]));
-                popoverText.element.appendChild(tspanElement);
-
-                // Max line width
-                lineWidth = tspanElement.getComputedTextLength() + 8;
-                if (popoverText.width < lineWidth) {
-                    popoverText.width = lineWidth;
-                }
-            }
-        }
-
-        // Box Height
-        popoverText.height = 2 + popoverText.defaultHeight * lines.length;
-        popoverContainer.element.setAttribute('height', popoverText.height);
-
-        // Box Width
-        popoverContainer.element.setAttribute('width', popoverText.width);
-    };
-
-    // Set popover image to show
-    var setPopoverImage = function (content) {
-
-        // Set default image size
-        popoverImage.width = popoverImage.defaultWidth;
-        popoverImage.height = popoverImage.defaultHeight;
-
-        // Pick up height and width from image(width,height):name
-        if (content.charAt(5) == '(') {
-            popoverImage.width = parseInt(content.slice(6));
-            popoverImage.height = parseInt(content.slice(content.indexOf(',') + 1));
-        }
-
-        popoverImage.element.setAttribute('width', popoverImage.width);
-        popoverImage.element.setAttribute('height', popoverImage.height);
-        popoverImage.element.setAttribute('preserveAspectRatio', 'none');
-
-        // attach image URL as a link
-        content = content.slice(content.indexOf(':') + 1);
-        popoverImage.element.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', content);
-    };
-
-    // Show popover text in given position
-    var showPopoverText = function (position) {
-        var domRect = svgElement.getBoundingClientRect();
-        domRect = convertDOMToSVG({'x': domRect.right, 'y': domRect.bottom });
-
-        // bounce off frame bottom
-        if (position.y + popoverText.height + 16 > domRect.y) {
-            position.y = domRect.y - popoverText.height - 16;
-        }
-
-        // bounce off right edge
-        if (position.x + popoverText.width + 14 > domRect.x) {
-            position.x = domRect.x - popoverText.width - 14;
-        }
-
-        // Change Box position
-        popoverContainer.element.setAttribute('x', position.x + 10);
-        popoverContainer.element.setAttribute('y', position.y + 4);
-        popoverContainer.element.setAttribute('visibility', 'visible');
-
-        // Change Text position
-        popoverText.element.setAttribute('x', position.x + 14);
-        popoverText.element.setAttribute('y', position.y + 18);
-        popoverText.element.setAttribute('visibility', 'visible');
-
-        // Change multiline text position
-        var tspan = popoverText.element.querySelectorAll('tspan');
-        for (var i = 0; i < tspan.length; i++) {
-            tspan[i].setAttribute('x', position.x + 14);
-        }
-
-        // Font properties
-        if (settings.hypertext_fontFamily != null)
-            popoverText.element.setAttribute('font-family', settings.hypertext_fontFamily);
-        if (settings.hypertext_fontStyle != null)
-            popoverText.element.setAttribute('font-style', settings.hypertext_fontStyle);
-        if (settings.hypertext_fontWeight != null)
-            popoverText.element.setAttribute('font-weight', settings.hypertext_fontWeight);
-        if (settings.hypertext_fontSize > 0)
-            popoverText.element.setAttribute('font-size', settings.hypertext_fontSize);
-    };
-
-    // Show popover image in given position
-    var showPopoverImage = function (position) {
-        var domRect = svgElement.getBoundingClientRect();
-        domRect = convertDOMToSVG({'x': domRect.right, 'y': domRect.bottom });
-
-        // bounce off frame bottom
-        if (position.y + popoverImage.height + 16 > domRect.y) {
-            position.y = domRect.y - popoverImage.height - 16;
-        }
-
-        // bounce off right edge
-        if (position.x + popoverImage.width + 14 > domRect.x) {
-            position.x = domRect.x - popoverImage.width - 14;
-        }
-
-        popoverImage.element.setAttribute('x', position.x);
-        popoverImage.element.setAttribute('y', position.y);
-        popoverImage.element.setAttribute('visibility', 'visible');
-    };
-
-    // Hide all popovers
-    var hidePopover = function () {
-        popoverContainer.element.setAttribute('visibility', 'hidden');
-        popoverText.element.setAttribute('visibility', 'hidden');
-        popoverImage.element.setAttribute('visibility', 'hidden');
-    };
-
-    // Zoom svg inside viewbox
-    var zoom = function (direction) {
-        var zoomRate = 1.1;
-        var viewBoxValues = getViewBox();
-
-        var widthBefore = viewBoxValues[2];
-        var heightBefore = viewBoxValues[3];
-
-        if (direction == 'in') {
-            viewBoxValues[2] /= zoomRate;
-            viewBoxValues[3] /= zoomRate;
-            // Pan to center
-            viewBoxValues[0] -= (viewBoxValues[2] - widthBefore) / 2;
-            viewBoxValues[1] -= (viewBoxValues[3] - heightBefore) / 2;
-        }
-        else if (direction == 'out') {
-            viewBoxValues[2] *= zoomRate;
-            viewBoxValues[3] *= zoomRate;
-            // Pan to center
-            viewBoxValues[0] += (widthBefore - viewBoxValues[2]) / 2;
-            viewBoxValues[1] += (heightBefore - viewBoxValues[3]) / 2;
-        }
-
-        return viewBoxValues;
-    };
-
-    // Pan svg inside viewbox
-    var pan = function (direction) {
-        var panRate = 10;
-        var viewBoxValues = getViewBox();
-
-        switch (direction) {
-            case 'left':
-                viewBoxValues[0] += panRate;
-                break;
-            case 'right':
-                viewBoxValues[0] -= panRate;
-                break;
-            case 'up':
-                viewBoxValues[1] += panRate;
-                break;
-            case 'down':
-                viewBoxValues[1] -= panRate;
-                break;
-        }
-
-        return viewBoxValues;
-    };
-
-    // Toggle key and chart on/off or set manually to wanted
-    var key = function (id, set, evt) {
-        var visibility = null;
-
-        // Chart element
-        var chartElement = svgElement.getElementById(id.replace('_keyentry', ''));
-        if (chartElement) {
-            // Set on/off
-            if (set === true || set === false) {
-                visibility = set ? 'visible' : 'hidden';
-            }
-            // Toggle
-            else {
-                visibility = chartElement.getAttribute('visibility') == 'hidden' ? 'visible' : 'hidden';
-            }
-            chartElement.setAttribute('visibility', visibility);
-        }
-
-        // Key element
-        var keyElement = svgElement.getElementById(id);
-        if (keyElement && visibility) {
-            keyElement.setAttribute('style', visibility == 'hidden' ? 'filter:url(#greybox)' : 'none');
-        }
-
-        if (evt !== undefined) {
-            evt.stopPropagation();
-            evt.preventDefault();
-        }
-    };
-
-    // Toggle coordinates on/off or set manually to wanted
-    var coordinate = function (set) {
-        if (coordinateText.element) {
-            // Set on/off
-            if (set === true || set === false) {
-                coordinateText.enabled = set;
-            }
-            // Toggle
-            else {
-                coordinateText.enabled = coordinateText.element.getAttribute('visibility') == 'hidden' ? true : false;
-            }
-            coordinateText.element.setAttribute('visibility', coordinateText.enabled ? 'visible' : 'hidden');
-        }
-    };
-
-    // Toggle grid on/off or set manually to wanted
-    var grid = function (set) {
-        var grid = svgElement.getElementsByClassName('gridline');
-
-        // Set on/off
-        if (set === true || set === false) {
-            gridEnabled = set;
-        }
-        // Toggle, get state from first element
-        else if (grid.length) {
-            gridEnabled = grid[0].getAttribute('visibility') == 'hidden' ? true : false;
-        }
-
-        for (i = 0; i < grid.length; i++) {
-            grid[i].setAttribute('visibility', gridEnabled ? 'visible' : 'hidden');
-        }
-    };
-
-    // Show popover text or image
-    var popover = function (content, set, evt) {
-
-        // Hide popover
-        if (set === false) {
-            hidePopover();
-
-            if (evt !== undefined) {
-                evt.stopPropagation();
-                evt.preventDefault();
-            }
-
-            return;
-        }
-
-        var position = null;
-
-        // Change content only if changed
-        if (popoverContainer.content != content) {
-
-            // Set current text
-            popoverContainer.content = content;
-
-            popoverImage.content = '';
-            popoverText.content = content;
-
-            // If text starts with image: process it as an xlinked bitmap
-            if (content.substring(0, 5) == 'image') {
-                var lines = content.split(/\n|\\n/g);
-                var nameindex = lines[0].indexOf(':');
-                if (nameindex > 0) {
-                    popoverImage.content = lines.shift();
-                    popoverText.content = '';
-
-                    // Additional text lines
-                    if (lines !== undefined && lines.length > 0) {
-                        popoverText.content = lines.join('\n');
-                    }
-                }
-            }
-
-            // Set image content
-            if(popoverImage.content){
-                setPopoverImage(popoverImage.content);
-            }
-
-            // Set text content
-            if(popoverText.content){
-                setPopoverText(popoverText.content);
-            }
-        }
-
-        if(popoverImage.content || popoverText.content){
-            position = convertDOMToSVG({'x': evt.clientX, 'y': evt.clientY });
-        }
-
-        // Show popover image on mouse position
-        if(popoverImage.content){
-            showPopoverImage(position);
-        }
-
-        // Show popover on mouse position
-        if(popoverText.content){
-            showPopoverText(position);
-        }
-
-        if (evt !== undefined) {
-            evt.stopPropagation();
-            evt.preventDefault();
-        }
-    };
-
-    // Parse plot settings
-    parseSettings();
-
-    // viewBox initial position and size
-    viewBoxResetValue = getViewBox();
-
-    // Set focusable for event focusing, not work on old svg version
-    svgElement.setAttribute('focusable', true);
-
-    // Disable native draggable
-    svgElement.setAttribute('draggable', false);
-
-    // Add events
-    addEvents();
-
-    // Return functions to outside use
-    return {
-        zoom: function (direction) {
-            setViewBox(zoom(direction));
-            return this;
-        },
-        pan: function (direction) {
-            setViewBox(pan(direction));
-            return this;
-        },
-        reset: function () {
-            setViewBox(viewBoxResetValue);
-            return this;
-        },
-        key: function (id, set) {
-            key(id, set);
-            return this;
-        },
-        coordinate: function (set) {
-            coordinate(set);
-            return this;
-        },
-        grid: function (set) {
-            grid(set);
-            return this;
-        }
-    };
-};
-
-// Old init function, remove when svg inline events removed
-gnuplot_svg.Init = function() { };
-]]>
-</script>
-
-<!-- Tie mousing to entire bounding box of the plot -->
-<rect x="0" y="0" width="600" height="600" fill="#ffffff" stroke="black" stroke-width="1"
-onclick="gnuplot_svg.toggleCoordBox(evt)"  onmousemove="gnuplot_svg.moveCoordBox(evt)"/>
-
-<!-- Also track mouse when it is on a plot element -->
-<g id="gnuplot_canvas" onclick="gnuplot_svg.toggleCoordBox(evt)" onmousemove="gnuplot_svg.moveCoordBox(evt)">
-
+<rect x="0" y="0" width="600" height="600" fill="#ffffff"/>
 <defs>
 
 	<circle id='gpDot' r='0.5' stroke-width='0.5' stroke='currentColor'/>
@@ -1103,15 +231,13 @@ onclick="gnuplot_svg.toggleCoordBox(evt)"  onmousemove="gnuplot_svg.moveCoordBox
 </g>
 	<g id="gnuplot_plot_1" ><title>go-brrr</title>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<g id="gnuplot_plot_1_keyentry" visibility="visible" onclick="gnuplot_svg.toggleVisibility(evt,'gnuplot_plot_1')">
 	<g transform="translate(507.09,78.91)" stroke="none" fill="black" font-family="Arial" font-size="12.00"  text-anchor="end">
 		<text><tspan font-family="Arial" >go-brrr</tspan></text>
 	</g>
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<path stroke='rgb(148,   0, 211)'  d='M515.48,75.01 L558.04,75.01  '/>	</g>
-	<path stroke='rgb(148,   0, 211)'  d='M538.94,516.00 L412.90,440.87 L267.79,334.39 L253.42,307.04 L196.11,261.81 L151.79,148.40 L137.11,122.51 L130.28,102.45
-		L123.51,92.24 L113.28,83.49  '/>	<use xlink:href='#gpPt6' transform='translate(538.94,516.00) scale(2.70)' color='rgb(148,   0, 211)'/>
+	<path stroke='rgb(148,   0, 211)'  d='M515.48,75.01 L558.04,75.01 M538.94,516.00 L412.90,440.87 L267.79,334.39 L253.42,307.04 L196.11,261.81 L151.79,148.40
+		L137.11,122.51 L130.28,102.45 L123.51,92.24 L113.28,83.49  '/>	<use xlink:href='#gpPt6' transform='translate(538.94,516.00) scale(2.70)' color='rgb(148,   0, 211)'/>
 	<use xlink:href='#gpPt6' transform='translate(412.90,440.87) scale(2.70)' color='rgb(148,   0, 211)'/>
 	<use xlink:href='#gpPt6' transform='translate(267.79,334.39) scale(2.70)' color='rgb(148,   0, 211)'/>
 	<use xlink:href='#gpPt6' transform='translate(253.42,307.04) scale(2.70)' color='rgb(148,   0, 211)'/>
@@ -1121,9 +247,7 @@ onclick="gnuplot_svg.toggleCoordBox(evt)"  onmousemove="gnuplot_svg.moveCoordBox
 	<use xlink:href='#gpPt6' transform='translate(130.28,102.45) scale(2.70)' color='rgb(148,   0, 211)'/>
 	<use xlink:href='#gpPt6' transform='translate(123.51,92.24) scale(2.70)' color='rgb(148,   0, 211)'/>
 	<use xlink:href='#gpPt6' transform='translate(113.28,83.49) scale(2.70)' color='rgb(148,   0, 211)'/>
-	<g id="gnuplot_plot_1_keyentry" visibility="visible" onclick="gnuplot_svg.toggleVisibility(evt,'gnuplot_plot_1')">
 	<use xlink:href='#gpPt6' transform='translate(536.76,75.01) scale(2.70)' color='rgb(148,   0, 211)'/>
-	</g>
 </g>
 	</g>
 	<g id="gnuplot_plot_2"  fill="none"><title>gnuplot_plot_2</title>
@@ -1164,61 +288,61 @@ onclick="gnuplot_svg.toggleCoordBox(evt)"  onmousemove="gnuplot_svg.moveCoordBox
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<g onmousemove="gnuplot_svg.showHypertext(evt,'go-brrr 0: 326.74 MB/s, ratio 3.236')" onmouseout="gnuplot_svg.hideHypertext()"><title> </title>
+	<g><title>go-brrr 0: 326.74 MB/s, ratio 3.236</title>
 	<use xlink:href='#gpPt6' transform='translate(538.94,516.00) scale(6.75)' color='rgb(  0,   0,   0)' opacity='0.00'/></g>
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<g onmousemove="gnuplot_svg.showHypertext(evt,'go-brrr 1: 239.39 MB/s, ratio 3.442')" onmouseout="gnuplot_svg.hideHypertext()"><title> </title>
+	<g><title>go-brrr 1: 239.39 MB/s, ratio 3.442</title>
 	<use xlink:href='#gpPt6' transform='translate(412.90,440.87) scale(6.75)' color='rgb(  0,   0,   0)' opacity='0.00'/></g>
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<g onmousemove="gnuplot_svg.showHypertext(evt,'go-brrr 2: 138.83 MB/s, ratio 3.734')" onmouseout="gnuplot_svg.hideHypertext()"><title> </title>
+	<g><title>go-brrr 2: 138.83 MB/s, ratio 3.734</title>
 	<use xlink:href='#gpPt6' transform='translate(267.79,334.39) scale(6.75)' color='rgb(  0,   0,   0)' opacity='0.00'/></g>
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<g onmousemove="gnuplot_svg.showHypertext(evt,'go-brrr 3: 128.87 MB/s, ratio 3.809')" onmouseout="gnuplot_svg.hideHypertext()"><title> </title>
+	<g><title>go-brrr 3: 128.87 MB/s, ratio 3.809</title>
 	<use xlink:href='#gpPt6' transform='translate(253.42,307.04) scale(6.75)' color='rgb(  0,   0,   0)' opacity='0.00'/></g>
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<g onmousemove="gnuplot_svg.showHypertext(evt,'go-brrr 4: 89.15 MB/s, ratio 3.933')" onmouseout="gnuplot_svg.hideHypertext()"><title> </title>
+	<g><title>go-brrr 4: 89.15 MB/s, ratio 3.933</title>
 	<use xlink:href='#gpPt6' transform='translate(196.11,261.81) scale(6.75)' color='rgb(  0,   0,   0)' opacity='0.00'/></g>
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<g onmousemove="gnuplot_svg.showHypertext(evt,'go-brrr 5: 58.44 MB/s, ratio 4.244')" onmouseout="gnuplot_svg.hideHypertext()"><title> </title>
+	<g><title>go-brrr 5: 58.44 MB/s, ratio 4.244</title>
 	<use xlink:href='#gpPt6' transform='translate(151.79,148.40) scale(6.75)' color='rgb(  0,   0,   0)' opacity='0.00'/></g>
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<g onmousemove="gnuplot_svg.showHypertext(evt,'go-brrr 6: 48.26 MB/s, ratio 4.315')" onmouseout="gnuplot_svg.hideHypertext()"><title> </title>
+	<g><title>go-brrr 6: 48.26 MB/s, ratio 4.315</title>
 	<use xlink:href='#gpPt6' transform='translate(137.11,122.51) scale(6.75)' color='rgb(  0,   0,   0)' opacity='0.00'/></g>
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<g onmousemove="gnuplot_svg.showHypertext(evt,'go-brrr 7: 43.53 MB/s, ratio 4.37')" onmouseout="gnuplot_svg.hideHypertext()"><title> </title>
+	<g><title>go-brrr 7: 43.53 MB/s, ratio 4.37</title>
 	<use xlink:href='#gpPt6' transform='translate(130.28,102.45) scale(6.75)' color='rgb(  0,   0,   0)' opacity='0.00'/></g>
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<g onmousemove="gnuplot_svg.showHypertext(evt,'go-brrr 8: 38.84 MB/s, ratio 4.398')" onmouseout="gnuplot_svg.hideHypertext()"><title> </title>
+	<g><title>go-brrr 8: 38.84 MB/s, ratio 4.398</title>
 	<use xlink:href='#gpPt6' transform='translate(123.51,92.24) scale(6.75)' color='rgb(  0,   0,   0)' opacity='0.00'/></g>
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<g onmousemove="gnuplot_svg.showHypertext(evt,'go-brrr 9: 31.75 MB/s, ratio 4.422')" onmouseout="gnuplot_svg.hideHypertext()"><title> </title>
+	<g><title>go-brrr 9: 31.75 MB/s, ratio 4.422</title>
 	<use xlink:href='#gpPt6' transform='translate(113.28,83.49) scale(6.75)' color='rgb(  0,   0,   0)' opacity='0.00'/></g>
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
@@ -1226,20 +350,16 @@ onclick="gnuplot_svg.toggleCoordBox(evt)"  onmousemove="gnuplot_svg.moveCoordBox
 	</g>
 	<g id="gnuplot_plot_4" ><title>zstd</title>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<g id="gnuplot_plot_4_keyentry" visibility="visible" onclick="gnuplot_svg.toggleVisibility(evt,'gnuplot_plot_4')">
 	<g transform="translate(507.09,96.91)" stroke="none" fill="black" font-family="Arial" font-size="12.00"  text-anchor="end">
 		<text><tspan font-family="Arial" >zstd</tspan></text>
 	</g>
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<path stroke='rgb( 42, 140, 200)'  d='M515.48,93.01 L558.04,93.01  '/>	</g>
-	<path stroke='rgb( 42, 140, 200)'  d='M337.71,426.65 L279.90,327.09 L238.59,250.14 L118.84,149.13  '/>	<use xlink:href='#gpPt8' transform='translate(337.71,426.65) scale(2.70)' color='rgb( 42, 140, 200)'/>
+	<path stroke='rgb( 42, 140, 200)'  d='M515.48,93.01 L558.04,93.01 M337.71,426.65 L279.90,327.09 L238.59,250.14 L118.84,149.13  '/>	<use xlink:href='#gpPt8' transform='translate(337.71,426.65) scale(2.70)' color='rgb( 42, 140, 200)'/>
 	<use xlink:href='#gpPt8' transform='translate(279.90,327.09) scale(2.70)' color='rgb( 42, 140, 200)'/>
 	<use xlink:href='#gpPt8' transform='translate(238.59,250.14) scale(2.70)' color='rgb( 42, 140, 200)'/>
 	<use xlink:href='#gpPt8' transform='translate(118.84,149.13) scale(2.70)' color='rgb( 42, 140, 200)'/>
-	<g id="gnuplot_plot_4_keyentry" visibility="visible" onclick="gnuplot_svg.toggleVisibility(evt,'gnuplot_plot_4')">
 	<use xlink:href='#gpPt8' transform='translate(536.76,93.01) scale(2.70)' color='rgb( 42, 140, 200)'/>
-	</g>
 </g>
 	</g>
 	<g id="gnuplot_plot_5"  fill="none"><title>gnuplot_plot_5</title>
@@ -1262,25 +382,25 @@ onclick="gnuplot_svg.toggleCoordBox(evt)"  onmousemove="gnuplot_svg.moveCoordBox
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<g onmousemove="gnuplot_svg.showHypertext(evt,'zstd 1: 187.28 MB/s, ratio 3.481')" onmouseout="gnuplot_svg.hideHypertext()"><title> </title>
+	<g><title>zstd 1: 187.28 MB/s, ratio 3.481</title>
 	<use xlink:href='#gpPt6' transform='translate(337.71,426.65) scale(6.75)' color='rgb(  0,   0,   0)' opacity='0.00'/></g>
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<g onmousemove="gnuplot_svg.showHypertext(evt,'zstd 2: 147.22 MB/s, ratio 3.754')" onmouseout="gnuplot_svg.hideHypertext()"><title> </title>
+	<g><title>zstd 2: 147.22 MB/s, ratio 3.754</title>
 	<use xlink:href='#gpPt6' transform='translate(279.90,327.09) scale(6.75)' color='rgb(  0,   0,   0)' opacity='0.00'/></g>
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<g onmousemove="gnuplot_svg.showHypertext(evt,'zstd 3: 118.59 MB/s, ratio 3.965')" onmouseout="gnuplot_svg.hideHypertext()"><title> </title>
+	<g><title>zstd 3: 118.59 MB/s, ratio 3.965</title>
 	<use xlink:href='#gpPt6' transform='translate(238.59,250.14) scale(6.75)' color='rgb(  0,   0,   0)' opacity='0.00'/></g>
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<g onmousemove="gnuplot_svg.showHypertext(evt,'zstd 4: 35.60 MB/s, ratio 4.242')" onmouseout="gnuplot_svg.hideHypertext()"><title> </title>
+	<g><title>zstd 4: 35.60 MB/s, ratio 4.242</title>
 	<use xlink:href='#gpPt6' transform='translate(118.84,149.13) scale(6.75)' color='rgb(  0,   0,   0)' opacity='0.00'/></g>
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
@@ -1288,15 +408,13 @@ onclick="gnuplot_svg.toggleCoordBox(evt)"  onmousemove="gnuplot_svg.moveCoordBox
 	</g>
 	<g id="gnuplot_plot_7" ><title>gzip</title>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<g id="gnuplot_plot_7_keyentry" visibility="visible" onclick="gnuplot_svg.toggleVisibility(evt,'gnuplot_plot_7')">
 	<g transform="translate(507.09,114.91)" stroke="none" fill="black" font-family="Arial" font-size="12.00"  text-anchor="end">
 		<text><tspan font-family="Arial" >gzip</tspan></text>
 	</g>
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<path stroke='rgb(230, 159,   0)'  d='M515.48,111.01 L558.04,111.01  '/>	</g>
-	<path stroke='rgb(230, 159,   0)'  d='M284.59,524.75 L277.03,475.88 L252.98,451.45 L225.43,394.56 L200.09,328.92 L190.58,308.13 L149.43,275.67 L123.27,254.89
-		L90.47,244.67  '/>	<use xlink:href='#gpPt12' transform='translate(284.59,524.75) scale(2.70)' color='rgb(230, 159,   0)'/>
+	<path stroke='rgb(230, 159,   0)'  d='M515.48,111.01 L558.04,111.01 M284.59,524.75 L277.03,475.88 L252.98,451.45 L225.43,394.56 L200.09,328.92 L190.58,308.13
+		L149.43,275.67 L123.27,254.89 L90.47,244.67  '/>	<use xlink:href='#gpPt12' transform='translate(284.59,524.75) scale(2.70)' color='rgb(230, 159,   0)'/>
 	<use xlink:href='#gpPt12' transform='translate(277.03,475.88) scale(2.70)' color='rgb(230, 159,   0)'/>
 	<use xlink:href='#gpPt12' transform='translate(252.98,451.45) scale(2.70)' color='rgb(230, 159,   0)'/>
 	<use xlink:href='#gpPt12' transform='translate(225.43,394.56) scale(2.70)' color='rgb(230, 159,   0)'/>
@@ -1305,9 +423,7 @@ onclick="gnuplot_svg.toggleCoordBox(evt)"  onmousemove="gnuplot_svg.moveCoordBox
 	<use xlink:href='#gpPt12' transform='translate(149.43,275.67) scale(2.70)' color='rgb(230, 159,   0)'/>
 	<use xlink:href='#gpPt12' transform='translate(123.27,254.89) scale(2.70)' color='rgb(230, 159,   0)'/>
 	<use xlink:href='#gpPt12' transform='translate(90.47,244.67) scale(2.70)' color='rgb(230, 159,   0)'/>
-	<g id="gnuplot_plot_7_keyentry" visibility="visible" onclick="gnuplot_svg.toggleVisibility(evt,'gnuplot_plot_7')">
 	<use xlink:href='#gpPt12' transform='translate(536.76,111.01) scale(2.70)' color='rgb(230, 159,   0)'/>
-	</g>
 </g>
 	</g>
 	<g id="gnuplot_plot_8"  fill="none"><title>gnuplot_plot_8</title>
@@ -1345,55 +461,55 @@ onclick="gnuplot_svg.toggleCoordBox(evt)"  onmousemove="gnuplot_svg.moveCoordBox
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<g onmousemove="gnuplot_svg.showHypertext(evt,'gzip 1: 150.47 MB/s, ratio 3.212')" onmouseout="gnuplot_svg.hideHypertext()"><title> </title>
+	<g><title>gzip 1: 150.47 MB/s, ratio 3.212</title>
 	<use xlink:href='#gpPt6' transform='translate(284.59,524.75) scale(6.75)' color='rgb(  0,   0,   0)' opacity='0.00'/></g>
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<g onmousemove="gnuplot_svg.showHypertext(evt,'gzip 2: 145.23 MB/s, ratio 3.346')" onmouseout="gnuplot_svg.hideHypertext()"><title> </title>
+	<g><title>gzip 2: 145.23 MB/s, ratio 3.346</title>
 	<use xlink:href='#gpPt6' transform='translate(277.03,475.88) scale(6.75)' color='rgb(  0,   0,   0)' opacity='0.00'/></g>
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<g onmousemove="gnuplot_svg.showHypertext(evt,'gzip 3: 128.56 MB/s, ratio 3.413')" onmouseout="gnuplot_svg.hideHypertext()"><title> </title>
+	<g><title>gzip 3: 128.56 MB/s, ratio 3.413</title>
 	<use xlink:href='#gpPt6' transform='translate(252.98,451.45) scale(6.75)' color='rgb(  0,   0,   0)' opacity='0.00'/></g>
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<g onmousemove="gnuplot_svg.showHypertext(evt,'gzip 4: 109.47 MB/s, ratio 3.569')" onmouseout="gnuplot_svg.hideHypertext()"><title> </title>
+	<g><title>gzip 4: 109.47 MB/s, ratio 3.569</title>
 	<use xlink:href='#gpPt6' transform='translate(225.43,394.56) scale(6.75)' color='rgb(  0,   0,   0)' opacity='0.00'/></g>
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<g onmousemove="gnuplot_svg.showHypertext(evt,'gzip 5: 91.91 MB/s, ratio 3.749')" onmouseout="gnuplot_svg.hideHypertext()"><title> </title>
+	<g><title>gzip 5: 91.91 MB/s, ratio 3.749</title>
 	<use xlink:href='#gpPt6' transform='translate(200.09,328.92) scale(6.75)' color='rgb(  0,   0,   0)' opacity='0.00'/></g>
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<g onmousemove="gnuplot_svg.showHypertext(evt,'gzip 6: 85.32 MB/s, ratio 3.806')" onmouseout="gnuplot_svg.hideHypertext()"><title> </title>
+	<g><title>gzip 6: 85.32 MB/s, ratio 3.806</title>
 	<use xlink:href='#gpPt6' transform='translate(190.58,308.13) scale(6.75)' color='rgb(  0,   0,   0)' opacity='0.00'/></g>
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<g onmousemove="gnuplot_svg.showHypertext(evt,'gzip 7: 56.80 MB/s, ratio 3.895')" onmouseout="gnuplot_svg.hideHypertext()"><title> </title>
+	<g><title>gzip 7: 56.80 MB/s, ratio 3.895</title>
 	<use xlink:href='#gpPt6' transform='translate(149.43,275.67) scale(6.75)' color='rgb(  0,   0,   0)' opacity='0.00'/></g>
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<g onmousemove="gnuplot_svg.showHypertext(evt,'gzip 8: 38.67 MB/s, ratio 3.952')" onmouseout="gnuplot_svg.hideHypertext()"><title> </title>
+	<g><title>gzip 8: 38.67 MB/s, ratio 3.952</title>
 	<use xlink:href='#gpPt6' transform='translate(123.27,254.89) scale(6.75)' color='rgb(  0,   0,   0)' opacity='0.00'/></g>
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
-	<g onmousemove="gnuplot_svg.showHypertext(evt,'gzip 9: 15.94 MB/s, ratio 3.98')" onmouseout="gnuplot_svg.hideHypertext()"><title> </title>
+	<g><title>gzip 9: 15.94 MB/s, ratio 3.98</title>
 	<use xlink:href='#gpPt6' transform='translate(90.47,244.67) scale(6.75)' color='rgb(  0,   0,   0)' opacity='0.00'/></g>
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
@@ -1424,54 +540,5 @@ onclick="gnuplot_svg.toggleCoordBox(evt)"  onmousemove="gnuplot_svg.moveCoordBox
 </g>
 <g fill="none" color="black" stroke="currentColor" stroke-width="1.00" stroke-linecap="butt" stroke-linejoin="miter">
 </g>
-
-<script type="text/javascript"><![CDATA[
-// plot boundaries and axis scaling information for mousing
-gnuplot_svg.plot_term_xmax = 600;
-gnuplot_svg.plot_term_ymax = 600;
-gnuplot_svg.plot_xmin = 72.5;
-gnuplot_svg.plot_xmax = 574.8;
-gnuplot_svg.plot_ybot = 542.4;
-gnuplot_svg.plot_ytop = 57.0;
-gnuplot_svg.plot_width = 502.3;
-gnuplot_svg.plot_height = 485.4;
-gnuplot_svg.plot_is_not_2D = false;
-gnuplot_svg.plot_axis_xmin = 3.508;
-gnuplot_svg.plot_axis_xmax = 351.604;
-gnuplot_svg.plot_axis_ymin = 3.1636;
-gnuplot_svg.plot_axis_ymax = 4.4946;
-gnuplot_svg.polar_mode = false;
-gnuplot_svg.plot_axis_x2min = "none";
-gnuplot_svg.plot_axis_y2min = "none";
-gnuplot_svg.plot_logaxis_x = 0;
-gnuplot_svg.plot_logaxis_y = 0;
-gnuplot_svg.plot_timeaxis_x = "";
-gnuplot_svg.plot_timeaxis_y = "";
-gnuplot_svg.hypertext_fontSize = 0;
-gnuplot_svg.hypertext_fontFamily = null;
-gnuplot_svg.hypertext_fontStyle = null;
-gnuplot_svg.hypertext_fontWeight = null;
-]]>
-</script>
 </g>
-
-  <text id="coord_text" text-anchor="start" pointer-events="none"
-  font-size="12" font-family="Arial"
-  visibility="hidden"> </text>
-
-  <rect id="hypertextbox" class="hypertextbox" pointer-events="none"
-  fill="white" stroke="black" opacity="0.8"
-  height="16" visibility="hidden" />
-
-  <text id="hypertext" class="hypertext" pointer-events="none"
-  font-size="12" font-family="Arial"
-  visibility="hidden"> </text>
-
-  <image id="hyperimage" class="hyperimage" pointer-events="none"
-  fill="white" stroke="black" opacity="0.8"
-  height="200" width="300" visibility="hidden" />
-
-  <image x='10' y='574' width='16' height='16'
-    xlink:href='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAABmJLR0QA/wD/AP+gvaeTAAAAM0lEQVQokWP8//8/AymACc5iZGQkyEDRQCwgyUn///9nhGtgZISy8TBGnTSCnMRIavIGAGPTWfVV7DcfAAAAAElFTkSuQmCC'
-    onclick='gnuplot_svg.toggleGrid();'/>
 </svg>

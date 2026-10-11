@@ -8,7 +8,7 @@ if (!exists("csv")) csv = 'bench-crosslib.csv'
 
 if (exists("outfile")) {
     if (outfile[strlen(outfile)-3:strlen(outfile)] eq '.svg') {
-        set terminal svg size 600,600 enhanced background rgb 'white' mouse standalone
+        set terminal svg size 600,600 enhanced background rgb 'white'
     } else {
         set terminal pngcairo size 600,600 enhanced
     }
@@ -53,3 +53,8 @@ if (!exists("nogzip")) {
 }
 
 eval('plot ' . plotcmd)
+
+if (exists("outfile") && outfile[strlen(outfile)-3:strlen(outfile)] eq '.svg') {
+    unset output
+    system(sprintf("sed -i -e \"s/ onmousemove=\\\"gnuplot_svg.showHypertext(evt,'\\([^']*\\)')\\\" onmouseout=\\\"gnuplot_svg.hideHypertext()\\\"><title> <\\/title>/><title>\\1<\\/title>/\" '%s'", outfile))
+}
