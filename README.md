@@ -119,13 +119,17 @@ goarch: amd64
 cpu: AMD Ryzen 5 7535HS with Radeon Graphics
 ```
 
-Compared against [klauspost/compress](https://github.com/klauspost/compress) zstd (pure Go) and stdlib gzip. Single CPU, no parallelism. These plots measure reused streaming encoders: the timed loop resets a warmed writer and discards compressed output, while ratio is measured from a warmup buffer.
+Each plot uses a set of real-world files of one type, for example 530 HTML pages or 111 JS files of 64 KiB to 1 MiB. The benchmark compresses the files one by one with one reused encoder. This is like a web server that compresses its assets. Compared against [klauspost/compress](https://github.com/klauspost/compress) zstd (pure Go) and stdlib gzip, single CPU.
+
+Plots for all file sizes (up to more than 8 MiB), Intel results and the methodology are in [docs/plots.md](docs/plots.md).
 
 | Compression | Decompression |
 |---|---|
-| ![HTML 522KB](assets/gh_522KB_html.png) | ![HTML 522KB](assets/gh_522KB_html_decompress.png) |
-| ![JS 187KB](assets/reactcore_187KB_js.png) | ![JS 187KB](assets/reactcore_187KB_js_decompress.png) |
-| ![JSON 58KB](assets/github_events_58KB_json.png) | ![JSON 58KB](assets/github_events_58KB_json_decompress.png) |
+| ![html 64k-1m](assets/ryzen-7535hs/64k-1m/html.svg) | ![html 64k-1m](assets/ryzen-7535hs/64k-1m/html_decompress.svg) |
+| ![js 64k-1m](assets/ryzen-7535hs/64k-1m/js.svg) | ![js 64k-1m](assets/ryzen-7535hs/64k-1m/js_decompress.svg) |
+| ![json 64k-1m](assets/ryzen-7535hs/64k-1m/json.svg) | ![json 64k-1m](assets/ryzen-7535hs/64k-1m/json_decompress.svg) |
+| ![css 64k-1m](assets/ryzen-7535hs/64k-1m/css.svg) | ![css 64k-1m](assets/ryzen-7535hs/64k-1m/css_decompress.svg) |
+| ![prose 64k-1m](assets/ryzen-7535hs/64k-1m/prose.svg) | ![prose 64k-1m](assets/ryzen-7535hs/64k-1m/prose_decompress.svg) |
 
 ## Benchmarks
 
