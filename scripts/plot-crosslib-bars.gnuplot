@@ -5,7 +5,11 @@
 if (!exists("dat")) dat = 'bench-crosslib.dat'
 
 if (exists("outfile")) {
-    set terminal pngcairo size 600,600 enhanced
+    if (outfile[strlen(outfile)-3:strlen(outfile)] eq '.svg') {
+        set terminal svg size 600,600 enhanced background rgb 'white'
+    } else {
+        set terminal pngcairo size 600,600 enhanced
+    }
     set output outfile
 }
 
@@ -19,16 +23,19 @@ set grid x
 set xrange [0:*]
 set yrange [] reverse
 set key bottom right
+# Room right of the longest bar for its value label.
+set offsets 0, graph 0.08, 0, 0
 
 eval sprintf("set ytics (%s)", ytics_str)
 
 # col1=row, col2=speed, col3=lib_index (1=go-brrr, 2=zstd, 3=gzip)
-# Color palette: go-brrr=purple (#9467bd), zstd=cyan (#17becf), gzip=orange (#ff7f0e)
-set linetype 1 lc rgb '#9467bd'
-set linetype 2 lc rgb '#17becf'
-set linetype 3 lc rgb '#ff7f0e'
+# Colors match plot-crosslib.gnuplot.
+set linetype 1 lc rgb '#9400d3'
+set linetype 2 lc rgb '#2a8cc8'
+set linetype 3 lc rgb '#e69f00'
 
 plot dat using 2:0:(0):2:($0-0.35):($0+0.35):3 with boxxyerror lc variable notitle, \
-     NaN with boxes fs solid 0.8 lc rgb '#9467bd' title 'go-brrr', \
-     NaN with boxes fs solid 0.8 lc rgb '#17becf' title 'zstd', \
-     NaN with boxes fs solid 0.8 lc rgb '#ff7f0e' title 'gzip'
+     dat using 2:0:(sprintf('%.0f', $2)) with labels left offset char 0.5,0 font ',8' notitle, \
+     NaN with boxes fs solid 0.8 lc rgb '#9400d3' title 'go-brrr', \
+     NaN with boxes fs solid 0.8 lc rgb '#2a8cc8' title 'zstd', \
+     NaN with boxes fs solid 0.8 lc rgb '#e69f00' title 'gzip'
