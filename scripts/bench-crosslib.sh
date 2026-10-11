@@ -10,6 +10,7 @@
 # Environment:
 #   BENCHTIME         benchmark duration per case (default: 3s)
 #   BENCH_CORPUS_FILE path to input file (default: alice29.txt from brotli testdata)
+#   BENCH_PAYLOAD_GLOB comma-separated glob patterns; all matched files become one rotating payload
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -25,7 +26,7 @@ echo "Running benchmarks (bench=$BENCH, benchtime=$BENCHTIME, count=$COUNT)..." 
 
 (cd benchmarks && go test -tags bench -run='^$' -bench="$BENCH" \
     -benchtime="$BENCHTIME" -count=$COUNT -timeout=0 -cpu 1 .) 2>&1 \
-| tee /dev/stderr > "$TMPRAW"
+| tee "$TMPRAW" >&2
 
 echo "Running benchstat..." >&2
 

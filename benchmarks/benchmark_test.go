@@ -86,6 +86,40 @@ var testCases = []testCase{
 	{name: "Random10k", gen: func() []byte { return randomPayload(10000) }},
 }
 
+func globTestCase(b *testing.B) (testCase, bool) {
+	b.Helper()
+	patterns := os.Getenv("BENCH_PAYLOAD_GLOB")
+	if patterns == "" {
+		return testCase{}, false
+	}
+
+	var paths []string
+	for p := range strings.SplitSeq(patterns, ",") {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		matches, err := filepath.Glob(resolveUserPath(p))
+		if err != nil {
+			b.Fatalf("invalid BENCH_PAYLOAD_GLOB pattern %q: %v", p, err)
+		}
+		for _, m := range matches {
+			info, err := os.Stat(m)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if info.IsDir() {
+				continue
+			}
+			paths = append(paths, m)
+		}
+	}
+	if len(paths) == 0 {
+		b.Fatalf("BENCH_PAYLOAD_GLOB=%q matched no files", patterns)
+	}
+	return testCase{name: "Glob", paths: paths}, true
+}
+
 // benchTestCases returns the standard testCases, extended with one entry per
 // file found in BENCH_CORPUS_DIR (named "corpus_<filename>") when that env
 // var is set. Subdirectories are skipped. When PAYLOAD_MIN_SIZE is set,
@@ -95,6 +129,9 @@ func benchTestCases(b *testing.B) []testCase {
 	b.Helper()
 	cases := testCases
 	dir := resolveUserPath(os.Getenv("BENCH_CORPUS_DIR"))
+	if tc, ok := globTestCase(b); ok {
+		cases, dir = []testCase{tc}, ""
+	}
 	if dir != "" {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
