@@ -20,6 +20,9 @@ const (
 	// Limit expensive high-quality compression and one-byte streaming.
 	// The copies of FuzzEncodeCRef grow a stream to at most 64 times this size.
 	fuzzMaxPlain = 64 << 10
+	// Keeps one q10+ input under the 10 s fuzz worker limit on CI.
+	// It still wraps the ring buffer for lgwin <= 19.
+	fuzzMaxPlainQ10 = 2 << 20
 	// This limits mutation size, not decoded output size.
 	fuzzMaxCompressed = 8 << 10
 )
@@ -53,6 +56,9 @@ func FuzzEncodeCRef(f *testing.F) {
 	f.Fuzz(func(t *testing.T, data []byte, qualityByte, windowByte uint8, chunkWord, readWord uint16, flush bool, copiesByte uint8) {
 		data = similarCopies(data[:min(len(data), fuzzMaxPlain)], 1<<(copiesByte%7))
 		quality := int(qualityByte) % 12
+		if quality >= 10 {
+			data = data[:min(len(data), fuzzMaxPlainQ10)]
+		}
 		lgwin := fuzzLGWin(windowByte)
 		// At most 4096 writes and flushes per stream.
 		chunkSize := max(1, int(chunkWord), len(data)>>12)
