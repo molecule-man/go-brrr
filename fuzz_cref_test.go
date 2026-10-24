@@ -326,8 +326,9 @@ func assertGoStreamRejects(t *testing.T, encoded []byte, chunkSize, readSize int
 	var got []byte
 	for {
 		n, err := r.Read(buf)
+		prev := len(got)
 		got = append(got, buf[:n]...)
-		if len(got) > len(cPrefix) || !bytes.Equal(got, cPrefix[:len(got)]) {
+		if len(got) > len(cPrefix) || !bytes.Equal(got[prev:], cPrefix[prev:len(got)]) {
 			t.Fatalf("C rejects after %d bytes out, Go Reader returned %d bytes: %s",
 				len(cPrefix), len(got), firstDiff(got, cPrefix))
 		}

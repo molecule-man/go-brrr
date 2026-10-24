@@ -1,0 +1,4 @@
+go test fuzz v1
+[]byte("a20\x80A01\x1e x70")
+uint16(208)
+uint16(37)
