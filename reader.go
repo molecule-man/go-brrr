@@ -113,7 +113,6 @@ func (r *Reader) Read(p []byte) (int, error) {
 
 		case decoderResultError:
 			r.err = r.state.err
-			// Drop pending output so later calls return only the error.
 			r.out = r.out[:0]
 			r.outPos = 0
 			r.state.consumeOutput(len(r.state.pendingOutput()))

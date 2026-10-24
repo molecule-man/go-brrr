@@ -1,0 +1,4 @@
+go test fuzz v1
+[]byte("0X\x00\x80h\x9e$C281700\x95\xe3\xcf0\x112\xad$00000000000000")
+uint16(1)
+uint16(1754)

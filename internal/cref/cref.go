@@ -190,6 +190,54 @@ static int crefDecompress(
     *consumed = src_len - avail_in;
     return 1;
 }
+
+// Feed one input byte per call. Reserve a full window for C output.
+// C can hold valid bytes if the output buffer is smaller than its ring buffer.
+static int crefDecompressPrefix(
+    const uint8_t *src, size_t src_len,
+    uint8_t **out, size_t *out_len) {
+
+    const size_t room = (size_t)1 << BROTLI_MAX_WINDOW_BITS;
+    size_t cap = 2 * room;
+    uint8_t *buf = malloc(cap);
+    if (!buf) return 0;
+
+    BrotliDecoderState *s = BrotliDecoderCreateInstance(NULL, NULL, NULL);
+    if (!s) { free(buf); return 0; }
+
+    size_t total = 0;
+    const uint8_t *next_in = src;
+    size_t fed = 0;
+    size_t avail_in = 0;
+
+    for (;;) {
+        if (cap - total < room) {
+            cap *= 2;
+            buf = realloc(buf, cap);
+            if (!buf) { BrotliDecoderDestroyInstance(s); return 0; }
+        }
+        uint8_t *next_out = buf + total;
+        size_t avail_out = cap - total;
+        BrotliDecoderResult r = BrotliDecoderDecompressStream(
+            s, &avail_in, &next_in, &avail_out, &next_out, NULL);
+        total = (size_t)(next_out - buf);
+
+        if (r == BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT) {
+            continue;
+        }
+        if (r == BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT && fed < src_len) {
+            fed++;
+            avail_in++;
+            continue;
+        }
+        break;
+    }
+
+    BrotliDecoderDestroyInstance(s);
+    *out = buf;
+    *out_len = total;
+    return 1;
+}
 */
 import "C" //nolint:gocritic // cgo preamble must directly precede this import
 
@@ -246,6 +294,22 @@ func Decode(compressed []byte) ([]byte, error) {
 // decoder read. consumed < len(compressed) means trailing bytes were ignored.
 func DecodeConsumed(compressed []byte) (out []byte, consumed int, err error) {
 	return decode(compressed, nil)
+}
+
+// DecodePrefix returns bytes that C writes before it stops, with one input byte per call.
+func DecodePrefix(compressed []byte) ([]byte, error) {
+	var inPtr *C.uint8_t
+	if len(compressed) > 0 {
+		inPtr = (*C.uint8_t)(unsafe.Pointer(&compressed[0]))
+	}
+	var cOut *C.uint8_t
+	var outLen C.size_t
+	ok := C.crefDecompressPrefix(inPtr, C.size_t(len(compressed)), &cOut, &outLen) //nolint:gocritic // false positive on cgo call
+	if ok == 0 {
+		return nil, errDecode
+	}
+	defer C.free(unsafe.Pointer(cOut))
+	return goBytesLarge(unsafe.Pointer(cOut), outLen), nil
 }
 
 // DecodeDict decompresses brotli data that was encoded against a raw prefix
