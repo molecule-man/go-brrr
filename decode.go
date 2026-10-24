@@ -339,6 +339,12 @@ func (s *decodeState) decompressStream(output *[]byte) decoderResult {
 			decoderStateCommandPostWrapCopy:
 			result := s.processCommands()
 			if result != decoderResultSuccess {
+				// The caller may write the ring buffer out next. C refuses that
+				// after a command ran past the metablock (BLOCK_LENGTH_1).
+				if result != decoderResultError && s.metaBlockRemainingLen < 0 {
+					s.err = decompressError("negative remaining metablock length")
+					return decoderResultError
+				}
 				return result
 			}
 			// processCommands sets s.state to MetablockDone on success.
@@ -417,6 +423,10 @@ func (s *decodeState) decompressStream(output *[]byte) decoderResult {
 // pendingOutput aliases unread ring-buffer bytes until decoding resumes.
 // writeRingBuffer handles bytes in the write-ahead slack.
 func (s *decodeState) pendingOutput() []byte {
+	// After an overrun the ring buffer holds bytes past the metablock.
+	if s.metaBlockRemainingLen < 0 {
+		return nil
+	}
 	pos := min(s.pos, s.ringbufferSize)
 	flushed := int(s.partialPosOut) - int(s.rbRoundtrips)*s.ringbufferSize
 	if pos <= flushed {

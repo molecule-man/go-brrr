@@ -260,6 +260,51 @@ func TestReaderCorrupted(t *testing.T) {
 	}
 }
 
+// A command that runs past the declared metablock length must not reach the
+// output. C refuses to write such a ring buffer out (BLOCK_LENGTH_1).
+func TestReaderMetablockOverrun(t *testing.T) {
+	// 3000 'a' at quality 5 and LGWin 10: a literal, then a 2999-byte copy that
+	// wraps the 1 KiB ring buffer. MLEN is patched from 3000 to 2000.
+	overrun := []byte{0xa1, 0x78, 0x3e, 0x00, 0x20, 0x11, 0x16, 0x8f, 0x05, 0x12, 0x37, 0x00, 0x00}
+
+	if _, err := Decompress(overrun); err == nil {
+		t.Fatal("Decompress accepted the overrun")
+	}
+
+	sources := []struct {
+		name string
+		src  func() io.Reader
+	}{
+		{"whole", func() io.Reader { return bytes.NewReader(overrun) }},
+		{"one byte", func() io.Reader { return iotest.OneByteReader(bytes.NewReader(overrun)) }},
+	}
+	for _, src := range sources {
+		for _, readSize := range []int{1, 4096} {
+			t.Run(fmt.Sprintf("%s/read=%d", src.name, readSize), func(t *testing.T) {
+				r := NewReader(src.src())
+				var got []byte
+				buf := make([]byte, readSize)
+				var err error
+				for err == nil {
+					var n int
+					n, err = r.Read(buf)
+					got = append(got, buf[:n]...)
+				}
+				if errors.Is(err, io.EOF) {
+					t.Fatal("Reader accepted the overrun")
+				}
+				// Only the literal before the copy may come out.
+				if len(got) > 1 {
+					t.Fatalf("Reader returned %d bytes of a 2000-byte metablock before %v", len(got), err)
+				}
+				if n, again := r.Read(buf); n != 0 || !errors.Is(again, err) {
+					t.Fatalf("Read after error = (%d, %v), want (0, %v)", n, again, err)
+				}
+			})
+		}
+	}
+}
+
 func TestReaderZeroLenP(t *testing.T) {
 	input := []byte("hello")
 	compressed := compress(t, input, 1)
