@@ -262,6 +262,23 @@ func TestReaderCorrupted(t *testing.T) {
 
 // A command that runs past the declared metablock length must not reach the
 // output. C refuses to write such a ring buffer out (BLOCK_LENGTH_1).
+// After a decode error, Read must not serve the bytes still in the ring buffer.
+func TestReaderErrorDropsPendingOutput(t *testing.T) {
+	// One metablock of 22 bytes, then non-zero padding bits.
+	badPadding := []byte("\v\n\x80000000000000000000000008")
+	r := NewReader(bytes.NewReader(badPadding))
+	buf := make([]byte, 22)
+	_, err := r.Read(buf)
+	if err == nil || errors.Is(err, io.EOF) {
+		t.Fatalf("first Read error = %v, want a decode error", err)
+	}
+	for range 2 {
+		if n, again := r.Read(buf); n != 0 || !errors.Is(again, err) {
+			t.Fatalf("Read after error = (%d, %v), want (0, %v)", n, again, err)
+		}
+	}
+}
+
 func TestReaderMetablockOverrun(t *testing.T) {
 	// 3000 'a' at quality 5 and LGWin 10: a literal, then a 2999-byte copy that
 	// wraps the 1 KiB ring buffer. MLEN is patched from 3000 to 2000.
