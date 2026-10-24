@@ -74,7 +74,9 @@ ratio.
 # Compatibility
 
 Output is byte-compatible with the reference implementation at
-https://github.com/google/brotli. Any conforming brotli decoder can
+https://github.com/google/brotli, release v1.2.1. One exception: with a
+compound dictionary at quality 3 and 4, this package follows upstream commit
+54f74c7, which is not in a release yet. Any conforming brotli decoder can
 read streams produced by this package, and this package can decode
 any valid brotli stream.
 */

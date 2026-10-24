@@ -24,7 +24,7 @@ The encoder and decoder are covered by compatibility tests and fuzzing. The publ
 
 ## Compatibility
 
-go-brrr implements Brotli RFC 7932 and is tested against the Brotli reference corpus. Encoded output is byte-compatible with the C reference implementation.
+go-brrr implements Brotli RFC 7932 and is tested against the Brotli reference corpus. Encoded output is byte-compatible with the C reference implementation, release v1.2.1. One exception: with a compound dictionary at quality 3 and 4, go-brrr follows upstream commit [54f74c7](https://github.com/google/brotli/commit/54f74c7f5ac353100ebbda3d17f5471004f701b1), which is not in a release yet.
 
 ## Compared to other Go brotli libraries
 

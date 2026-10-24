@@ -194,7 +194,10 @@ func FuzzCompoundDictCRef(f *testing.F) {
 		assertCRefDecodes(t, goEncoded, data, dict)
 		assertGoDecodes(t, goEncoded, data, dict, chunkSize, readSize)
 		// Optimal parsing at q10–11 may change commands and compressed size.
-		if quality <= 9 && !bytes.Equal(goEncoded, cEncoded) {
+		// TODO: revert the commit "test: pin Go q3/q4 compound dictionary
+		// output for brotli v1.2.1" when a brotli release has 54f74c7.
+		// brotli v1.2.1 ignores the compound dictionary at q3 and q4.
+		if quality <= 9 && quality != 3 && quality != 4 && !bytes.Equal(goEncoded, cEncoded) {
 			t.Fatalf("Go stream differs from C: %s", firstDiff(goEncoded, cEncoded))
 		}
 
