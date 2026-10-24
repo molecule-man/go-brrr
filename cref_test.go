@@ -2,6 +2,8 @@ package brrr
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -448,6 +450,17 @@ func testCompoundDictMatchesCRef(t *testing.T, quality, lgwin int, sizeHint uint
 			}
 			goOut := goBuf.Bytes()
 
+			// TODO: revert the commit "test: pin Go q3/q4 compound dictionary
+			// output for brotli v1.2.1" when a brotli release has 54f74c7.
+			if quality == 3 || quality == 4 {
+				sum := sha256.Sum256(goOut)
+				got := hex.EncodeToString(sum[:])
+				if want := compoundDictQ3Q4SHA256[t.Name()]; got != want {
+					t.Errorf("output SHA-256 = %s, want %s", got, want)
+				}
+				return
+			}
+
 			// C reference encoder with compound dictionary.
 			cOut := creftest.BrotliCompressDict(t, input, dict, quality, lgwin, sizeHint)
 
@@ -465,6 +478,48 @@ func testCompoundDictMatchesCRef(t *testing.T, quality, lgwin int, sizeHint uint
 			}
 		})
 	}
+}
+
+// compoundDictQ3Q4SHA256 holds the Go output hashes of
+// testCompoundDictMatchesCRef at q3 and q4. brotli v1.2.1 lacks upstream
+// commit 54f74c7, so its C encoder ignores the compound dictionary at q3 and
+// q4. The hashes match the C output of brotli commit ab685df.
+//
+// TODO: revert the commit "test: pin Go q3/q4 compound dictionary output for
+// brotli v1.2.1" when a brotli release has 54f74c7.
+var compoundDictQ3Q4SHA256 = map[string]string{
+	"TestCompoundDictMatchesCRef/hint_1MiB/q3_lgwin10/alice29.txt": "e297d13aaf8ed21fdb201cfec36c427be2cec738613267335e97a03b9d9a2752",
+	"TestCompoundDictMatchesCRef/hint_1MiB/q3_lgwin10/monkey":      "7c10df7cc28562fdf284bc06bf35508dd27ce0066a7f6b2a2e69806002a246c1",
+	"TestCompoundDictMatchesCRef/hint_1MiB/q3_lgwin18/alice29.txt": "5d2bb942a49eeaac0b03319296869be44416403adcec6a34e2dff65d9539dcd9",
+	"TestCompoundDictMatchesCRef/hint_1MiB/q3_lgwin18/monkey":      "ccc472bc8883e583f0b506a9ebd5b32ef9677d49cb980e0eb7dc55235c878235",
+	"TestCompoundDictMatchesCRef/hint_1MiB/q3_lgwin22/alice29.txt": "26b9cd8379949272d31abc07ad3f75d1c169f7e5fcd8d74e735764d62de55920",
+	"TestCompoundDictMatchesCRef/hint_1MiB/q3_lgwin22/monkey":      "718678b13503800afd43a0c2472d8a5ac443bfcaa113619ea9565a2757694865",
+	"TestCompoundDictMatchesCRef/hint_1MiB/q3_lgwin24/alice29.txt": "889d5e6242dc75da5a761b86213e77e42f4e0cabf3f3fc82f8448ea88ed96d4a",
+	"TestCompoundDictMatchesCRef/hint_1MiB/q3_lgwin24/monkey":      "180ca75cebdd3c7b7bfbd978645b557fd03278bc742ee00f017186924d7878c3",
+	"TestCompoundDictMatchesCRef/hint_1MiB/q4_lgwin10/alice29.txt": "15168d0a2a8fff9ef4ca4ea72a584e34fb134c98d09e8b5ff9b69f5a5d54461e",
+	"TestCompoundDictMatchesCRef/hint_1MiB/q4_lgwin10/monkey":      "16631b6cabc0600ef65e6eb7f280ea34fb2e76da1c80913d432afc428fa4fa5f",
+	"TestCompoundDictMatchesCRef/hint_1MiB/q4_lgwin18/alice29.txt": "2f5dc4278f1c128c24d644c7890ad3ef85d64c8ba81936035f17900ffa24e2bb",
+	"TestCompoundDictMatchesCRef/hint_1MiB/q4_lgwin18/monkey":      "c4602fe633ead4fa9a3ddec6c0d15c14b0df664d5e244f090a82a94b3df9d051",
+	"TestCompoundDictMatchesCRef/hint_1MiB/q4_lgwin22/alice29.txt": "583ab0c404a2851bd0aed7fd1888089b37e46fdf563c55c16f20e8b0a718691a",
+	"TestCompoundDictMatchesCRef/hint_1MiB/q4_lgwin22/monkey":      "7bc2b84224e06b7de2ce7e6587b35ea5f59b437fa24686aed437fca6a6960997",
+	"TestCompoundDictMatchesCRef/hint_1MiB/q4_lgwin24/alice29.txt": "811df8a92d4d7325ecd5a7126890532bf8a7036a0aaf0194b96642a82ed69070",
+	"TestCompoundDictMatchesCRef/hint_1MiB/q4_lgwin24/monkey":      "f214d5ab75e3a566bbca2536a8dc0ca7dfb9395e188acd66fb8bf110e2ff37ce",
+	"TestCompoundDictMatchesCRef/hint_auto/q3_lgwin10/alice29.txt": "e297d13aaf8ed21fdb201cfec36c427be2cec738613267335e97a03b9d9a2752",
+	"TestCompoundDictMatchesCRef/hint_auto/q3_lgwin10/monkey":      "7c10df7cc28562fdf284bc06bf35508dd27ce0066a7f6b2a2e69806002a246c1",
+	"TestCompoundDictMatchesCRef/hint_auto/q3_lgwin18/alice29.txt": "5d2bb942a49eeaac0b03319296869be44416403adcec6a34e2dff65d9539dcd9",
+	"TestCompoundDictMatchesCRef/hint_auto/q3_lgwin18/monkey":      "ccc472bc8883e583f0b506a9ebd5b32ef9677d49cb980e0eb7dc55235c878235",
+	"TestCompoundDictMatchesCRef/hint_auto/q3_lgwin22/alice29.txt": "26b9cd8379949272d31abc07ad3f75d1c169f7e5fcd8d74e735764d62de55920",
+	"TestCompoundDictMatchesCRef/hint_auto/q3_lgwin22/monkey":      "718678b13503800afd43a0c2472d8a5ac443bfcaa113619ea9565a2757694865",
+	"TestCompoundDictMatchesCRef/hint_auto/q3_lgwin24/alice29.txt": "889d5e6242dc75da5a761b86213e77e42f4e0cabf3f3fc82f8448ea88ed96d4a",
+	"TestCompoundDictMatchesCRef/hint_auto/q3_lgwin24/monkey":      "180ca75cebdd3c7b7bfbd978645b557fd03278bc742ee00f017186924d7878c3",
+	"TestCompoundDictMatchesCRef/hint_auto/q4_lgwin10/alice29.txt": "a3f1f9d0355dcf96164130543a649b11ff2c571e3ea168cb8e266c90872afe5d",
+	"TestCompoundDictMatchesCRef/hint_auto/q4_lgwin10/monkey":      "d0813f3e510406d7890072c9075a13fa9f1c52a10f654af7d14f8ba5b6717a4e",
+	"TestCompoundDictMatchesCRef/hint_auto/q4_lgwin18/alice29.txt": "cd1d28590c7b80c920da91f752222e79fd721097d21557a78974902322e13d4f",
+	"TestCompoundDictMatchesCRef/hint_auto/q4_lgwin18/monkey":      "216a40410c7e97f23c697d420a56f9d27bce05049c9e21effedcfee53b26140c",
+	"TestCompoundDictMatchesCRef/hint_auto/q4_lgwin22/alice29.txt": "725c413b71244196c8c47f8f212f7df4736b6845653f60545c15ab0fb91d5906",
+	"TestCompoundDictMatchesCRef/hint_auto/q4_lgwin22/monkey":      "a05a424279e1cbd75dd1188fe0eeda26573f35e6a14b90d8717b8e60d86fd2d3",
+	"TestCompoundDictMatchesCRef/hint_auto/q4_lgwin24/alice29.txt": "8c17d2ceeec6e1f1511a4448d3c8dd84643edbc7213f8ddd4ca9a337a2c556d3",
+	"TestCompoundDictMatchesCRef/hint_auto/q4_lgwin24/monkey":      "aa8f4e7f93c92b633315b1d4ddba89de33dcb380db8b3d3b1b44a0c09bfebeb4",
 }
 
 // TestCompoundDictMatchesCRef verifies compound dictionary output across
