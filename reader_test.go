@@ -260,6 +260,22 @@ func TestReaderCorrupted(t *testing.T) {
 	}
 }
 
+func TestReaderErrorDropsPendingOutput(t *testing.T) {
+	// The stream has 22 output bytes and non-zero final padding bits.
+	badPadding := []byte("\v\n\x80000000000000000000000008")
+	r := NewReader(bytes.NewReader(badPadding))
+	buf := make([]byte, 22)
+	_, err := r.Read(buf)
+	if err == nil || errors.Is(err, io.EOF) {
+		t.Fatalf("first Read error = %v, want a decode error", err)
+	}
+	for range 2 {
+		if n, again := r.Read(buf); n != 0 || !errors.Is(again, err) {
+			t.Fatalf("Read after error = (%d, %v), want (0, %v)", n, again, err)
+		}
+	}
+}
+
 // A command that runs past the declared metablock length must not reach the
 // output. C refuses to write such a ring buffer out (BLOCK_LENGTH_1).
 func TestReaderMetablockOverrun(t *testing.T) {

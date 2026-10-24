@@ -118,6 +118,13 @@ func FuzzDecodeCRef(f *testing.F) {
 	f.Add(append(bytes.Clone(full), 0x00), uint16(1), uint16(1))
 	f.Add(full[:len(full)/2], uint16(1), uint16(1))
 	f.Add([]byte{0xff, 0xfe, 0xfd, 0x00, 0x01}, uint16(1), uint16(1))
+	overrun := []byte{0xa1, 0x78, 0x3e, 0x00, 0x20, 0x11, 0x16, 0x8f, 0x05, 0x12, 0x37, 0x00, 0x00}
+	f.Add(overrun, uint16(1), uint16(1))
+	f.Add(overrun, uint16(len(overrun)), uint16(4096))
+	f.Add([]byte{
+		0x30, 0x30, 0x61, 0x44, 0x32, 0xd2, 0x7a, 0x30, 0x00, 0x30, 0x25, 0x30, 0x11, 0x27, 0x32, 0x61, 0x38, 0x31, 0x30,
+		0x30, 0x30, 0x31, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+	}, uint16(37), uint16(4096))
 
 	f.Fuzz(func(t *testing.T, data []byte, chunkWord, readWord uint16) {
 		data = data[:min(len(data), fuzzMaxCompressed)]
@@ -307,16 +314,30 @@ func assertGoDecodes(t *testing.T, encoded, want, dict []byte, chunkSize, readSi
 	}
 }
 
+// Check that Go emits only bytes in C's rejected prefix.
 func assertGoStreamRejects(t *testing.T, encoded []byte, chunkSize, readSize int) {
 	t.Helper()
+	cPrefix, err := cref.DecodePrefix(encoded)
+	if err != nil {
+		t.Fatalf("C DecodePrefix: %v", err)
+	}
 	r := newFuzzReader(t, encoded, nil, chunkSize)
 	buf := make([]byte, readSize)
+	var got []byte
 	for {
-		_, err := r.Read(buf)
+		n, err := r.Read(buf)
+		got = append(got, buf[:n]...)
+		if len(got) > len(cPrefix) || !bytes.Equal(got, cPrefix[:len(got)]) {
+			t.Fatalf("C rejects after %d bytes out, Go Reader returned %d bytes: %s",
+				len(cPrefix), len(got), firstDiff(got, cPrefix))
+		}
 		if errors.Is(err, io.EOF) {
 			t.Fatal("C rejects, Go streaming Reader accepts")
 		}
 		if err != nil {
+			if n, again := r.Read(buf); n != 0 || !errors.Is(again, err) {
+				t.Fatalf("Read after error = (%d, %v), want (0, %v)", n, again, err)
+			}
 			return
 		}
 	}
