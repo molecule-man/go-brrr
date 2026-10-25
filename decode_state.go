@@ -287,6 +287,9 @@ type decodeState struct {
 	distRB                [4]int
 	safeCmdMemento        bitReaderState // saved before safe command symbol read
 	metaBlockRemainingLen int
+	// initForReuse resets the limit and total. metablockBegin preserves both.
+	maxDecodedBytes uint64
+	declaredTotal   uint64
 	// Indices into contextMap and distContextMap slices.
 	contextMapSliceIdx     int
 	distContextMapSliceIdx int

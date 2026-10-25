@@ -54,4 +54,10 @@ type ReaderOptions struct {
 	// the dictionaries supplied to the encoder. Up to 15 chunks are allowed;
 	// each must be non-empty. Dictionaries are preserved across Reset.
 	Dictionaries [][]byte
+
+	// MaxDecodedBytes limits bytes returned by Reader.Read. Zero disables it.
+	// It rejects oversized declared blocks before ring buffer growth.
+	// It does not set a strict memory or CPU limit. Reset preserves it.
+	// Decompress does not use it.
+	MaxDecodedBytes uint64
 }

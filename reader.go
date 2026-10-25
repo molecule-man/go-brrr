@@ -21,7 +21,10 @@ type Reader struct {
 	state   decodeState
 	outPos  int
 	started bool
-	buf     [32 << 10]byte
+	// Reset preserves the limit and clears the delivered byte count.
+	maxDecodedBytes uint64
+	delivered       uint64
+	buf             [32 << 10]byte
 }
 
 // NewReader returns a new Reader reading brotli-compressed data from src.
@@ -41,7 +44,7 @@ func NewReaderOptions(src io.Reader, opts ReaderOptions) (*Reader, error) {
 			return nil, encoder.ErrEmptyDict
 		}
 	}
-	return &Reader{src: src, dicts: opts.Dictionaries}, nil
+	return &Reader{src: src, dicts: opts.Dictionaries, maxDecodedBytes: opts.MaxDecodedBytes}, nil
 }
 
 // Read decompresses data into p.
@@ -67,6 +70,7 @@ func (r *Reader) Read(p []byte) (int, error) {
 	// Lazy initialization on first Read.
 	if !r.started {
 		r.state.initForReuse()
+		r.state.maxDecodedBytes = r.maxDecodedBytes
 		r.started = true
 		for _, d := range r.dicts {
 			if err := r.state.attachCompoundDict(d); err != nil {
@@ -89,6 +93,9 @@ func (r *Reader) Read(p []byte) (int, error) {
 			if n := r.serve(p); n > 0 {
 				return n, nil
 			}
+			if r.err != nil {
+				return 0, r.err
+			}
 			if r.srcErr != nil {
 				r.err = wrapInputError(r.srcErr)
 				r.srcErr = nil
@@ -102,6 +109,9 @@ func (r *Reader) Read(p []byte) (int, error) {
 		case decoderResultNeedsMoreOutput:
 			if n := r.serve(p); n > 0 {
 				return n, nil
+			}
+			if r.err != nil {
+				return 0, r.err
 			}
 
 		case decoderResultSuccess:
@@ -129,6 +139,7 @@ func (r *Reader) Reset(src io.Reader) {
 	r.srcErr = nil
 	r.out = r.out[:0]
 	r.outPos = 0
+	r.delivered = 0
 	r.started = false
 	// state will be zeroed by initForReuse on first Read;
 	// no need to zero it here or touch the 32KB buf.
@@ -146,8 +157,22 @@ func (r *Reader) Close() error {
 	return nil
 }
 
-// serve copies pending decoded bytes into p.
+// serve copies pending output into p within the decoded byte limit.
 func (r *Reader) serve(p []byte) int {
+	if r.maxDecodedBytes != 0 {
+		room := r.maxDecodedBytes - r.delivered
+		if room == 0 {
+			// Exact-limit streams can end without an error.
+			if r.outPos < len(r.out) || (r.started && r.state.pendingOutput() != nil) {
+				r.err = ErrDecodedSizeLimit
+			}
+			return 0
+		}
+		if uint64(len(p)) > room {
+			p = p[:room]
+		}
+	}
+
 	if r.outPos < len(r.out) {
 		n := copy(p, r.out[r.outPos:])
 		r.outPos += n
@@ -155,6 +180,7 @@ func (r *Reader) serve(p []byte) int {
 			r.out = r.out[:0]
 			r.outPos = 0
 		}
+		r.delivered += uint64(n)
 		return n
 	}
 
@@ -169,6 +195,7 @@ func (r *Reader) serve(p []byte) int {
 	}
 	n := copy(p, pending)
 	r.state.consumeOutput(n)
+	r.delivered += uint64(n)
 	return n
 }
 

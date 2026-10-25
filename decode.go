@@ -34,6 +34,9 @@ var codeLengthPrefixValue = [16]byte{
 // ErrExcessiveInput reports bytes that follow finalized brotli stream.
 var ErrExcessiveInput = errors.New("brotli: excessive input")
 
+// ErrDecodedSizeLimit reports a stream that exceeds ReaderOptions.MaxDecodedBytes.
+var ErrDecodedSizeLimit = errors.New("brotli: decoded size limit exceeded")
+
 // Sentinel errors returned by Decompress.
 var errPadding = errors.New("brotli: non-zero padding bits")
 
@@ -180,6 +183,15 @@ func (s *decodeState) decompressStream(output *[]byte) decoderResult {
 			if s.metaBlockRemainingLen == 0 {
 				s.state = decoderStateMetablockDone
 				break
+			}
+			// Check before ring-buffer allocation. Subtract to avoid overflow.
+			if s.maxDecodedBytes != 0 {
+				mlen := uint64(s.metaBlockRemainingLen)
+				if mlen > s.maxDecodedBytes-s.declaredTotal {
+					s.err = ErrDecodedSizeLimit
+					return decoderResultError
+				}
+				s.declaredTotal += mlen
 			}
 			s.calculateRingBufferSize()
 			if s.isUncompressed {
