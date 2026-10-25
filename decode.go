@@ -1586,7 +1586,11 @@ func (s *decodeState) processCommands() decoderResult {
 	}
 
 commandBegin:
-	if s.blockLength[1] == 0 && s.numBlockTypes[1] > 1 {
+	if s.blockLength[1] == 0 {
+		if s.numBlockTypes[1] <= 1 {
+			s.err = decompressError("invalid block switch")
+			return decoderResultError
+		}
 		if br.checkInputAmount() {
 			s.decodeBlockTypeAndLength(false, 1)
 		} else if !s.decodeBlockTypeAndLength(true, 1) {
@@ -1704,7 +1708,11 @@ commandInner:
 	// CommandInner: read i literal bytes.
 	if s.trivialLiteralContext != 0 {
 		for i > 0 {
-			if s.blockLength[0] == 0 && s.numBlockTypes[0] > 1 {
+			if s.blockLength[0] == 0 {
+				if s.numBlockTypes[0] <= 1 {
+					s.err = decompressError("invalid block switch")
+					return decoderResultError
+				}
 				if br.checkInputAmount() {
 					s.decodeBlockTypeAndLength(false, 0)
 				} else if !s.decodeBlockTypeAndLength(true, 0) {
@@ -1782,7 +1790,11 @@ commandInner:
 		p1 = s.ringbuffer[(pos-1)&s.ringbufferMask]
 		p2 = s.ringbuffer[(pos-2)&s.ringbufferMask]
 		for i > 0 {
-			if s.blockLength[0] == 0 && s.numBlockTypes[0] > 1 {
+			if s.blockLength[0] == 0 {
+				if s.numBlockTypes[0] <= 1 {
+					s.err = decompressError("invalid block switch")
+					return decoderResultError
+				}
 				if br.checkInputAmount() {
 					s.decodeBlockTypeAndLength(false, 0)
 				} else if !s.decodeBlockTypeAndLength(true, 0) {
@@ -1868,7 +1880,11 @@ commandPostDecodeLiterals:
 		s.distanceCode = s.distRB[s.distRBIdx&3]
 	} else {
 		// Read distance code.
-		if s.blockLength[2] == 0 && s.numBlockTypes[2] > 1 {
+		if s.blockLength[2] == 0 {
+			if s.numBlockTypes[2] <= 1 {
+				s.err = decompressError("invalid block switch")
+				return decoderResultError
+			}
 			if br.checkInputAmount() {
 				s.decodeBlockTypeAndLength(false, 2)
 			} else if !s.decodeBlockTypeAndLength(true, 2) {

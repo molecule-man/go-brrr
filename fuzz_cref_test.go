@@ -5,6 +5,7 @@ package brrr
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -125,6 +126,10 @@ func FuzzDecodeCRef(f *testing.F) {
 		0x30, 0x30, 0x61, 0x44, 0x32, 0xd2, 0x7a, 0x30, 0x00, 0x30, 0x25, 0x30, 0x11, 0x27, 0x32, 0x61, 0x38, 0x31, 0x30,
 		0x30, 0x30, 0x31, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
 	}, uint16(37), uint16(4096))
+	// Block switch with one block type: C rejects with -17 (CVE-2026-111497).
+	blockSwitch, _ := hex.DecodeString("200010414141fcffff07002228f00b60f7f41f000000")
+	f.Add(blockSwitch, uint16(1), uint16(1))
+	f.Add(blockSwitch, uint16(len(blockSwitch)), uint16(4096))
 
 	f.Fuzz(func(t *testing.T, data []byte, chunkWord, readWord uint16) {
 		data = data[:min(len(data), fuzzMaxCompressed)]
