@@ -135,7 +135,7 @@ type readBlockLengthState int
 
 // bitReader holds the bit-level reading state for the decoder input stream.
 type bitReader struct {
-	inputBase unsafe.Pointer // cached base pointer for bounds-check-free loads
+	inputBase unsafe.Pointer // default decoder input base; nil in purego
 	input     []byte         // full input buffer (set via setInput)
 	pos       int            // current byte position in input
 	val       uint64         // pre-fetched bits
@@ -252,14 +252,9 @@ type decodeState struct {
 	sink             *chunkWriter
 	outChunks        chunkWriter
 
-	// literalCodesPtrs caches a precomputed unsafe.Pointer for each of the
-	// 64 literal contexts. Each entry is codesBase + literalCodesOffsets[ctx]*4,
-	// eliminating a multiply and add from the critical path in
-	// decodeLiteralsContextBatch. Always populated alongside literalCodesOffsets
-	// by prepareLiteralDecoding; never zeroed by initForReuse.
-	// Placed here (in the pointer section) to keep all pointer-containing
-	// fields contiguous and avoid extending the GC scan range into the
-	// large scalar arrays.
+	// The default decoder caches one code pointer per literal context.
+	// The checked decoder uses literalCodesOffsets and leaves this array unused.
+	// Keep the array with other pointers to limit the GC scan range.
 	literalCodesPtrs [64]unsafe.Pointer
 
 	// In C these are a union; Go embeds both since they are never used
@@ -472,16 +467,11 @@ func (s *decodeState) initDefaults() {
 }
 
 func (s *decodeState) initForReuse() {
-	// Reset the decoder state for reuse, preserving heap-allocated backing
-	// arrays. Unlike the previous *s = decodeState{} approach, this avoids
-	// zeroing ~10 KB of arena arrays (headerArena.contextMapTable,
-	// headerArena.symbolListsArray, bodyArena, literalCodesOffsets) that are
-	// always fully initialized before being read.
+	// Preserve reusable arrays. The decoder fills them before each read.
 
 	// Reset only the scalar bitReader fields that must be zero.
-	// inputBase and input are stale but will be overwritten by setInput
-	// before any read, so skipping those two pointer-bearing fields avoids
-	// two GC write barriers per Decompress call.
+	// setInput replaces br.input before use. The default build also replaces
+	// br.inputBase. This reset avoids write barriers for those pointer fields.
 	s.br.val = 0
 	s.br.bitPos = 0
 	s.br.pos = 0
@@ -529,14 +519,7 @@ func (s *decodeState) initForReuse() {
 	s.headerArena.maxRunLengthPrefix = 0
 	s.headerArena.code = 0
 
-	// Bulk-zero the contiguous scalar block (state through distCodesCache).
-	// This region contains no pointers, so raw memclr is safe.
-	// bodyArena and literalCodesOffsets are NOT zeroed — they are always
-	// fully written by calculateDistanceLut / prepareLiteralDecoding
-	// before being read.
-	start := unsafe.Pointer(&s.state)
-	size := uintptr(unsafe.Pointer(&s.distCodesCache)) - uintptr(start) + unsafe.Sizeof(s.distCodesCache)
-	clear(unsafe.Slice((*byte)(start), size))
+	s.clearScalarFields()
 
 	s.initDefaults()
 }

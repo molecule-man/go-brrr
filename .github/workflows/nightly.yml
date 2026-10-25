@@ -28,7 +28,8 @@ jobs:
       fail-fast: false
       matrix:
         target: [FuzzEncodeCRef, FuzzDecodeCRef, FuzzCompoundDictCRef, FuzzEncodeDictWordsCRef]
-    name: fuzz (${{ matrix.target }})
+        tags: ["", "purego"]
+    name: fuzz (${{ matrix.target }}${{ matrix.tags && format(', {0}', matrix.tags) || '' }})
     steps:
       - uses: actions/checkout@v6
         with:
@@ -44,18 +45,21 @@ jobs:
       - name: Locate the corpus
         run: echo "FUZZ_CORPUS=$(go env GOCACHE)/fuzz" >> "$GITHUB_ENV"
 
-      # The corpus grows across runs. Do not commit it. Keep one cache lane per
-      # target, keyed by run id so every save is a new key.
+      # The corpus grows across runs. Do not commit it.
+      # Keep one cache per target and tag. The tag keeps prune prefixes separate.
+      - name: Lane name
+        run: echo "FUZZ_LANE=${{ matrix.tags && format('{0}-', matrix.tags) || '' }}${{ matrix.target }}" >> "$GITHUB_ENV"
+
       - name: Restore the corpus
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.FUZZ_CORPUS }}
-          key: fuzz-${{ matrix.target }}-${{ github.run_id }}
-          restore-keys: fuzz-${{ matrix.target }}-
+          key: fuzz-${{ env.FUZZ_LANE }}-${{ github.run_id }}
+          restore-keys: fuzz-${{ env.FUZZ_LANE }}-
 
       - name: Fuzz
         run: >
-          go test -run='^$' -fuzz='^${{ matrix.target }}$'
+          go test -tags '${{ matrix.tags }}' -run='^$' -fuzz='^${{ matrix.target }}$'
           -fuzztime="$FUZZTIME" -parallel=4 .
 
       - name: Save the corpus
@@ -63,14 +67,14 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ env.FUZZ_CORPUS }}
-          key: fuzz-${{ matrix.target }}-${{ github.run_id }}
+          key: fuzz-${{ env.FUZZ_LANE }}-${{ github.run_id }}
 
       - name: Prune the older corpus caches
         if: always()
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-          TARGET: ${{ matrix.target }}
+          TARGET: ${{ env.FUZZ_LANE }}
           REPO: ${{ github.repository }}
         run: .github/scripts/prune-fuzz-caches.sh
 
@@ -78,7 +82,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: crashers-${{ matrix.target }}
+          name: crashers-${{ env.FUZZ_LANE }}
           path: testdata/fuzz/**
           if-no-files-found: ignore
           retention-days: 90
