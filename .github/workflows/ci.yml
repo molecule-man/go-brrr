@@ -66,6 +66,28 @@ jobs:
           GOAMD64: ${{ matrix.goamd64 }}
         run: go test -tags '${{ matrix.tags }}' ${{ matrix.cpu && format('-cpu {0}', matrix.cpu) || '' }} ./...
 
+  checkptr:
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build C reference static library
+        run: make lib/libbrotli_cref.a
+
+      # checkptr instruments every unsafe.Pointer use and panics on a pointer
+      # that leaves its allocation. Skip the Alloc tests. They assert zero
+      # heap allocations. checkptr adds allocations, so the counts are invalid.
+      - name: Test (checkptr)
+        run: go test -gcflags=all=-d=checkptr=2 -skip Alloc ./...
+
   test-arch:
     runs-on: ${{ matrix.runner }}
     env:
