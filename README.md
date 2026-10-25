@@ -87,6 +87,8 @@ For on-the-fly compression, brotli q5–6 is a strong choice if you're already u
 
 If you compress or decompress repeatedly (e.g. per request in a webserver), keep `*brrr.Writer` and `*brrr.Reader` instances in `sync.Pool`s and `Reset` each one into the next stream rather than allocating new instances each time. See the [compiled examples](example_test.go).
 
+For untrusted input, set `ReaderOptions.MaxDecodedBytes`. See the [`MaxDecodedBytes` example](example_test.go).
+
 ## Implementation notes
 
 go-brrr is optimized for throughput. Some hot paths intentionally use larger functions, duplicated loops, and specialized code where benchmarks showed measurable wins. These choices stay local to performance-sensitive encoder and decoder internals; public APIs stay small and conventional.

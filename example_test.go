@@ -4,6 +4,7 @@ package brrr_test
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -235,4 +236,29 @@ func Example_compoundDictionary() {
 	}
 	fmt.Println(string(result))
 	// Output: This document references common dictionary content that appears in many documents. It benefits from the shared dictionary because repeated phrases compress better.
+}
+
+func Example_maxDecodedBytes() {
+	// Set a decoded byte limit for untrusted input.
+	var compressed bytes.Buffer
+	w, err := brrr.NewWriter(&compressed, 5)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if _, err := w.Write(bytes.Repeat([]byte("a"), 1<<20)); err != nil {
+		log.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		log.Fatal(err)
+	}
+
+	r, err := brrr.NewReaderOptions(&compressed, brrr.ReaderOptions{
+		MaxDecodedBytes: 1 << 10,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	n, err := io.Copy(io.Discard, r)
+	fmt.Println(n <= 1<<10, errors.Is(err, brrr.ErrDecodedSizeLimit))
+	// Output: true true
 }
