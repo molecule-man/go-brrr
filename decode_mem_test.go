@@ -1,4 +1,4 @@
-// Tests for the decode_mem.go / decode_mem_purego.go primitives. These run in
+// Tests for the decode_mem.go / decode_mem_checked.go primitives. These run in
 // both builds, so they also check that both versions return the same values.
 
 package brrr

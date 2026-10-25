@@ -1,6 +1,6 @@
-//go:build !purego
+//go:build !purego && (386 || amd64 || arm64 || loong64 || ppc64 || ppc64le || s390x || wasm)
 
-// Decoder memory access for the default build. The purego build uses checked slices.
+// Native loads need unaligned access. le32 and le64 handle big-endian targets.
 
 package brrr
 
@@ -54,7 +54,7 @@ func copy16(b []byte, dst, src int) {
 	*(*[16]byte)(unsafe.Add(base, dst)) = *(*[16]byte)(unsafe.Add(base, src))
 }
 
-// checkRingCopy is a no-op. The purego build checks the logical ring bounds.
+// checkRingCopy is a no-op. The checked build checks the logical ring bounds.
 func checkRingCopy(size, pos, n int) {}
 
 func (s *decodeState) cacheLiteralCodes() {

@@ -1,6 +1,6 @@
-//go:build purego
+//go:build purego || !(386 || amd64 || arm64 || loong64 || ppc64 || ppc64le || s390x || wasm)
 
-// Decoder memory access with Go bounds checks. The default build uses unsafe loads.
+// Checked memory access for purego and other targets.
 
 package brrr
 
@@ -55,7 +55,7 @@ func checkRingCopy(size, pos, n int) {
 	}
 }
 
-// cacheLiteralCodes fills only literalCodesOffsets. The purego context batch
+// cacheLiteralCodes fills only literalCodesOffsets. The checked context batch
 // does not read literalCodesPtrs.
 func (s *decodeState) cacheLiteralCodes() {
 	ctxMap := s.contextMap[s.contextMapSliceIdx:]

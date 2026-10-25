@@ -135,7 +135,7 @@ type readBlockLengthState int
 
 // bitReader holds the bit-level reading state for the decoder input stream.
 type bitReader struct {
-	inputBase unsafe.Pointer // default decoder input base; nil in purego
+	inputBase unsafe.Pointer // unsafe decoder input base; nil in the checked build
 	input     []byte         // full input buffer (set via setInput)
 	pos       int            // current byte position in input
 	val       uint64         // pre-fetched bits

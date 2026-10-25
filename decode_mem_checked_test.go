@@ -1,4 +1,4 @@
-//go:build purego
+//go:build purego || !(386 || amd64 || arm64 || loong64 || ppc64 || ppc64le || s390x || wasm)
 
 // Bounds tests for the checked decoder primitives.
 
