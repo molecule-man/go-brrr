@@ -4,12 +4,45 @@ package brrr
 
 import (
 	"bytes"
+	"encoding/hex"
 	"io"
 	"testing"
 	"testing/iotest"
 
 	"github.com/molecule-man/go-brrr/internal/core"
 )
+
+// A 22-byte stream that requests a block switch with one block type.
+// C reference v1.2.1 rejects it with BROTLI_DECODER_ERROR_FORMAT_BLOCK_SWITCH
+// (CVE-2026-111497).
+func TestDecodeRejectsBlockSwitchWithOneBlockType(t *testing.T) {
+	payload, err := hex.DecodeString("200010414141fcffff07002228f00b60f7f41f000000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "brotli: invalid block switch"
+
+	t.Run("oneshot", func(t *testing.T) {
+		_, err := Decompress(payload)
+		if err == nil {
+			t.Fatal("Decompress accepted the malformed stream")
+		}
+		if err.Error() != want {
+			t.Fatalf("Decompress err = %q, want %q", err, want)
+		}
+	})
+
+	t.Run("streaming", func(t *testing.T) {
+		r := NewReader(bytes.NewReader(payload))
+		_, err := io.Copy(io.Discard, r)
+		if err == nil {
+			t.Fatal("Reader accepted the malformed stream")
+		}
+		if err.Error() != want {
+			t.Fatalf("Reader err = %q, want %q", err, want)
+		}
+	})
+}
 
 func TestDecompressZeroLengthStaticDictionaryTransform(t *testing.T) {
 	// Transform 64 (OmitLast9) turns "links" into an empty string, then
@@ -64,6 +97,50 @@ func TestProcessCommandsRejectsInvalidStaticDictionaryTransform(t *testing.T) {
 	}
 	if got, want := s.err.Error(), "brotli: invalid dictionary transform"; got != want {
 		t.Fatalf("processCommands() err = %q, want %q", got, want)
+	}
+}
+
+// A block switch with one block type is the CVE-2026-111497 state.
+// Fixed C returns BROTLI_DECODER_ERROR_FORMAT_BLOCK_SWITCH for it.
+func TestProcessCommandsRejectsBlockSwitchWithOneBlockType(t *testing.T) {
+	tests := []struct {
+		name                  string
+		treeType              int
+		state                 decoderState
+		trivialLiteralContext int
+	}{
+		{"command", 1, decoderStateCommandBegin, 0},
+		{"literal trivial context", 0, decoderStateCommandInner, 1},
+		{"literal context", 0, decoderStateCommandInner, 0},
+		{"distance", 2, decoderStateCommandPostDecodeLiterals, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var s decodeState
+			s.state = tc.state
+			s.ringbufferSize = 64
+			s.ringbufferMask = s.ringbufferSize - 1
+			s.ringbuffer = make([]byte, s.ringbufferSize+ringBufferWriteAheadSlack)
+			s.pos = 2
+			s.loopCounter = 1
+			s.metaBlockRemainingLen = 7
+			s.distanceCode = -1
+			s.trivialLiteralContext = tc.trivialLiteralContext
+			s.numBlockTypes = [3]uint{1, 1, 1}
+			s.blockLength = [3]uint{blockSizeCap, blockSizeCap, blockSizeCap}
+			s.blockLength[tc.treeType] = 0
+
+			result := s.processCommands()
+			if result != decoderResultError {
+				t.Fatalf("processCommands() result = %v, want decoderResultError", result)
+			}
+			if s.err == nil {
+				t.Fatal("processCommands() returned no error")
+			}
+			if got, want := s.err.Error(), "brotli: invalid block switch"; got != want {
+				t.Fatalf("processCommands() err = %q, want %q", got, want)
+			}
+		})
 	}
 }
 
