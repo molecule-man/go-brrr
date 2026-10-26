@@ -135,13 +135,16 @@ static int crefCompressDict(
 
 // crefDecompress optionally attaches a raw dictionary. Reporting consumed
 // bytes lets tests distinguish trailing data from a malformed stream.
+// Return 2 if max_out is nonzero and output exceeds it.
 static int crefDecompress(
     const uint8_t *src, size_t src_len,
     const uint8_t *dict, size_t dict_len,
+    size_t max_out,
     uint8_t **out, size_t *out_len, size_t *consumed) {
 
     size_t cap = src_len * 4;
     if (cap < 1024) cap = 1024;
+    if (max_out > 0 && cap > max_out + 1) cap = max_out + 1;
     uint8_t *buf = malloc(cap);
     if (!buf) return 0;
 
@@ -165,6 +168,11 @@ static int crefDecompress(
             s, &avail_in, &next_in, &avail_out, &next_out, NULL);
         total = (size_t)(next_out - buf);
 
+        if (max_out > 0 && total > max_out) {
+            free(buf);
+            BrotliDecoderDestroyInstance(s);
+            return 2;
+        }
         if (r == BROTLI_DECODER_RESULT_SUCCESS) break;
         if (r == BROTLI_DECODER_RESULT_ERROR) {
             free(buf);
@@ -173,6 +181,7 @@ static int crefDecompress(
         }
         if (r == BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT) {
             cap *= 2;
+            if (max_out > 0 && cap > max_out + 1) cap = max_out + 1;
             buf = realloc(buf, cap);
             if (!buf) { BrotliDecoderDestroyInstance(s); return 0; }
             continue;
@@ -194,7 +203,7 @@ static int crefDecompress(
 // Feed one input byte per call. Reserve a full window for C output.
 // C can hold valid bytes if the output buffer is smaller than its ring buffer.
 static int crefDecompressPrefix(
-    const uint8_t *src, size_t src_len,
+    const uint8_t *src, size_t src_len, size_t max_out,
     uint8_t **out, size_t *out_len) {
 
     const size_t room = (size_t)1 << BROTLI_MAX_WINDOW_BITS;
@@ -222,6 +231,11 @@ static int crefDecompressPrefix(
             s, &avail_in, &next_in, &avail_out, &next_out, NULL);
         total = (size_t)(next_out - buf);
 
+        if (total > max_out) {
+            free(buf);
+            BrotliDecoderDestroyInstance(s);
+            return 2;
+        }
         if (r == BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT) {
             continue;
         }
@@ -249,6 +263,9 @@ import (
 
 var errEncode = errors.New("c reference brotli compression failed")
 var errDecode = errors.New("c reference brotli decompression failed")
+
+// ErrOutputLimit reports that C output went above maxOut.
+var ErrOutputLimit = errors.New("c reference brotli output limit exceeded")
 
 // goBytesLarge copies a C buffer into a fresh Go slice. C.GoBytes is unusable
 // for buffers >= 2 GiB because it truncates the length to C.int (32-bit) and
@@ -286,25 +303,38 @@ func Encode(input []byte, quality, lgwin int, sizeHint uint) ([]byte, error) {
 // Decode decompresses brotli data using the C reference decoder. Like the
 // reference decoder itself, it ignores bytes after the final meta-block.
 func Decode(compressed []byte) ([]byte, error) {
-	out, _, err := decode(compressed, nil)
+	out, _, err := decode(compressed, nil, 0)
 	return out, err
 }
 
 // DecodeConsumed is like Decode but also reports how many input bytes the
 // decoder read. consumed < len(compressed) means trailing bytes were ignored.
-func DecodeConsumed(compressed []byte) (out []byte, consumed int, err error) {
-	return decode(compressed, nil)
+// It returns ErrOutputLimit when the output exceeds maxOut bytes.
+func DecodeConsumed(compressed []byte, maxOut int) (out []byte, consumed int, err error) {
+	if maxOut <= 0 {
+		panic("cref: maxOut must be positive")
+	}
+	return decode(compressed, nil, maxOut)
 }
 
 // DecodePrefix returns bytes that C writes before it stops, with one input byte per call.
-func DecodePrefix(compressed []byte) ([]byte, error) {
+// It returns ErrOutputLimit when the output exceeds maxOut bytes.
+func DecodePrefix(compressed []byte, maxOut int) ([]byte, error) {
+	if maxOut <= 0 {
+		panic("cref: maxOut must be positive")
+	}
 	var inPtr *C.uint8_t
 	if len(compressed) > 0 {
 		inPtr = (*C.uint8_t)(unsafe.Pointer(&compressed[0]))
 	}
 	var cOut *C.uint8_t
 	var outLen C.size_t
-	ok := C.crefDecompressPrefix(inPtr, C.size_t(len(compressed)), &cOut, &outLen) //nolint:gocritic // false positive on cgo call
+	//nolint:gocritic // false positive on multi-line cgo call
+	ok := C.crefDecompressPrefix(inPtr, C.size_t(len(compressed)), C.size_t(maxOut),
+		&cOut, &outLen)
+	if ok == 2 {
+		return nil, ErrOutputLimit
+	}
 	if ok == 0 {
 		return nil, errDecode
 	}
@@ -315,11 +345,12 @@ func DecodePrefix(compressed []byte) ([]byte, error) {
 // DecodeDict decompresses brotli data that was encoded against a raw prefix
 // compound dictionary.
 func DecodeDict(compressed, dict []byte) ([]byte, error) {
-	out, _, err := decode(compressed, dict)
+	out, _, err := decode(compressed, dict, 0)
 	return out, err
 }
 
-func decode(compressed, dict []byte) (out []byte, consumed int, err error) {
+// A zero maxOut means no limit.
+func decode(compressed, dict []byte, maxOut int) (out []byte, consumed int, err error) {
 	var inPtr *C.uint8_t
 	if len(compressed) > 0 {
 		inPtr = (*C.uint8_t)(unsafe.Pointer(&compressed[0]))
@@ -333,8 +364,11 @@ func decode(compressed, dict []byte) (out []byte, consumed int, err error) {
 	var outLen, cConsumed C.size_t
 	//nolint:gocritic // false positive on multi-line cgo call
 	ok := C.crefDecompress(inPtr, C.size_t(len(compressed)),
-		dictPtr, C.size_t(len(dict)),
+		dictPtr, C.size_t(len(dict)), C.size_t(maxOut),
 		&cOut, &outLen, &cConsumed)
+	if ok == 2 {
+		return nil, 0, ErrOutputLimit
+	}
 	if ok == 0 {
 		return nil, 0, errDecode
 	}

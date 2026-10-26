@@ -24,8 +24,12 @@ const (
 	// Keeps one q10+ input under the 10 s fuzz worker limit on CI.
 	// It still wraps the ring buffer for lgwin <= 19.
 	fuzzMaxPlainQ10 = 2 << 20
+	// Keep q10+ ASan inputs within the fuzz worker time limit.
+	fuzzMaxPlainQ10ASan = 64 << 10
 	// This limits mutation size, not decoded output size.
 	fuzzMaxCompressed = 8 << 10
+	// Allow two maximum Brotli windows of C output.
+	fuzzMaxDecoded = 32 << 20
 )
 
 // fuzzLGWin maps an arbitrary byte onto the valid window range.
@@ -33,17 +37,25 @@ func fuzzLGWin(b uint8) int {
 	return minLGWin + int(b)%(maxLGWin-minLGWin+1)
 }
 
+// Probe the encoder's hasher thresholds with exact and inaccurate hints.
+func fuzzSizeHint(b uint8, n int) uint {
+	hints := [...]uint{uint(n), 0, 1, 1 << 16, 1<<16 + 1, 1 << 20, 1 << 30}
+	return hints[int(b)%len(hints)]
+}
+
 // FuzzEncodeCRef checks encoder equivalence and cross-decoding with C.
 func FuzzEncodeCRef(f *testing.F) {
 	for quality := uint8(0); quality <= 11; quality++ {
-		f.Add([]byte{}, quality, uint8(22), uint16(1), uint16(1), false, uint8(0))
-		f.Add([]byte("hello, brotli fuzzer!"), quality, uint8(10), uint16(3), uint16(5), true, uint8(0))
+		f.Add([]byte{}, quality, uint8(22), uint16(1), uint16(1), false, uint8(0), uint8(0))
+		f.Add([]byte("hello, brotli fuzzer!"), quality, uint8(10), uint16(3), uint16(5), true, uint8(0), uint8(0))
 		f.Add(bytes.Repeat([]byte("the quick brown fox jumps over the lazy dog\n"), 100),
-			quality, uint8(24), uint16(127), uint16(4096), false, uint8(0))
+			quality, uint8(24), uint16(127), uint16(4096), false, uint8(0), uint8(0))
+		// Probe a 1 GiB hint with short input.
+		f.Add([]byte("hello, brotli fuzzer!"), quality, uint8(22), uint16(4), uint16(8), false, uint8(0), uint8(6))
 	}
 	// Cross small-window fragment boundaries with both fast encoders.
-	f.Add(pseudoRandomBytesCRef(32<<10, 42), uint8(0), uint8(10), uint16(700), uint16(1000), false, uint8(0))
-	f.Add(bytes.Repeat([]byte("abcdefgh"), 4096), uint8(1), uint8(10), uint16(701), uint16(1), true, uint8(0))
+	f.Add(pseudoRandomBytesCRef(32<<10, 42), uint8(0), uint8(10), uint16(700), uint16(1000), false, uint8(0), uint8(0))
+	f.Add(bytes.Repeat([]byte("abcdefgh"), 4096), uint8(1), uint8(10), uint16(701), uint16(1), true, uint8(0), uint8(0))
 	// 64 copies of 64 KiB: 4 MiB wraps the 2 MiB ring buffer of lgwin 19, and
 	// the size hint selects the large-input hashers.
 	html, err := os.ReadFile(filepath.Join("testdata", "gh_172KB.html"))
@@ -51,20 +63,28 @@ func FuzzEncodeCRef(f *testing.F) {
 		f.Fatal(err)
 	}
 	for _, quality := range []uint8{4, 5, 6, 7, 9} {
-		f.Add(html[:fuzzMaxPlain], quality, uint8(19-minLGWin), uint16(32<<10), uint16(32<<10), true, uint8(6))
+		f.Add(html[:fuzzMaxPlain], quality, uint8(19-minLGWin), uint16(32<<10), uint16(32<<10), true, uint8(6), uint8(0))
+	}
+	// A 1-byte hint selects a uint16 hasher, which must grow past 64 KiB.
+	for _, quality := range []uint8{2, 3, 4, 5, 9} {
+		f.Add(html[:fuzzMaxPlain], quality, uint8(22-minLGWin), uint16(32<<10), uint16(32<<10), false, uint8(6), uint8(2))
 	}
 
-	f.Fuzz(func(t *testing.T, data []byte, qualityByte, windowByte uint8, chunkWord, readWord uint16, flush bool, copiesByte uint8) {
+	f.Fuzz(func(t *testing.T, data []byte, qualityByte, windowByte uint8, chunkWord, readWord uint16, flush bool, copiesByte, hintByte uint8) {
 		data = similarCopies(data[:min(len(data), fuzzMaxPlain)], 1<<(copiesByte%7))
 		quality := int(qualityByte) % 12
 		if quality >= 10 {
-			data = data[:min(len(data), fuzzMaxPlainQ10)]
+			limit := fuzzMaxPlainQ10
+			if asanEnabled {
+				limit = fuzzMaxPlainQ10ASan
+			}
+			data = data[:min(len(data), limit)]
 		}
 		lgwin := fuzzLGWin(windowByte)
 		// At most 4096 writes and flushes per stream.
 		chunkSize := max(1, int(chunkWord), len(data)>>12)
 		readSize := max(1, int(readWord))
-		sizeHint := uint(len(data))
+		sizeHint := fuzzSizeHint(hintByte, len(data))
 
 		// Use cref directly: caching every mutated input would fill the disk.
 		cEncoded, err := cref.Encode(data, quality, lgwin, sizeHint)
@@ -136,7 +156,10 @@ func FuzzDecodeCRef(f *testing.F) {
 		chunkSize := max(1, int(chunkWord))
 		readSize := max(1, int(readWord))
 
-		cOut, consumed, cErr := cref.DecodeConsumed(data)
+		cOut, consumed, cErr := cref.DecodeConsumed(data, fuzzMaxDecoded)
+		if errors.Is(cErr, cref.ErrOutputLimit) {
+			return
+		}
 		goOut, goErr := Decompress(data)
 
 		if cErr != nil {
@@ -322,7 +345,10 @@ func assertGoDecodes(t *testing.T, encoded, want, dict []byte, chunkSize, readSi
 // Check that Go emits only bytes in C's rejected prefix.
 func assertGoStreamRejects(t *testing.T, encoded []byte, chunkSize, readSize int) {
 	t.Helper()
-	cPrefix, err := cref.DecodePrefix(encoded)
+	cPrefix, err := cref.DecodePrefix(encoded, fuzzMaxDecoded)
+	if errors.Is(err, cref.ErrOutputLimit) {
+		return
+	}
 	if err != nil {
 		t.Fatalf("C DecodePrefix: %v", err)
 	}
