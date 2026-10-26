@@ -243,3 +243,20 @@ func TestShiftUTF8(t *testing.T) {
 		}
 	}
 }
+
+func TestTransformDictionaryWordAtMatchesTransformDictionaryWord(t *testing.T) {
+	var want, got [256]byte
+	for length := DictMinWordLength; length <= DictMaxWordLength; length++ {
+		for idx := range 1 << DictSizeBitsByLength[length] {
+			offset := int(DictOffsetsByLength[length]) + idx*length
+			for transformIdx := range NumTransforms {
+				n := TransformDictionaryWord(want[:], DictData[offset:offset+length], transformIdx)
+				m := TransformDictionaryWordAt(got[:], offset, length, transformIdx)
+				if m != n || string(got[:m]) != string(want[:n]) {
+					t.Fatalf("length %d word %d transform %d: TransformDictionaryWordAt = %q, want %q",
+						length, idx, transformIdx, got[:m], want[:n])
+				}
+			}
+		}
+	}
+}

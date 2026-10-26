@@ -2035,7 +2035,7 @@ commandPostDecodeLiterals:
 			if transformIdx == int(core.TransformCutOffs[0]) {
 				copy(s.ringbuffer[pos:], word)
 			} else {
-				i = core.TransformDictionaryWord(s.ringbuffer[pos:], word, transformIdx)
+				i = core.TransformDictionaryWordAt(s.ringbuffer[pos:], offset, i, transformIdx)
 				// Omit transforms may produce an empty word; retain C's distance guard.
 				if i == 0 && s.distanceCode <= 120 {
 					s.err = decompressError("invalid dictionary transform")
