@@ -2,8 +2,6 @@
 
 package core
 
-import "unsafe"
-
 // Transform types from RFC 7932.
 const (
 	TransformIdentity       = iota // 0
@@ -221,25 +219,14 @@ var TransformTriplets = [NumTransforms * 3]byte{
 // dictionary matching.
 var TransformCutOffs = [10]int16{0, 12, 27, 23, 42, 63, 56, 48, 59, 64}
 
-// TransformDictionaryWord applies transform transformIdx to word, writing the
-// result into dst. Returns the number of bytes written. dst must be large
-// enough to hold the result (word length + longest prefix + longest suffix).
+// TransformDictionaryWord writes a transformed word to dst and returns its length.
+// dst must hold the full result.
 func TransformDictionaryWord(dst []byte, word string, transformIdx int) int {
 	prefix := transformPrefixSuffix[TransformTriplets[transformIdx*3]]
 	t := TransformTriplets[transformIdx*3+1]
 	suffix := transformPrefixSuffix[TransformTriplets[transformIdx*3+2]]
 
-	// Use unsafe copies to avoid runtime.memmove overhead for small data.
-	// Safety: dst is backed by the ring buffer which has ≥542 bytes of
-	// slack, and word comes from the static dictionary (≥120 KB). All
-	// reads and writes within 32 bytes of the starting offsets are in
-	// bounds.
-	dstBase := unsafe.Pointer(unsafe.SliceData(dst))
-
-	idx := len(prefix)
-	if idx > 0 {
-		*(*[8]byte)(dstBase) = *(*[8]byte)(unsafe.Pointer(unsafe.StringData(prefix)))
-	}
+	idx := copy(dst, prefix)
 
 	wordLen := len(word)
 	wordStart := 0
@@ -253,35 +240,20 @@ func TransformDictionaryWord(dst []byte, word string, transformIdx int) int {
 		wordStart = skip
 		wordLen -= skip
 	}
-
-	if wordLen > 0 {
-		wordSrc := unsafe.Pointer(unsafe.StringData(word))
-		dstWord := unsafe.Add(dstBase, idx)
-		*(*[16]byte)(dstWord) = *(*[16]byte)(unsafe.Add(wordSrc, wordStart))
-		if wordLen > 16 {
-			*(*[16]byte)(unsafe.Add(dstWord, 16)) = *(*[16]byte)(unsafe.Add(wordSrc, wordStart+16))
-		}
-	}
-	idx += wordLen
+	idx += copy(dst[idx:idx+wordLen], word[wordStart:wordStart+wordLen])
 
 	switch t {
 	case TransformUppercaseFirst:
-		toUpperCase(dst[idx-wordLen:])
+		if wordLen > 0 {
+			toUpperCase(dst[idx-wordLen : idx])
+		}
 	case TransformUppercaseAll:
-		p := dst[idx-wordLen:]
-		remaining := wordLen
-		for remaining > 0 {
-			step := toUpperCase(p)
-			p = p[step:]
-			remaining -= step
+		for p := dst[idx-wordLen : idx]; len(p) > 0; {
+			p = p[min(toUpperCase(p), len(p)):]
 		}
 	}
 
-	suffixLen := len(suffix)
-	if suffixLen > 0 {
-		*(*[8]byte)(unsafe.Add(dstBase, idx)) = *(*[8]byte)(unsafe.Pointer(unsafe.StringData(suffix)))
-	}
-	idx += suffixLen
+	idx += copy(dst[idx:], suffix)
 	return idx
 }
 
@@ -295,12 +267,17 @@ func toUpperCase(p []byte) int {
 		return 1
 	}
 	// Simplified 2-byte UTF-8 uppercase: flip bit 5 of the second byte.
+	// A cut word can end with a UTF-8 lead byte.
 	if p[0] < 0xE0 {
-		p[1] ^= 32
+		if len(p) > 1 {
+			p[1] ^= 32
+		}
 		return 2
 	}
 	// Arbitrary transform for 3-byte UTF-8: XOR the third byte with 5.
-	p[2] ^= 5
+	if len(p) > 2 {
+		p[2] ^= 5
+	}
 	return 3
 }
 

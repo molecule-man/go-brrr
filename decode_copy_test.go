@@ -1,9 +1,6 @@
 package brrr
 
-import (
-	"testing"
-	"unsafe"
-)
+import "testing"
 
 func copyOverlappingFixture(tb testing.TB, pos, n int) []byte {
 	tb.Helper()
@@ -31,7 +28,7 @@ func TestCopyOverlappingPatternStaysWithinTheRingBufferSlack(t *testing.T) {
 				rb[i] = canary
 			}
 
-			copyOverlappingPattern(unsafe.Pointer(unsafe.SliceData(rb)), pos, dist, n)
+			copyOverlappingPattern(rb, pos, dist, n)
 
 			for i := pos + n + maxOvershoot; i < len(rb); i++ {
 				if rb[i] != canary {

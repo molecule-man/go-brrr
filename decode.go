@@ -902,11 +902,17 @@ func (s *decodeState) prepareLiteralDecoding() {
 	if s.trivialLiteralContext == 0 {
 		ctxMap := s.contextMap[s.contextMapSliceIdx:]
 		htrees := s.literalHGroup.htrees
-		codesBase := unsafe.Pointer(unsafe.SliceData(s.literalHGroup.codes))
-		for ctx := range 64 {
-			offset := htrees[ctxMap[ctx]]
-			s.literalCodesOffsets[ctx] = offset
-			s.literalCodesPtrs[ctx] = unsafe.Add(codesBase, uintptr(offset)*4)
+		if checkedDecoder {
+			for ctx := range 64 {
+				s.literalCodesOffsets[ctx] = htrees[ctxMap[ctx]]
+			}
+		} else {
+			codesBase := unsafe.Pointer(unsafe.SliceData(s.literalHGroup.codes))
+			for ctx := range 64 {
+				offset := htrees[ctxMap[ctx]]
+				s.literalCodesOffsets[ctx] = offset
+				s.literalCodesPtrs[ctx] = unsafe.Add(codesBase, uintptr(offset)*4)
+			}
 		}
 	}
 }
@@ -1357,6 +1363,8 @@ func (s *decodeState) readSymbolCodeLengths(alphabetSize uint) decoderResult {
 		brPos := br.pos
 		inputBase := br.inputBase
 		tableBase := unsafe.Pointer(&h.table[0])
+		input := br.input
+		table := h.table[:]
 		symbol := h.symbol
 
 		for symbol < alphabetSize && h.space > 0 {
@@ -1365,15 +1373,24 @@ func (s *decodeState) readSymbolCodeLengths(alphabetSize uint) decoderResult {
 				if brPos > br.fastEnd {
 					break
 				}
-				val |= uint64(le32(*(*uint32)(unsafe.Add(inputBase, brPos)))) << bitPos
+				if checkedDecoder {
+					val |= uint64(load32(input, brPos)) << bitPos
+				} else {
+					val |= uint64(le32(*(*uint32)(unsafe.Add(inputBase, brPos)))) << bitPos
+				}
 				bitPos += 32
 				brPos += 4
 			}
 
-			// Decode code length from table — the table has exactly 32 entries
-			// (1 << core.HuffmanMaxCodeLengthCodeLength), so masking with 0x1F is
-			// always in bounds.
-			raw := *(*uint32)(unsafe.Add(tableBase, (val&0x1F)*4))
+			// Decode code length from table - the table has exactly 32 entries (1 <<
+			// core.HuffmanMaxCodeLengthCodeLength), so masking with 0x1F is always in
+			// bounds.
+			var raw uint32
+			if checkedDecoder {
+				raw = huffmanEntry(table, 0, val&0x1F)
+			} else {
+				raw = *(*uint32)(unsafe.Add(tableBase, (val&0x1F)*4))
+			}
 			drop := uint(raw & 0xFF)
 			codeLen := uint(raw >> 16)
 
@@ -1555,28 +1572,6 @@ func (s *decodeState) calculateDistanceLut() {
 	b.cachedValid = true
 }
 
-// copyOverlappingPattern fills n bytes at pos by repeating the dist-byte pattern
-// that ends there, for dist < n.
-//
-// The first loop doubles the usable gap: after storing dist correct bytes the
-// valid run behind p is twice as long, so once it reaches 16 every 16-byte load
-// lies entirely inside already-final data and the second loop can run flat out.
-// Both loops store 16 bytes at a time and so may write up to 15 bytes past
-// pos+n, which the ring buffer's 542 bytes of slack absorb — the same contract
-// the eager 16-byte store in processCommands already relies on.
-func copyOverlappingPattern(base unsafe.Pointer, pos, dist, n int) {
-	p, end := pos, pos+n
-	for dist < 16 && p < end {
-		*(*[16]byte)(unsafe.Add(base, p)) = *(*[16]byte)(unsafe.Add(base, p-dist))
-		p += dist
-		dist += dist
-	}
-	for p < end {
-		*(*[16]byte)(unsafe.Add(base, p)) = *(*[16]byte)(unsafe.Add(base, p-dist))
-		p += 16
-	}
-}
-
 func (s *decodeState) processCommands() decoderResult {
 	br := &s.br
 	pos := s.pos
@@ -1619,24 +1614,47 @@ commandBegin:
 	if br.checkInputAmountAndBits(huffmanTableBits) {
 		val, bitPos := br.val, br.bitPos
 		idx := val & huffmanTableMask
-		val |= le64(*(*uint64)(unsafe.Add(br.inputBase, br.pos))) << (bitPos & 63)
-		br.pos += int((63 - bitPos) >> 3)
-		bitPos |= 56
+		if checkedDecoder {
+			val, bitPos = br.refill64(val, bitPos)
+		} else {
+			val |= le64(*(*uint64)(unsafe.Add(br.inputBase, br.pos))) << (bitPos & 63)
+			br.pos += int((63 - bitPos) >> 3)
+			bitPos |= 56
+		}
 		// Decode the command inline to avoid a call and bounds checks.
-		cmdTableBase := unsafe.Pointer(unsafe.SliceData(s.htreeCommand))
-		raw := *(*uint32)(unsafe.Add(cmdTableBase, idx*4))
-		lutSlot := (*uint64)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(s.htreeCommandLut)), idx*8))
-		lut := *lutSlot
-		cmdDrop := uint(raw & 0xFF)
-		if cmdDrop > huffmanTableBits {
-			nbits := cmdDrop - huffmanTableBits
-			idx2 := idx + uint64(raw>>16) + ((val >> huffmanTableBits) & bitMask(nbits))
-			raw = *(*uint32)(unsafe.Add(cmdTableBase, idx2*4))
-			cmdDrop = huffmanTableBits + uint(raw&0xFF)
-			lut = *(*uint64)(unsafe.Add(unsafe.Pointer(&cmdLutPacked[0]), uintptr(raw>>16)*8))
-		} else if lut == 0 {
-			lut = *(*uint64)(unsafe.Add(unsafe.Pointer(&cmdLutPacked[0]), uintptr(raw>>16)*8))
-			*lutSlot = lut
+		var lut uint64
+		var cmdDrop uint
+		if checkedDecoder {
+			raw := huffmanEntry(s.htreeCommand, 0, idx)
+			lutSlot := uint64At(s.htreeCommandLut, idx)
+			lut = *lutSlot
+			cmdDrop = uint(raw & 0xFF)
+			if cmdDrop > huffmanTableBits {
+				nbits := cmdDrop - huffmanTableBits
+				idx2 := idx + uint64(raw>>16) + ((val >> huffmanTableBits) & bitMask(nbits))
+				raw = huffmanEntry(s.htreeCommand, 0, idx2)
+				cmdDrop = huffmanTableBits + uint(raw&0xFF)
+				lut = *uint64At(cmdLutPacked[:], uint64(raw>>16))
+			} else if lut == 0 {
+				lut = *uint64At(cmdLutPacked[:], uint64(raw>>16))
+				*lutSlot = lut
+			}
+		} else {
+			cmdTableBase := unsafe.Pointer(unsafe.SliceData(s.htreeCommand))
+			raw := *(*uint32)(unsafe.Add(cmdTableBase, idx*4))
+			lutSlot := (*uint64)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(s.htreeCommandLut)), idx*8))
+			lut = *lutSlot
+			cmdDrop = uint(raw & 0xFF)
+			if cmdDrop > huffmanTableBits {
+				nbits := cmdDrop - huffmanTableBits
+				idx2 := idx + uint64(raw>>16) + ((val >> huffmanTableBits) & bitMask(nbits))
+				raw = *(*uint32)(unsafe.Add(cmdTableBase, idx2*4))
+				cmdDrop = huffmanTableBits + uint(raw&0xFF)
+				lut = *(*uint64)(unsafe.Add(unsafe.Pointer(&cmdLutPacked[0]), uintptr(raw>>16)*8))
+			} else if lut == 0 {
+				lut = *(*uint64)(unsafe.Add(unsafe.Pointer(&cmdLutPacked[0]), uintptr(raw>>16)*8))
+				*lutSlot = lut
+			}
 		}
 
 		s.distanceCode = int(int8(lut >> 16))
@@ -1659,9 +1677,13 @@ commandBegin:
 			insertLenExtra = val & bitMask(insertBits)
 			val >>= insertBits & 63
 			bitPos -= insertBits
-			val |= le64(*(*uint64)(unsafe.Add(br.inputBase, br.pos))) << (bitPos & 63)
-			br.pos += int((63 - bitPos) >> 3)
-			bitPos |= 56
+			if checkedDecoder {
+				val, bitPos = br.refill64(val, bitPos)
+			} else {
+				val |= le64(*(*uint64)(unsafe.Add(br.inputBase, br.pos))) << (bitPos & 63)
+				br.pos += int((63 - bitPos) >> 3)
+				bitPos |= 56
+			}
 		}
 
 		copyExtra := val & bitMask(copyBits)
@@ -1739,8 +1761,7 @@ commandInner:
 				}
 			}
 
-			// Batch decode: when we have enough input, ringbuffer space,
-			// and block length, decode multiple literals without per-symbol checks.
+			// Decode a batch when input, ring space, and block length allow it.
 			n := min(i, int(s.blockLength[0]), s.ringbufferSize-pos, (br.availIn()-8)/2)
 			if n == 1 {
 				// Decode one symbol here. The call overhead of
@@ -1760,6 +1781,7 @@ commandInner:
 				}
 				continue
 			} else if n > 1 {
+				checkRingCopy(s.ringbufferSize, pos, n)
 				decodeLiteralsBatch(s.ringbuffer[pos:], n, s.literalHTree, br)
 				pos += n
 				i -= n
@@ -1821,14 +1843,13 @@ commandInner:
 				}
 			}
 
-			// Batch decode: when we have enough input, ringbuffer space,
-			// and block length, decode multiple context-dependent literals
-			// without per-symbol bounds checks.
+			// Decode a context batch when input, ring space, and block length allow it.
 			n := min(i, int(s.blockLength[0]), s.ringbufferSize-pos, (br.availIn()-8)/2)
 			if n > 0 {
+				checkRingCopy(s.ringbufferSize, pos, n)
 				p1, p2 = decodeLiteralsContextBatch(
 					s.ringbuffer[pos:], n,
-					&s.literalCodesPtrs,
+					s,
 					s.contextLookup, p1, p2, br,
 				)
 				pos += n
@@ -1914,9 +1935,13 @@ commandPostDecodeLiterals:
 			val, bitPos := br.val, br.bitPos
 			// Load the root entry before the refill.
 			raw := distanceSymbolEntryFast(val, s.distanceHGroup.codes, s.distCodesOffset)
-			val |= le64(*(*uint64)(unsafe.Add(br.inputBase, br.pos))) << (bitPos & 63)
-			br.pos += int((63 - bitPos) >> 3)
-			bitPos |= 56
+			if checkedDecoder {
+				val, bitPos = br.refill64(val, bitPos)
+			} else {
+				val |= le64(*(*uint64)(unsafe.Add(br.inputBase, br.pos))) << (bitPos & 63)
+				br.pos += int((63 - bitPos) >> 3)
+				bitPos |= 56
+			}
 			drop := uint(raw & 0xFF)
 			code := uint(raw >> 16)
 			if drop > huffmanTableBits {
@@ -1935,8 +1960,13 @@ commandPostDecodeLiterals:
 				s.takeDistanceFromRingBuffer()
 			} else {
 				b := &s.bodyArena
-				nExtra := uint(*(*byte)(unsafe.Add(unsafe.Pointer(&b.distExtraBits[0]), uintptr(code))))
-				offset := *(*uint)(unsafe.Add(unsafe.Pointer(&b.distOffset[0]), uintptr(code)*unsafe.Sizeof(uint(0))))
+				var nExtra, offset uint
+				if checkedDecoder {
+					nExtra, offset = distExtra(b, code)
+				} else {
+					nExtra = uint(*(*byte)(unsafe.Add(unsafe.Pointer(&b.distExtraBits[0]), uintptr(code))))
+					offset = *(*uint)(unsafe.Add(unsafe.Pointer(&b.distOffset[0]), uintptr(code)*unsafe.Sizeof(uint(0))))
+				}
 				bits := val & bitMask(nExtra)
 				br.val = val >> (nExtra & 63)
 				br.bitPos = bitPos - nExtra
@@ -2005,7 +2035,7 @@ commandPostDecodeLiterals:
 			if transformIdx == int(core.TransformCutOffs[0]) {
 				copy(s.ringbuffer[pos:], word)
 			} else {
-				i = core.TransformDictionaryWord(s.ringbuffer[pos:], word, transformIdx)
+				i = core.TransformDictionaryWordAt(s.ringbuffer[pos:], offset, i, transformIdx)
 				// Omit transforms may produce an empty word; retain C's distance guard.
 				if i == 0 && s.distanceCode <= 120 {
 					s.err = decompressError("invalid dictionary transform")
@@ -2045,22 +2075,28 @@ commandPostDecodeLiterals:
 		dstEnd := pos + i
 		srcEnd := srcStart + i
 
-		// Eagerly copy 16 bytes using direct pointer arithmetic.
-		// The ring buffer has 542 bytes of slack past ringbufferSize,
-		// so pos+16 and srcStart+16 are always within bounds.
-		base := unsafe.Pointer(unsafe.SliceData(s.ringbuffer))
-		*(*[16]byte)(unsafe.Add(base, pos)) = *(*[16]byte)(unsafe.Add(base, srcStart))
+		// Eagerly copy 16 bytes.
+		// Valid ring positions leave space for this store in the 542-byte slack.
+		rb := s.ringbuffer
+		checkRingCopy(s.ringbufferSize, pos, 0)
+		if checkedDecoder {
+			copy16(rb, pos, srcStart)
+		} else {
+			base := unsafe.Pointer(unsafe.SliceData(rb))
+			*(*[16]byte)(unsafe.Add(base, pos)) = *(*[16]byte)(unsafe.Add(base, srcStart))
+		}
 
 		if dstEnd >= s.ringbufferSize || srcEnd >= s.ringbufferSize {
 			// Wrapping — the byte loop is what yields to the state machine.
 			goto commandPostWrapCopy
 		}
+		checkRingCopy(s.ringbufferSize, pos, i)
 		if srcEnd > pos && dstEnd > srcStart {
 			// Overlapping but not wrapping. Only a source behind pos can be
 			// pattern-replicated; when the ring-buffer subtraction wrapped,
 			// srcStart is ahead of pos and the masked byte loop is still needed.
 			if dist := pos - srcStart; dist > 0 {
-				copyOverlappingPattern(base, pos, dist, i)
+				copyOverlappingPattern(rb, pos, dist, i)
 				pos += i
 				goto postCopy
 			}
@@ -2073,17 +2109,37 @@ commandPostDecodeLiterals:
 			// the overhead of a memmove function call on moderate copies.
 			src16 := srcStart + 16
 			dst16 := pos - i + 16
-			*(*[16]byte)(unsafe.Add(base, dst16)) = *(*[16]byte)(unsafe.Add(base, src16))
-			if i > 32 {
-				*(*[16]byte)(unsafe.Add(base, dst16+16)) = *(*[16]byte)(unsafe.Add(base, src16+16))
-				if i > 48 {
-					*(*[16]byte)(unsafe.Add(base, dst16+32)) = *(*[16]byte)(unsafe.Add(base, src16+32))
-					if i > 64 {
-						*(*[16]byte)(unsafe.Add(base, dst16+48)) = *(*[16]byte)(unsafe.Add(base, src16+48))
-						if i > 80 {
-							*(*[16]byte)(unsafe.Add(base, dst16+64)) = *(*[16]byte)(unsafe.Add(base, src16+64))
-							if i > 96 {
-								copy(s.ringbuffer[dst16+80:pos], s.ringbuffer[src16+80:srcEnd])
+			if checkedDecoder {
+				copy16(rb, dst16, src16)
+				if i > 32 {
+					copy16(rb, dst16+16, src16+16)
+					if i > 48 {
+						copy16(rb, dst16+32, src16+32)
+						if i > 64 {
+							copy16(rb, dst16+48, src16+48)
+							if i > 80 {
+								copy16(rb, dst16+64, src16+64)
+								if i > 96 {
+									copy(s.ringbuffer[dst16+80:pos], s.ringbuffer[src16+80:srcEnd])
+								}
+							}
+						}
+					}
+				}
+			} else {
+				base := unsafe.Pointer(unsafe.SliceData(rb))
+				*(*[16]byte)(unsafe.Add(base, dst16)) = *(*[16]byte)(unsafe.Add(base, src16))
+				if i > 32 {
+					*(*[16]byte)(unsafe.Add(base, dst16+16)) = *(*[16]byte)(unsafe.Add(base, src16+16))
+					if i > 48 {
+						*(*[16]byte)(unsafe.Add(base, dst16+32)) = *(*[16]byte)(unsafe.Add(base, src16+32))
+						if i > 64 {
+							*(*[16]byte)(unsafe.Add(base, dst16+48)) = *(*[16]byte)(unsafe.Add(base, src16+48))
+							if i > 80 {
+								*(*[16]byte)(unsafe.Add(base, dst16+64)) = *(*[16]byte)(unsafe.Add(base, src16+64))
+								if i > 96 {
+									copy(s.ringbuffer[dst16+80:pos], s.ringbuffer[src16+80:srcEnd])
+								}
 							}
 						}
 					}
@@ -2101,14 +2157,14 @@ commandPostWrapCopy:
 		// cursor wraps inside one. ringbufferMask is ringbufferSize-1, so both
 		// remainders are at least 1 and the loop always advances.
 		n := min(i, s.ringbufferSize-pos, s.ringbufferSize-srcStart)
+		checkRingCopy(s.ringbufferSize, pos, n)
 		if dist := pos - srcStart; dist > 0 {
 			if dist >= n {
 				copy(s.ringbuffer[pos:pos+n], s.ringbuffer[srcStart:srcStart+n])
 			} else {
 				// Stores up to 15 bytes past pos+n, which cannot exceed
 				// ringbufferSize+15 and so stays inside the 542 bytes of slack.
-				copyOverlappingPattern(unsafe.Pointer(unsafe.SliceData(s.ringbuffer)),
-					pos, dist, n)
+				copyOverlappingPattern(s.ringbuffer, pos, dist, n)
 			}
 			pos += n
 			i -= n
@@ -2239,130 +2295,6 @@ func decodeSymbol(bits uint64, table []core.HuffmanCode, br *bitReader) uint {
 	}
 	br.dropBits(drop)
 	return uint(entry.Value)
-}
-
-// distanceSymbolEntryFast loads the first-level distance Huffman table entry.
-func distanceSymbolEntryFast(bits uint64, table []core.HuffmanCode, offset int) uint32 {
-	tableBase := unsafe.Add(
-		unsafe.Pointer(unsafe.SliceData(table)),
-		uintptr(offset)*unsafe.Sizeof(core.HuffmanCode{}),
-	)
-	idx := bits & huffmanTableMask
-	return *(*uint32)(unsafe.Add(tableBase, idx*4))
-}
-
-// decodeDistanceSymbolSecondLevel decodes a second-level distance Huffman entry.
-func decodeDistanceSymbolSecondLevel(bits uint64, table []core.HuffmanCode, offset int, code, drop uint) (uint, uint) {
-	tableBase := unsafe.Add(
-		unsafe.Pointer(unsafe.SliceData(table)),
-		uintptr(offset)*unsafe.Sizeof(core.HuffmanCode{}),
-	)
-	nbits := drop - huffmanTableBits
-	idx := (bits & huffmanTableMask) + uint64(code) + ((bits >> huffmanTableBits) & bitMask(nbits))
-	raw := *(*uint32)(unsafe.Add(tableBase, idx*4))
-	return uint(raw >> 16), huffmanTableBits + uint(raw&0xFF)
-}
-
-// decodeLiteralsBatch decodes n literal symbols from br into dst using table.
-// It hoists the bitReader state into local variables to keep them in registers
-// and avoid repeated struct field access on the hot path.
-// The fill is on demand: a symbol consumes at most core.HuffmanMaxCodeLength
-// bits, so bits are only loaded once fewer than that remain. One fill leaves
-// ≥56 bits, which covers about nine to fourteen symbols at typical code
-// lengths, so the branch is taken rarely and predicts well.
-func decodeLiteralsBatch(dst []byte, n int, table []core.HuffmanCode, br *bitReader) {
-	val := br.val
-	bitPos := br.bitPos
-	brPos := br.pos
-	inputBase := br.inputBase
-	tableBase := unsafe.Pointer(unsafe.SliceData(table))
-
-	for j := range n {
-		if bitPos < core.HuffmanMaxCodeLength {
-			val |= le64(*(*uint64)(unsafe.Add(inputBase, brPos))) << (bitPos & 63)
-			brPos += int((63 - bitPos) >> 3)
-			bitPos |= 56
-		}
-
-		idx := val & huffmanTableMask
-		raw := *(*uint32)(unsafe.Add(tableBase, idx*4))
-		drop := uint(raw & 0xFF)
-		value := uint(raw >> 16)
-		if drop > huffmanTableBits {
-			nbits := drop - huffmanTableBits
-			idx2 := idx + uint64(value) + ((val >> huffmanTableBits) & bitMask(nbits))
-			raw = *(*uint32)(unsafe.Add(tableBase, idx2*4))
-			drop = huffmanTableBits + uint(raw&0xFF)
-			value = uint(raw >> 16)
-		}
-		bitPos -= drop
-		val >>= drop & 63
-		dst[j] = byte(value)
-	}
-
-	br.val = val
-	br.bitPos = bitPos
-	br.pos = brPos
-}
-
-// decodeLiteralsContextBatch decodes n literals using context-dependent Huffman
-// trees. It hoists bitReader state into locals and uses unsafe pointer arithmetic
-// to avoid per-symbol bounds checks. Returns updated (p1, p2) context bytes.
-func decodeLiteralsContextBatch(
-	dst []byte, n int,
-	ptrs *[64]unsafe.Pointer,
-	contextLookup []byte, p1, p2 byte,
-	br *bitReader,
-) (byte, byte) {
-	val := br.val
-	bitPos := br.bitPos
-	brPos := br.pos
-	inputBase := br.inputBase
-	ctxBase := unsafe.Pointer(unsafe.SliceData(contextLookup))
-	// Use an incrementing pointer instead of an index to avoid spilling the
-	// loop counter onto the stack — on x86-64 the shift in fillBitWindow
-	// requires CX, which would otherwise evict j every iteration.
-	dstPtr := unsafe.Pointer(unsafe.SliceData(dst))
-	ptrsBase := unsafe.Pointer(ptrs)
-	c1, c2 := uint(p1), uint(p2)
-
-	for n > 0 {
-		n--
-		if bitPos < core.HuffmanMaxCodeLength {
-			val |= le64(*(*uint64)(unsafe.Add(inputBase, brPos))) << (bitPos & 63)
-			brPos += int((63 - bitPos) >> 3)
-			bitPos |= 56
-		}
-
-		ctx := uint(*(*byte)(unsafe.Add(ctxBase, c1))) | uint(*(*byte)(unsafe.Add(ctxBase, 256+c2)))
-		tableBase := *(*unsafe.Pointer)(unsafe.Add(ptrsBase, uintptr(ctx)*unsafe.Sizeof(unsafe.Pointer(nil))))
-
-		// decodeSymbol inline
-		idx := val & huffmanTableMask
-		raw := *(*uint32)(unsafe.Add(tableBase, idx*4))
-		drop := uint(raw & 0xFF)
-		value := uint(raw >> 16)
-		if drop > huffmanTableBits {
-			nbits := drop - huffmanTableBits
-			idx2 := idx + uint64(value) + ((val >> huffmanTableBits) & bitMask(nbits))
-			raw = *(*uint32)(unsafe.Add(tableBase, idx2*4))
-			drop = huffmanTableBits + uint(raw&0xFF)
-			value = uint(raw >> 16)
-		}
-		// dropBits inline
-		bitPos -= drop
-		val >>= drop & 63
-
-		c2 = c1
-		c1 = value
-		*(*byte)(dstPtr) = byte(value)
-		dstPtr = unsafe.Add(dstPtr, 1)
-	}
-
-	br.val = val
-	br.bitPos = bitPos
-	br.pos = brPos
-	return byte(c1), byte(c2)
 }
 
 // safeDecodeSymbol is a fallback when fewer than 15 bits may be available.

@@ -248,7 +248,7 @@ func FuzzEncodeDictWordsCRef(f *testing.F) {
 
 func dictWordText(recipe []byte, limit int) []byte {
 	var out []byte
-	var buf [128]byte // TransformDictionaryWord needs slack after its result.
+	var buf [128]byte
 	for len(recipe) >= 4 && len(out) < limit {
 		l := core.DictMinWordLength + int(recipe[0])%(core.DictMaxWordLength-core.DictMinWordLength+1)
 		idx := int(binary.LittleEndian.Uint16(recipe[1:])) % (1 << core.DictSizeBitsByLength[l])

@@ -43,10 +43,7 @@ package core
 //	    Each symbol's code length (0-15) is transmitted using the
 //	    Huffman tree built from Layer 1.
 
-import (
-	"math/bits"
-	"unsafe"
-)
+import "math/bits"
 
 // Huffman coding limits from the brotli specification.
 const (
@@ -66,25 +63,6 @@ const reverseBitsHigh = uint64(1) << (reverseBitsWidth - 1)
 type SymbolList struct {
 	Storage []uint16
 	Offset  int
-}
-
-func (sl SymbolList) get(i int) uint16 {
-	return *(*uint16)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(sl.Storage)), uintptr(sl.Offset+i)*2))
-}
-
-// replicateValue fills table[0], table[step], table[2*step], ..., table[end-step] with code.
-// Uses unsafe to pack the HuffmanCode into a single uint32 store per iteration,
-// avoiding separate byte+uint16 stores and per-iteration bounds checks.
-func replicateValue(table []HuffmanCode, code HuffmanCode, step, end int) {
-	base := unsafe.Pointer(unsafe.SliceData(table))
-	packed := uint32(code.Bits) | uint32(code.Value)<<16
-	for {
-		end -= step
-		*(*uint32)(unsafe.Add(base, uintptr(end)*4)) = packed
-		if end <= 0 {
-			break
-		}
-	}
 }
 
 // nextTableBitSize returns the width of the next 2nd-level table.
