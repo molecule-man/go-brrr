@@ -23,9 +23,6 @@ func load64(b []byte, i int) uint64 {
 	return binary.LittleEndian.Uint64(b[i : i+8])
 }
 
-// The checked decoder reads br.input.
-func (br *bitReader) setInputBase(data []byte) {}
-
 // huffmanEntry returns t[offset+i] packed as Bits | Value<<16. It slices with
 // the signed offset first, so a negative offset cannot wrap into range.
 func huffmanEntry(t []core.HuffmanCode, offset int, i uint64) uint32 {
@@ -52,16 +49,6 @@ func copy16(b []byte, dst, src int) {
 func checkRingCopy(size, pos, n int) {
 	if pos < 0 || n < 0 || pos >= size || n > size-pos {
 		panic("brrr: ring buffer access past the logical end")
-	}
-}
-
-// cacheLiteralCodes fills only literalCodesOffsets. The checked context batch
-// does not read literalCodesPtrs.
-func (s *decodeState) cacheLiteralCodes() {
-	ctxMap := s.contextMap[s.contextMapSliceIdx:]
-	htrees := s.literalHGroup.htrees
-	for ctx := range 64 {
-		s.literalCodesOffsets[ctx] = htrees[ctxMap[ctx]]
 	}
 }
 
@@ -164,4 +151,67 @@ func decodeLiteralsContextBatch(
 	br.bitPos = bitPos
 	br.pos = brPos
 	return byte(c1), byte(c2)
+}
+
+// copyOverlappingPattern repeats the dist bytes before pos across n bytes.
+// Its 16-byte stores can use up to 15 bytes of ring-buffer slack.
+func copyOverlappingPattern(rb []byte, pos, dist, n int) {
+	p, end := pos, pos+n
+	for dist < 16 && p < end {
+		copy16(rb, p, p-dist)
+		p += dist
+		dist += dist
+	}
+	for p < end {
+		copy16(rb, p, p-dist)
+		p += 16
+	}
+}
+
+// distanceSymbolEntryFast loads the first-level distance Huffman table entry.
+func distanceSymbolEntryFast(bits uint64, table []core.HuffmanCode, offset int) uint32 {
+	return huffmanEntry(table, offset, bits&huffmanTableMask)
+}
+
+// decodeDistanceSymbolSecondLevel decodes a second-level distance Huffman entry.
+func decodeDistanceSymbolSecondLevel(bits uint64, table []core.HuffmanCode, offset int, code, drop uint) (uint, uint) {
+	nbits := drop - huffmanTableBits
+	idx := (bits & huffmanTableMask) + uint64(code) + ((bits >> huffmanTableBits) & bitMask(nbits))
+	raw := huffmanEntry(table, offset, idx)
+	return uint(raw >> 16), huffmanTableBits + uint(raw&0xFF)
+}
+
+// decodeLiteralsBatch decodes n literals with local bit-reader state.
+func decodeLiteralsBatch(dst []byte, n int, table []core.HuffmanCode, br *bitReader) {
+	val := br.val
+	bitPos := br.bitPos
+	brPos := br.pos
+	input := br.input
+
+	for j := range n {
+		if bitPos < core.HuffmanMaxCodeLength {
+			val |= load64(input, brPos) << (bitPos & 63)
+			brPos += int((63 - bitPos) >> 3)
+			bitPos |= 56
+		}
+
+		idx := val & huffmanTableMask
+		raw := huffmanEntry(table, 0, idx)
+		drop := uint(raw & 0xFF)
+		value := uint(raw >> 16)
+		if drop > huffmanTableBits {
+			nbits := drop - huffmanTableBits
+			idx2 := idx + uint64(value) + ((val >> huffmanTableBits) & bitMask(nbits))
+			raw = huffmanEntry(table, 0, idx2)
+			drop = huffmanTableBits + uint(raw&0xFF)
+			value = uint(raw >> 16)
+		}
+		bitPos -= drop
+		val >>= drop & 63
+		dst[j] = byte(value)
+	}
+
+	br.val = val
+	br.bitPos = bitPos
+	br.pos = brPos
 }
