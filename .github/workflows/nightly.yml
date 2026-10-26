@@ -135,3 +135,31 @@ jobs:
 
       - name: Race test
         run: go test -race -timeout=25m ./...
+
+  asan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GOTOOLCHAIN: local
+    strategy:
+      fail-fast: false
+      matrix:
+        tags: ["", "purego"]
+    name: asan${{ matrix.tags && format(' ({0})', matrix.tags) || '' }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build C reference static library
+        run: make lib/libbrotli_cref.a
+
+      # ASan changes allocation counts.
+      - name: AddressSanitizer test
+        env:
+          CC: gcc
+        run: go test -asan -tags '${{ matrix.tags }}' -skip Alloc -timeout=50m ./...
