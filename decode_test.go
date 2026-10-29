@@ -72,6 +72,30 @@ func TestDecompressZeroLengthStaticDictionaryTransform(t *testing.T) {
 	})
 }
 
+func TestDecompressZeroBitSymbolCodeLengthsAtEndOfInput(t *testing.T) {
+	compressed := []byte("\xa188A01\x12\" \x00\x00\x00\x00")
+	want := bytes.Repeat([]byte("#"), 9992)
+	t.Run("Decompress", func(t *testing.T) {
+		got, err := Decompress(compressed)
+		if err != nil {
+			t.Fatalf("Decompress: %v", err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("Decompress returned %d bytes, want %d '#' bytes", len(got), len(want))
+		}
+	})
+	t.Run("Reader", func(t *testing.T) {
+		r := NewReader(iotest.OneByteReader(bytes.NewReader(compressed)))
+		got, err := io.ReadAll(r)
+		if err != nil {
+			t.Fatalf("ReadAll: %v", err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("ReadAll returned %d bytes, want %d '#' bytes", len(got), len(want))
+		}
+	})
+}
+
 func TestProcessCommandsRejectsInvalidStaticDictionaryTransform(t *testing.T) {
 	const transformIdx = core.NumTransforms
 	var s decodeState

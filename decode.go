@@ -1351,9 +1351,8 @@ func (s *decodeState) readSymbolCodeLengths(alphabetSize uint) decoderResult {
 	br := &s.br
 	h := &s.headerArena
 
-	if !br.warmup() {
-		return decoderResultNeedsMoreInput
-	}
+	// A code length code with one symbol reads zero bits per symbol.
+	br.warmup()
 
 	// Batched fast path: hoist bit reader state into locals and process
 	// single code lengths in a tight loop without per-symbol method calls.
