@@ -30,8 +30,10 @@ set offsets graph 0.04, graph 0.08, graph 0.06, graph 0.04
 # it is far enough from the last labeled point of the series.
 mx(a, b) = a > b ? a : b
 hi_b = hi_z = hi_g = -1
+gzip6_speed = -1
 stats csv using ( \
-    valid(2) ? (strcol(1) eq 'go-brrr' ? hi_b = mx(hi_b, $2) : \
+    valid(2) ? (strcol(1) eq 'gzip' && $2 == 6 ? gzip6_speed = $3 : 0, \
+                strcol(1) eq 'go-brrr' ? hi_b = mx(hi_b, $2) : \
                 strcol(1) eq 'zstd'    ? hi_z = mx(hi_z, $2) : \
                 strcol(1) eq 'gzip'    ? hi_g = mx(hi_g, $2) : 0) : 0, $3):4 nooutput
 dx = 0.07 * (STATS_max_x - STATS_min_x)
@@ -50,6 +52,10 @@ series(lib, pt, prefix) = \
 plotcmd = series('go-brrr', 7, 'b') . ", " . series('zstd', 9, 'z')
 if (!exists("nogzip")) {
     plotcmd = plotcmd . ", " . series('gzip', 13, 'g')
+    # gzip level 6 is the default level of compress/gzip.
+    if (gzip6_speed > 0) {
+        set arrow from gzip6_speed, graph 0 to gzip6_speed, graph 1 nohead back dt 2 lc rgb color('gzip')
+    }
 }
 
 eval('plot ' . plotcmd)
