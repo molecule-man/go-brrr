@@ -175,7 +175,7 @@ jobs:
       - name: Install qemu and the s390x C toolchain
         run: >
           sudo apt-get update && sudo apt-get install -y --no-install-recommends
-          qemu-user-static gcc-s390x-linux-gnu libc6-dev-s390x-cross
+          qemu-user gcc-s390x-linux-gnu libc6-dev-s390x-cross
 
       - name: Test
         env:

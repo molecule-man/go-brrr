@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Run s390x tests with QEMU and the cross C toolchain.
-# TAGS selects Go build tags. QEMU overrides qemu-s390x-static.
+# TAGS selects Go build tags. QEMU overrides qemu-s390x.
 # Arguments select test packages. The default is `./...`.
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-QEMU="${QEMU:-qemu-s390x-static}"
+QEMU="${QEMU:-qemu-s390x}"
 SYSROOT=/usr/s390x-linux-gnu
 
 CC=s390x-linux-gnu-gcc "$ROOT/testdata/build_libbrotli_cref.sh"
