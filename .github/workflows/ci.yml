@@ -47,7 +47,12 @@ jobs:
             tags: ""
             goamd64: v1
             cpu: "1"
-    name: test (${{ matrix.go || 'go.mod' }}${{ matrix.tags && format(', {0}', matrix.tags) || '' }}${{ matrix.goamd64 == 'v3' && ', v3' || '' }}${{ matrix.cpu && format(', cpu {0}', matrix.cpu) || '' }})
+          - go: stable
+            tags: ""
+            goamd64: v3
+            goexperiment: simd
+            godebug: simd=+256
+    name: test (${{ matrix.go || 'go.mod' }}${{ matrix.tags && format(', {0}', matrix.tags) || '' }}${{ matrix.goamd64 == 'v3' && ', v3' || '' }}${{ matrix.cpu && format(', cpu {0}', matrix.cpu) || '' }}${{ matrix.goexperiment && format(', GOEXPERIMENT={0}', matrix.goexperiment) || '' }}${{ matrix.godebug && format(', GODEBUG={0}', matrix.godebug) || '' }})
     steps:
       - uses: actions/checkout@v6
         with:
@@ -64,6 +69,8 @@ jobs:
       - name: Test
         env:
           GOAMD64: ${{ matrix.goamd64 }}
+          GOEXPERIMENT: ${{ matrix.goexperiment }}
+          GODEBUG: ${{ matrix.godebug }}
         run: go test -tags '${{ matrix.tags }}' ${{ matrix.cpu && format('-cpu {0}', matrix.cpu) || '' }} ./...
 
   checkptr:
